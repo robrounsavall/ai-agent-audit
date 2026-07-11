@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  component:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - core
+          - claude
+          - cursor
+          - codex
+          - copilot
+          - grok
+          - chat-history
+          - git-posture
+          - secrets-scan
+          - pii-scan
+          - integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test ${{ matrix.component }}
+        shell: pwsh
+        run: |
+          .\scripts\test-component.ps1 -Name ${{ matrix.component }}
+
+  mcp-visibility:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: MCP visibility tests
+        run: python -m unittest discover -s tools/mcp-visibility/tests -v
+
+  scrub-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sensitive-string scrub gate
+        shell: pwsh
+        run: |
+          # Class-based checks: real user-profile paths, real Windows hostnames,
+          # and live-looking secrets must never land in the repo. Placeholder
+          # identities (you, me, Test User, ...) and the SCHEMA.md example
+          # hostname are allowed.
+          $files = Get-ChildItem -Recurse . -File | Where-Object {
+            $_.Extension -in ".py",".ps1",".md",".html",".json",".txt",".yml",".toml" -and
+            $_.FullName -notmatch "\\\.git(hub)?\\"
+          }
+          $patterns = @(
+            # C:\Users\<real name> in any slash/escaping style, except placeholders
+            'C:(\\|/)+Users(\\|/)+(?!(you|me|yourname|example|Test[ %]?User|Test)\b)[A-Za-z]'
+            # Real-looking machine names (SCHEMA.md documents DESKTOP-XYZ as the example)
+            'DESKTOP-(?!XYZ\b)[A-Z0-9]{6,}'
+            # Live token shapes that gitleaks-style fixtures should never use unmasked
+            'AKIA[0-9A-Z]{16}'
+            'xox[baprs]-[0-9]{8,}'
+          )
+          $hits = $files | Select-String -Pattern $patterns -AllMatches
+          # Test fixtures may use the placeholder profile; anything else fails.
+          if ($hits) { $hits | ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }; exit 1 }
+          Write-Host "scrub clean"

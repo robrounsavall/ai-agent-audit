@@ -1,0 +1,41 @@
+{
+  "collector": "grok",
+  "version": "1.0.0",
+  "ran_at": "2026-07-11T21:23:58.915498+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "f9185874715c",
+  "summary": {
+    "permission_mode": "always-approve",
+    "yolo": true,
+    "mcp_servers": 1,
+    "rules": 1
+  },
+  "findings": [
+    {
+      "id": "grok.permission.always_approve",
+      "severity": "critical",
+      "category": "Shell Execution",
+      "title": "Grok Build permission_mode is always-approve",
+      "evidence_count": 1,
+      "sample_redacted": "permission_mode=always-approve yolo=true",
+      "tags": [
+        "auto_approve"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "platform": "grok",
+      "scope": "user",
+      "scope_label_redacted": "user#mcp1",
+      "rule_type": "mcp_tool",
+      "rule": "mcp__demo",
+      "decision": "allow",
+      "command_or_tool_redacted": "demo",
+      "risk": "medium",
+      "exposure_category": "MCP Tooling"
+    }
+  ],
+  "raw_pointers": []
+}

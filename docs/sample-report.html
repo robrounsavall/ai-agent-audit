@@ -1,0 +1,1989 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Unknown customer · AI Coding Tool Exposure Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+:root{
+    /* Dark editorial skin — the briefing always renders dark.
+       (@media print below still flattens to white for paper.) */
+    color-scheme: dark;
+    --bg:       #121315;
+    --bg-alt:   #17191b;
+    --bg-card:  #17191b;
+    --fg:       #f4f5f6;
+    --fg-2:     #d0d6e0;
+    --fg-3:     #9aa0a8;
+    --fg-4:     #6b7078;
+    --line:     rgba(255,255,255,.12);
+    --line-2:   rgba(255,255,255,.16);
+    --accent:   #78a9ff;
+    --accent-2: rgba(120,169,255,.15);
+    --green:    #10b981;
+    --red:      #f07f7f;
+    --red-bg:   rgba(240,127,127,.12);
+    --amber:    #fb923c;
+    --amber-bg: rgba(251,146,60,.10);
+    --yellow:   #fbbf24;
+
+    --nav-bg:   rgba(18,19,21,.72);
+    --fill:     rgba(255,255,255,.03);
+    --code-bg:  #212429;
+    --radius:   .55rem;
+    --ring:     0 0 0 1px rgba(255,255,255,.08);
+    --shadow:   0 2px 8px rgba(0,0,0,.3);
+
+    --f-sans:    "Inter", ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+    --f-mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --f-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --f-serif:   "Inter", ui-sans-serif, system-ui, sans-serif;
+
+    --pad-x: clamp(20px, 5vw, 56px);
+    --section-y: clamp(64px, 9vw, 128px);
+    --max-w: 1200px;
+  }
+
+  *{ box-sizing: border-box; }
+  html{ scroll-behavior: smooth; scroll-padding-top: 64px; }
+  body{
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--f-sans);
+    font-size: 16px;
+    line-height: 1.55;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection{ background: color-mix(in oklch, var(--accent), transparent 70%); color: var(--fg); }
+
+  a{ color: inherit; text-decoration: none; }
+
+  /* ───── NAV ───── */
+  .nav{
+    position: sticky; top: 0; z-index: 50;
+    background: var(--nav-bg);
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner{
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 var(--pad-x);
+    height: 60px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 24px;
+  }
+  .brand{
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 13px; color: var(--fg);
+    font-weight: 500;
+  }
+  .brand-mark{
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 1px;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+  }
+  .nav-links{
+    display: none;
+    gap: 28px;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+  }
+  .nav-links a:hover{ color: var(--fg); }
+  .nav-cta{
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    color: var(--fg-2);
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--line-2);
+  }
+  .nav-cta .dot{ width:6px; height:6px; border-radius:50%; background: var(--accent); }
+  @media (min-width: 800px){ .nav-links{ display: flex; } }
+
+  /* ───── WRAP / SECTIONS ───── */
+  .wrap{
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 var(--pad-x);
+    position: relative;
+    z-index: 2;
+  }
+  .section{
+    padding: var(--section-y) 0;
+    border-top: 1px solid var(--line);
+    position: relative;
+  }
+  .section--alt{ background: var(--bg-alt); }
+
+  /* ───── SECTION HEADER ───── */
+  .sh{
+    margin-bottom: clamp(32px, 5vw, 56px);
+    display: grid;
+    gap: 14px;
+  }
+  .kicker{
+    display: inline-flex; align-items: center; gap: 12px;
+    font-family: var(--f-mono);
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--fg-3);
+  }
+  .num{ color: var(--accent); font-variant-numeric: tabular-nums; }
+  .kicker-label::before{ content: "— "; color: var(--fg-4); }
+  .h2{
+    font-family: var(--f-display);
+    font-size: clamp(28px, 4.6vw, 52px);
+    line-height: 1.05;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .sub{
+    margin: 0; max-width: 64ch;
+    color: var(--fg-3); font-size: 16px; line-height: 1.55;
+  }
+
+  /* 12 col grid */
+  .grid12{
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 24px 32px;
+  }
+  .col-7{ grid-column: span 12; }
+  .col-4{ grid-column: span 12; }
+  @media (min-width: 900px){
+    .col-7{ grid-column: span 7; }
+    .col-4{ grid-column: span 4; }
+    .col-offset-1{ grid-column-start: 9; }
+  }
+
+  /* ───── HERO / COVER ───── */
+  .hero{
+    padding: clamp(48px, 8vw, 96px) 0 clamp(56px, 9vw, 112px);
+    border-bottom: 1px solid var(--line);
+  }
+  .hero-inner{
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 var(--pad-x);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 40px;
+    align-items: stretch;
+  }
+  @media (min-width: 900px){
+    .hero-inner{
+      grid-template-columns: 1.05fr 1fr;
+      gap: 48px;
+      min-height: 70vh;
+    }
+  }
+  .hero-text{ display: flex; flex-direction: column; justify-content: center; padding-top: 24px; }
+  .mono-eyebrow{
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--f-mono); font-size: 11px;
+    letter-spacing: .14em; text-transform: uppercase;
+    color: var(--fg-3);
+    margin-bottom: 28px;
+  }
+  .mono-eyebrow > :first-child{ color: var(--accent); }
+  .display{
+    font-family: var(--f-display);
+    font-size: clamp(48px, 8.4vw, 108px);
+    line-height: .94;
+    font-weight: 500;
+    letter-spacing: -0.04em;
+    margin: 0 0 24px;
+    text-wrap: balance;
+  }
+  .display-period{ color: var(--accent); }
+  .lede{
+    font-size: clamp(18px, 2vw, 22px);
+    color: var(--fg-2);
+    line-height: 1.4;
+    max-width: 40ch;
+    margin: 0 0 28px;
+    text-wrap: pretty;
+  }
+  .lede-emph{
+    font-family: var(--f-serif);
+    font-style: italic;
+    font-size: clamp(18px, 1.6vw, 22px);
+    line-height: 1.35;
+    color: var(--fg);
+    margin: 0 0 28px;
+    letter-spacing: -0.01em;
+    max-width: 40ch;
+  }
+  .lede-emph em{ color: var(--accent); font-style: italic; }
+  .meta-list{
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 8px;
+    font-family: var(--f-mono); font-size: 12.5px;
+    color: var(--fg-3);
+  }
+  .meta-dash{ color: var(--accent); margin-right: 10px; }
+
+  /* Hero aside — evidence status */
+  .hero-aside{
+    position: relative;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    overflow: hidden;
+    min-height: 420px;
+    display: flex; flex-direction: column;
+  }
+  .evidence-panel-head{
+    padding: 20px 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .evidence-panel-head span{
+    display: block;
+    margin-bottom: 8px;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .14em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .evidence-panel-head strong{
+    font-family: var(--f-display);
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .evidence-panel-body{
+    padding: 22px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .evidence-metrics{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .evidence-metrics div{
+    padding: 16px 14px;
+    border-right: 1px solid var(--line);
+  }
+  .evidence-metrics div:last-child{ border-right: 0; }
+  .evidence-metrics span{
+    display: block;
+    margin-bottom: 8px;
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    color: var(--fg-3);
+    text-transform: uppercase;
+  }
+  .evidence-metrics strong{
+    font-family: var(--f-display);
+    font-size: 30px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .severity-inline{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .severity-inline span{
+    border: 1px solid var(--line);
+    padding: 5px 8px;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .severity-inline .critical{
+    color: var(--red);
+    border-color: color-mix(in oklab, var(--red) 50%, var(--line));
+  }
+  .evidence-status-table th,
+  .evidence-status-table td{
+    padding: 10px 8px;
+    font-size: 12.5px;
+  }
+  .evidence-status-table th{
+    position: static;
+    font-size: 9.5px;
+  }
+  .evidence-status-table td{
+    color: var(--fg-2);
+  }
+  .status-dot{
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 8px;
+    border-radius: 50%;
+    background: var(--fg-4);
+  }
+  .status-dot.ok{ background: var(--green); }
+  .status-dot.muted{ background: var(--fg-4); }
+
+  /* ───── PROSE ───── */
+  .prose p{
+    margin: 0 0 1em;
+    font-size: 16.5px; line-height: 1.7;
+    color: var(--fg-2);
+    text-wrap: pretty;
+    max-width: 62ch;
+  }
+  .prose p:last-child{ margin-bottom: 0; }
+  .lead-p{ font-size: 19px !important; color: var(--fg) !important; }
+  .aside{
+    display: flex; gap: 12px;
+    margin: 24px 0;
+    padding: 14px 18px;
+    border-left: 2px solid var(--accent);
+    background: linear-gradient(90deg, var(--accent-2), transparent 70%);
+    font-family: var(--f-mono);
+    font-size: 13.5px;
+    color: var(--fg);
+    line-height: 1.55;
+    max-width: 62ch;
+  }
+  .aside-mark{ color: var(--accent); font-family: var(--f-sans); }
+  .aside.red{
+    border-left-color: var(--red);
+    background: linear-gradient(90deg, var(--red-bg), transparent 70%);
+  }
+  .aside.red .aside-mark{ color: var(--red); }
+
+  /* ───── SIDE STATS ───── */
+  .side{ display: flex; flex-direction: column; gap: 16px; }
+  .stat{
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+  .stat-num{
+    font-family: var(--f-display);
+    font-size: 36px; font-weight: 500;
+    letter-spacing: -0.03em; line-height: 1;
+    color: var(--fg);
+  }
+  .stat-num.red{ color: var(--red); }
+  .stat-num.accent{ color: var(--accent); }
+  .stat-num span{
+    font-family: var(--f-mono);
+    font-size: 14px; color: var(--fg-4); margin-left: 4px;
+    font-weight: 400;
+  }
+  .stat-lbl{
+    font-family: var(--f-mono); font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--fg-3); margin-top: 6px;
+  }
+
+  /* Severity hero strip */
+  .sev-strip{
+    margin-top: clamp(24px, 4vw, 36px);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .sev-strip > div{
+    padding: 22px 24px;
+    border-right: 1px solid var(--line);
+  }
+  .sev-strip > div:last-child{ border-right: 0; }
+  .sev-strip .lbl{
+    font-family: var(--f-mono); font-size: 11px;
+    letter-spacing: .14em; color: var(--fg-3);
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .sev-strip .v{
+    font-family: var(--f-display);
+    font-size: 48px; font-weight: 500;
+    letter-spacing: -0.03em; line-height: 1;
+    color: var(--fg);
+  }
+  .sev-strip .v.red{ color: var(--red); }
+  .sev-strip .v.amber{ color: var(--amber); }
+  .sev-strip .v.yellow{ color: var(--yellow); }
+  .sev-strip .v.green{ color: var(--green); }
+  .sev-strip .note{
+    margin-top: 12px;
+    font-family: var(--f-mono); font-size: 12px;
+    color: var(--fg-4);
+  }
+  @media (max-width: 700px){ .sev-strip{ grid-template-columns: 1fr 1fr; } }
+
+  /* Severity proportion bar */
+  .sev-bar{
+    margin-top: 28px;
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 22px;
+  }
+  .sev-bar .hdr{
+    display:flex; justify-content:space-between; align-items: baseline;
+    padding-bottom: 14px; border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    font-family: var(--f-mono);
+    font-size: 11px; color: var(--fg-3);
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  .sev-bar-track{
+    height: 38px;
+    display: flex;
+    overflow: hidden;
+  }
+  .sev-bar-track > div{
+    display: flex; align-items: center;
+    padding: 0 12px;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    gap: 8px;
+  }
+  .sev-bar-track > div .n{ font-family: var(--f-display); font-size: 16px; font-weight: 500; }
+  .sev-bar-track .crit{ background: var(--red); color: var(--bg); }
+  .sev-bar-track .high{ background: var(--accent); color: var(--bg); }
+  .sev-bar-track .med { background: var(--yellow); color: var(--bg); }
+  .sev-bar-track .low { background: var(--green); color: var(--bg); }
+
+  /* ───── CASES (risk register / findings) ───── */
+  .cases{ display:flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .case{
+    padding: clamp(28px, 4vw, 44px) 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .case-head{
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: start;
+    gap: 16px 20px;
+    margin-bottom: 18px;
+  }
+  .case-num{
+    font-family: var(--f-mono);
+    color: var(--accent);
+    font-size: 12px;
+    padding-top: 8px;
+    min-width: 40px;
+  }
+  .case-title{
+    font-family: var(--f-display);
+    font-size: clamp(22px, 3vw, 30px);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+    line-height: 1.15;
+  }
+  .case-meta{
+    font-family: var(--f-mono); font-size: 12px;
+    color: var(--fg-3);
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .dot-sep{ color: var(--fg-4); }
+  .status{
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--f-mono); font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--fg-2);
+    white-space: nowrap;
+    padding-top: 8px;
+  }
+  .status-dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--fg-4); }
+  .status.is-crit .status-dot{ background: var(--red); }
+  .status.is-active .status-dot{ background: var(--accent); }
+  .status.is-done .status-dot{ background: var(--green); }
+  .case-summary{
+    font-family: var(--f-display);
+    font-size: clamp(17px, 2vw, 21px);
+    line-height: 1.4;
+    margin: 0 0 24px;
+    max-width: 62ch;
+    letter-spacing: -0.01em;
+    color: var(--fg);
+  }
+  .case-grid{
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+  }
+  @media (min-width: 800px){
+    .case-grid{ grid-template-columns: repeat(3, 1fr); gap: 32px; }
+  }
+  .case-lbl{
+    font-family: var(--f-mono); font-size: 10.5px;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--fg-3); margin-bottom: 10px;
+  }
+  .case-grid p{
+    margin: 0; font-size: 14.5px; line-height: 1.6;
+    color: var(--fg-2);
+  }
+  .case-foot{
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 16px;
+    margin-top: 8px;
+  }
+  .tags{ display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag{
+    display: inline-flex; align-items: center;
+    font-family: var(--f-mono); font-size: 10.5px;
+    letter-spacing: .06em; text-transform: uppercase;
+    color: var(--fg-3);
+    border: 1px solid var(--line-2);
+    padding: 4px 8px;
+  }
+  .tag.crit{ color: var(--red); border-color: color-mix(in oklch, var(--red), transparent 50%); }
+  .tag.high{ color: var(--accent); border-color: color-mix(in oklch, var(--accent), transparent 50%); }
+  .tag.green{ color: var(--green); border-color: color-mix(in oklch, var(--green), transparent 50%); }
+
+  /* ───── PILLS (for tables) ───── */
+  .pill{
+    display:inline-flex; align-items:center;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    padding: 3px 8px;
+    font-weight: 500;
+    border: 1px solid var(--line-2);
+    color: var(--fg-2);
+  }
+  .pill.critical{ color: var(--red); border-color: color-mix(in oklch, var(--red), transparent 50%); }
+  .pill.high   { color: var(--accent); border-color: color-mix(in oklch, var(--accent), transparent 50%); }
+  .pill.medium { color: var(--yellow); border-color: color-mix(in oklch, var(--yellow), transparent 50%); }
+  .pill.low    { color: var(--green); border-color: color-mix(in oklch, var(--green), transparent 50%); }
+  .pill.ok     { color: var(--green); border-color: color-mix(in oklch, var(--green), transparent 50%); }
+  .pill.skipped{ color: var(--fg-3); }
+
+  /* ───── CODE ───── */
+  code{
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    background: rgba(255,255,255,.03);
+    border: 1px solid var(--line);
+    padding: 2px 6px;
+    color: var(--fg-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  code.block{
+    display: block;
+    padding: 10px 12px;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .mono{ font-family: var(--f-mono); }
+
+  /* ───── TABLES ───── */
+  .table-wrap{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    overflow: auto;
+    max-height: 580px;
+  }
+  table{ width:100%; border-collapse: collapse; }
+  th, td{
+    padding: 14px 16px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--line);
+    font-size: 14.5px;
+    color: var(--fg-2);
+  }
+  th{
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    background: var(--bg-card);
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    font-weight: 500;
+    border-bottom: 1px solid var(--line-2);
+    position: sticky;
+    top: 0;
+  }
+  tbody tr:last-child td{ border-bottom: 0; }
+  tbody tr:hover{ background: rgba(255,255,255,.02); }
+  td.mono{ font-family: var(--f-mono); font-size: 12.5px; color: var(--fg-3); }
+  td.num{
+    font-variant-numeric: tabular-nums;
+    font-family: var(--f-mono);
+    color: var(--fg-2);
+  }
+  td.num.hot{ color: var(--red); font-weight: 500; }
+  .posture-grid-caption{
+    margin: 14px 0 0;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--fg-3);
+  }
+
+  /* ───── TOOLS COVERAGE ───── */
+  .coverage{
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0;
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+  }
+  .coverage .cell{
+    padding: 22px 18px;
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    gap: 8px;
+  }
+  .coverage .cell:last-child{ border-right: 0; }
+  .coverage .cell.skipped{ background: rgba(255,255,255,.015); }
+  .coverage .name{
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    color: var(--fg-3);
+    text-transform: uppercase;
+  }
+  .coverage .det{
+    font-family: var(--f-display);
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .coverage .det.no{ color: var(--fg-4); }
+  .coverage .ver,
+  .coverage .evidence-label{
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .coverage .ct{
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--fg-4);
+  }
+  @media (max-width: 900px){ .coverage{ grid-template-columns: repeat(2, 1fr); } }
+
+  .collection-scope{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    margin-bottom: clamp(32px, 5vw, 52px);
+  }
+  .collection-scope-head{
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .collection-scope-head h3{
+    margin: 0;
+    font-family: var(--f-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .collection-scope-head p{
+    margin: 0;
+    max-width: 680px;
+    font-size: 13px;
+    color: var(--fg-3);
+    line-height: 1.5;
+  }
+  .collection-scope table th,
+  .collection-scope table td{
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+  .collection-scope table th{
+    position: static;
+  }
+
+  /* ───── TABS ───── */
+  .tab-bar{
+    display: flex; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line);
+    margin-top: 28px;
+    gap: 0;
+  }
+  .tab-btn{
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .06em;
+    color: var(--fg-3);
+    padding: 14px 18px;
+    cursor: pointer;
+    font-weight: 500;
+    margin-bottom: -1px;
+    text-transform: uppercase;
+  }
+  .tab-btn .ct{ color: var(--fg-4); font-weight: 400; margin-left: 8px; }
+  .tab-btn:hover{ color: var(--fg); }
+  .tab-btn.active{
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+  }
+  .tab-btn.active .ct{ color: var(--accent); }
+  .tab-panel{ display:none; padding-top: 20px; }
+  .tab-panel.active{ display:block; }
+
+  /* ───── FILTER ───── */
+  .filter{
+    margin: 16px 0;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .filter input{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 12px 14px;
+    font-family: var(--f-mono);
+    font-size: 13px;
+    color: var(--fg);
+    flex: 1;
+    border-radius: 0;
+  }
+  .filter input::placeholder{ color: var(--fg-4); }
+  .filter input:focus{ outline: none; border-color: var(--accent); }
+
+  /* ───── PERMISSIONS ───── */
+  .platform{
+    margin-top: clamp(36px, 5vw, 56px);
+  }
+  .platform-head{
+    display:flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 16px;
+    margin-bottom: 22px;
+    flex-wrap: wrap; gap: 16px;
+  }
+  .platform-head h3{
+    margin: 0;
+    font-family: var(--f-display);
+    font-size: clamp(22px, 3vw, 28px);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+  .platform-head .stats{
+    display:flex; gap: 22px;
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    color: var(--fg-3);
+    letter-spacing: .04em;
+  }
+  .platform-head .stats b{ color: var(--fg); font-weight: 500; }
+  .platform-head .stats b.warn{ color: var(--accent); }
+  .perm-summary{
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 22px;
+  }
+  .perm-summary .ps{
+    padding: 18px 22px;
+    border-right: 1px solid var(--line);
+  }
+  .perm-summary .ps:last-child{ border-right: 0; }
+  .perm-summary .label{
+    font-family: var(--f-mono); font-size: 10.5px;
+    color: var(--fg-3); letter-spacing: .12em;
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .perm-summary .n{
+    font-family: var(--f-display);
+    font-size: 28px; font-weight: 500;
+    letter-spacing: -0.02em; line-height: 1;
+    color: var(--fg);
+  }
+  .perm-summary .n.risk-word{
+    font-size: 24px;
+    letter-spacing: 0;
+  }
+  .perm-summary .note{ font-family: var(--f-mono); font-size: 11px; color: var(--fg-4); margin-top: 6px; }
+  @media (max-width: 900px){ .perm-summary{ grid-template-columns: 1fr 1fr; } .perm-summary .ps:nth-child(2){ border-right: 0; } }
+
+  .rule-group{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+  }
+  .mcp-summary{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+    margin-bottom: 18px;
+  }
+  .mode-summary{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+    margin-bottom: 18px;
+  }
+  .telemetry-summary{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+    margin-bottom: 18px;
+  }
+  .mcp-summary .rule-group-head{
+    margin-bottom: 10px;
+  }
+  .mode-summary .rule-group-head{
+    margin-bottom: 10px;
+  }
+  .telemetry-summary .rule-group-head{
+    margin-bottom: 10px;
+  }
+  .mode-grid{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+  }
+  .mode-chip{
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,.025);
+    padding: 12px;
+    min-height: 74px;
+  }
+  .mode-chip span{
+    display: block;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    line-height: 1.35;
+  }
+  .mode-chip strong{
+    display: block;
+    margin-top: 10px;
+    font-family: var(--f-mono);
+    font-size: 24px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .mode-chip strong.small-value{
+    font-size: 13px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  /* Logging-route chips are text labels, not big numeric stats — one size. */
+  .route-chip{
+    min-height: 88px;
+  }
+  .route-chip strong{
+    font-family: var(--f-mono);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .mcp-table th,
+  .mcp-table td{
+    padding: 10px 12px;
+  }
+  .mcp-table th{
+    position: static;
+  }
+  .mcp-table code{
+    background: transparent;
+  }
+  .allow-summary{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+  }
+  .allow-source-grid{
+    display: grid;
+    gap: 16px;
+  }
+  .allow-source{
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+  .allow-source:first-child{
+    border-top: 0;
+    padding-top: 0;
+  }
+  .codex-surface-grid{
+    display: grid;
+    grid-template-columns: minmax(260px, .9fr) minmax(360px, 1.4fr);
+    gap: 18px;
+  }
+  .codex-surface-card{
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+  .codex-surface-card:first-child{
+    border-top: 0;
+    padding-top: 0;
+  }
+  .surface-note{
+    margin: 0 0 12px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--fg-3);
+  }
+  .surface-note code{
+    background: transparent;
+    color: var(--fg-2);
+    padding: 0;
+  }
+  .allow-source-head{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .allow-source-head h5{
+    margin: 0;
+    font-family: var(--f-display);
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: 0;
+  }
+  .allow-source-head span{
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+  }
+  .allow-cats{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .allow-cats span{
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    border: 1px solid var(--line);
+    padding: 4px 8px;
+  }
+  .allow-cats b{
+    color: var(--fg);
+    font-weight: 500;
+  }
+  .rule-group-head{
+    display:flex; justify-content:space-between; align-items: baseline;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap; gap: 8px;
+  }
+  .rule-group-head h4{
+    margin: 0;
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: .02em;
+  }
+  .rule-group-head .meta{
+    font-family: var(--f-mono); font-size: 10.5px;
+    color: var(--fg-3); letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .settings-source{
+    margin: -2px 0 12px;
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--fg-3);
+    letter-spacing: .04em;
+  }
+  .rule-list{
+    list-style: none; margin: 0; padding: 0;
+    display:flex; flex-direction: column; gap: 4px;
+  }
+  .rule-list li code{ display: block; padding: 8px 10px; }
+  .rule-list.compact li code{ padding: 7px 10px; }
+  .more{
+    margin-top: 12px;
+    font-family: var(--f-mono); font-size: 11.5px;
+    color: var(--fg-3); letter-spacing: .04em;
+  }
+  .other-rule-groups{
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .other-rule-groups > h5,
+  .rule-subgroup-head h5{
+    margin: 0;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .other-rule-groups > h5{
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    margin-bottom: 12px;
+  }
+  .rule-subgroup{
+    margin-top: 14px;
+  }
+  .rule-subgroup-head{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .rule-subgroup-head span{
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+  }
+  .posture-list{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .posture-list li{
+    display: grid;
+    grid-template-columns: 90px minmax(180px, 1fr) minmax(180px, 1fr);
+    gap: 12px;
+    align-items: center;
+    padding: 10px;
+    background: rgba(255,255,255,.025);
+    border: 1px solid var(--line);
+  }
+  .posture-list strong{
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .posture-list code{ display: block; }
+  @media (max-width: 900px){
+    .codex-surface-grid{ grid-template-columns: 1fr; }
+    .posture-list li{ grid-template-columns: 1fr; }
+  }
+
+  /* ───── CHAT EXPOSURE ───── */
+  .chat-grid{
+    display:grid;
+    grid-template-columns: 320px 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 900px){ .chat-grid{ grid-template-columns: 1fr; } }
+
+  .retention{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 26px 28px;
+  }
+  .retention h3{
+    margin: 0 0 20px;
+    font-family: var(--f-display);
+    font-size: 19px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .retention-row{
+    display:grid;
+    grid-template-columns: 140px 1fr 120px;
+    gap: 18px;
+    align-items: center;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .retention-row:last-of-type{ border-bottom: 0; }
+  .retention-row .name{
+    font-family: var(--f-mono); font-size: 12.5px;
+    color: var(--fg); letter-spacing: .04em;
+  }
+  .retention-row .track{
+    height: 22px; background: rgba(255,255,255,.04);
+    position: relative; border: 1px solid var(--line);
+  }
+  .retention-row .bar{
+    position: absolute; top: 0; left: 0; bottom: 0;
+    background: var(--accent);
+    display:flex; align-items: center;
+    padding-left: 10px;
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--bg);
+    font-weight: 500;
+  }
+  .retention-row .bar.over{ background: var(--red); color: var(--fg); }
+  .retention-row .ninety{
+    position: absolute; top: -4px; bottom: -4px; width: 2px;
+    background: var(--red);
+  }
+  .retention-row .right{
+    font-family: var(--f-mono); font-size: 11.5px;
+    color: var(--fg-3); text-align: right;
+  }
+  .ninety-cap{
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--red);
+    letter-spacing: .12em;
+    margin-top: 16px;
+    text-align: right;
+    border-top: 1px dashed var(--line);
+    padding-top: 12px;
+  }
+
+  /* ───── SECRETS BARS ───── */
+  .two-col{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 900px){ .two-col{ grid-template-columns: 1fr; } }
+  .panel{
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    padding: 26px 28px;
+  }
+  .panel h3{
+    margin: 0 0 20px;
+    font-family: var(--f-display);
+    font-size: 19px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .secret-rules{
+    display:grid;
+    grid-template-columns: 170px 1fr 60px;
+    gap: 16px;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .secret-rules:last-child{ border-bottom: 0; }
+  .secret-rules .name{ font-family: var(--f-mono); font-size: 12.5px; color: var(--fg-2);}
+  .secret-rules .track{
+    height: 4px;
+    background: rgba(255,255,255,.06);
+    position: relative;
+  }
+  .secret-rules .track .b{
+    position: absolute; top: 0; left: 0; bottom: 0;
+    background: var(--accent);
+  }
+  .secret-rules .v{
+    font-family: var(--f-mono); font-size: 13px;
+    color: var(--fg); text-align: right;
+  }
+  .git-grid{
+    display:grid; grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-top: 1px solid var(--line);
+    margin-top: 8px;
+  }
+  .git-grid > div{
+    padding: 18px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .git-grid > div:nth-child(odd){ padding-right: 18px; }
+  .git-grid > div:nth-child(even){ padding-left: 18px; border-left: 1px solid var(--line); }
+  .git-grid .label{
+    font-family: var(--f-mono); font-size: 10.5px;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--fg-3); margin-bottom: 10px;
+  }
+  .git-grid .v{
+    font-family: var(--f-display); font-size: 36px;
+    letter-spacing: -0.03em; line-height: 1;
+    color: var(--fg); font-weight: 500;
+  }
+  .git-grid .v small{
+    font-family: var(--f-mono); font-size: 13px;
+    color: var(--fg-4); margin-left: 6px; font-weight: 400;
+  }
+  .git-grid .v.red{ color: var(--red); }
+  .git-grid .v.amber{ color: var(--accent); }
+
+  /* ───── METHODOLOGY ───── */
+  .attestation{
+    margin-top: 28px;
+    padding: 24px 28px;
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--green);
+    background: linear-gradient(90deg, color-mix(in oklch, var(--green), transparent 90%), transparent 30%), var(--bg-card);
+  }
+  .attestation p{ margin: 0 0 10px; font-size: 14.5px; color: var(--fg-2); }
+  .sig-line{
+    margin-top: 56px;
+    border-top: 1px solid var(--fg);
+    width: 340px;
+    padding-top: 10px;
+    color: var(--fg-3);
+    font-family: var(--f-mono); font-size: 12px;
+    letter-spacing: .04em;
+  }
+
+  /* ───── APPENDIX ───── */
+  .appendix-note{
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--green);
+    padding: 16px 20px;
+    margin-bottom: 22px;
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    color: var(--fg-2);
+    line-height: 1.6;
+  }
+  .appendix-note strong{ color: var(--green); font-weight: 500; }
+
+  .appendix-table td .count{
+    display:inline-block;
+    font-family: var(--f-mono);
+    font-size: 13px;
+    background: var(--accent);
+    color: var(--bg);
+    padding: 3px 10px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+  .appendix-table td .count.one{
+    background: transparent;
+    color: var(--fg-4);
+    padding: 3px 0;
+  }
+
+  /* ───── FOOTER ───── */
+  .footer{
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+    padding: 28px 0 40px;
+    margin-top: 64px;
+  }
+  .foot-inner{
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 var(--pad-x);
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 16px; flex-wrap: wrap;
+    font-family: var(--f-mono); font-size: 11.5px;
+    color: var(--fg-3); letter-spacing: .04em;
+  }
+  .foot-meta{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  /* Print */
+  @media print{
+    body{ background: white; color: #111; }
+    body::before{ display: none; }
+    .nav, .tab-btn, .filter{ display: none !important; }
+    .tab-panel{ display: block !important; padding-top: 8px; }
+    .table-wrap{ max-height: none; overflow: visible; }
+    .panel, .case, .perm-summary, .coverage, .retention, .sev-bar, .stat, .stack-card, .rule-group, .attestation{
+      background: white !important;
+      color: #111 !important;
+      border-color: #ccc !important;
+    }
+    code{ background: #f4f4f4 !important; color: #111 !important; border-color: #ddd !important; }
+  }
+
+  @media (max-width: 540px){
+    .display{ font-size: 56px; }
+    .case-head{ grid-template-columns: auto 1fr; }
+    .status{ grid-column: 1 / -1; padding-top: 0; }
+    .git-grid{ grid-template-columns: 1fr; }
+    .git-grid > div:nth-child(even){ border-left: 0; padding-left: 0; }
+  }
+
+  /* ═════ Dark skin — surface treatment & fixes ═════ */
+
+  /* Signature surface: keep the hairline border, add ring + soft shadow + radius */
+  .table-wrap, .hero-aside, .panel, .coverage, .collection-scope,
+  .rule-group, .mcp-summary, .mode-summary, .telemetry-summary, .allow-summary,
+  .retention, .attestation, .appendix-note{
+    border-radius: var(--radius);
+    box-shadow: var(--ring), var(--shadow);
+  }
+  .pill, .tag{ border-radius: calc(var(--radius) - 2px); }
+  .nav-cta, .filter input{ border-radius: calc(var(--radius) - 1px); }
+  code, code.block{ border-radius: calc(var(--radius) - 3px); background: var(--code-bg); }
+
+  /* Semibold headings */
+  .display, .h2, .h3, .stat-num, .case-title, .sev-strip .v{ font-weight: 600; }
+
+  /* Severity decouple: brand = --accent (blue); "high" = --amber (orange) */
+  .tag.high{ color: var(--amber); border-color: color-mix(in oklch, var(--amber), transparent 50%); }
+  .pill.high{ color: var(--amber); border-color: color-mix(in oklch, var(--amber), transparent 50%); }
+  .sev-bar-track .high{ background: var(--amber); }
+  .git-grid .v.amber{ color: var(--amber); }
+
+  /* Theme-aware fills (originals used white-alpha, invisible on light) */
+  tbody tr:hover{ background: var(--fill); }
+  .coverage .cell.skipped{ background: var(--fill); }
+
+  /* Per-occurrence table inside a grouped risk-register card */
+  .case-rows{ margin: 4px 0 2px; border: 1px solid var(--line); border-radius: calc(var(--radius) - 3px); overflow: hidden; }
+  .case-rows th, .case-rows td{ padding: 8px 12px; font-size: 12.5px; }
+  .case-rows th{ position: static; }
+  .case-rows td:last-child, .case-rows th:last-child{ width: 45%; }
+
+  /* Risk-register reconciliation caption (grouped findings) */
+  .cases-caption{
+    margin: 0 0 4px;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    color: var(--fg-3);
+  }
+
+  </style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#top" class="brand">
+      <span class="brand-mark"></span>
+      <span>aiscan</span>
+    </a>
+    <div class="nav-links">
+      <a href="#executive">Executive</a>
+      <a href="#posture">Posture</a>
+      <a href="#findings">Findings</a>
+      <a href="#permissions">Permissions</a>
+      <a href="#chat">Chat</a>
+      <a href="#secrets-git">Secrets &amp; Git</a>
+      <a href="#methodology">Methodology</a>
+      <a href="#appendix">Appendix</a>
+    </div>
+    <span class="nav-cta">
+      <span class="dot"></span>
+      <span>aiscan · 2026-07-11</span>
+    </span>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<section id="top" class="hero">
+  <div class="hero-inner">
+    <div class="hero-text">
+      <div class="mono-eyebrow">
+        <span>/00</span><span>·</span><span>ENDPOINT POSTURE BRIEFING — CONFIDENTIAL</span>
+      </div>
+      <h1 class="display">AI Coding Tool<br/>Exposure<span class="display-period">.</span></h1>
+      <p class="lede">5 coding agents are in use on the endpoint. 3 critical findings need action this week.</p>
+      <ul class="meta-list">
+        <li><span class="meta-dash">—</span>Customer · <strong style="color: var(--fg);">Unknown customer</strong></li>
+        <li><span class="meta-dash">—</span>Engagement · 2026-07-11</li>
+        <li><span class="meta-dash">—</span>Operator · Unknown operator</li>
+        <li><span class="meta-dash">—</span>Manifest SHA-256 · manifest not pre…</li>
+      </ul>
+    </div>
+
+    <div class="hero-aside">
+      <div class="evidence-panel-head">
+        <span>01 · EVIDENCE STATUS</span>
+        <strong>Local endpoint collection</strong>
+      </div>
+      <div class="evidence-panel-body">
+        <div class="evidence-metrics">
+          <div><span>Detected tools</span><strong>5</strong></div>
+          <div><span>Not detected</span><strong>0</strong></div>
+          <div><span>Findings</span><strong>6</strong></div>
+        </div>
+        <div class="severity-inline">
+          <span class="critical">critical 3</span>
+          <span>high 2</span>
+          <span>medium 1</span>
+          <span>low 0</span>
+        </div>
+        <table class="evidence-status-table">
+          <thead><tr><th>Tool</th><th>Status</th><th>Duration</th><th>Collector</th></tr></thead>
+          <tbody><tr><td><span class='status-dot ok'></span>Claude Code</td><td>detected</td><td>-</td><td>1.0.0</td></tr><tr><td><span class='status-dot ok'></span>Cursor</td><td>detected</td><td>-</td><td>1.0.0</td></tr><tr><td><span class='status-dot ok'></span>Codex Desktop</td><td>detected</td><td>-</td><td>1.0.0</td></tr><tr><td><span class='status-dot ok'></span>GitHub Copilot</td><td>detected</td><td>-</td><td>1.0.0</td></tr><tr><td><span class='status-dot ok'></span>Grok Build</td><td>detected</td><td>-</td><td>1.0.0</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ EXECUTIVE SUMMARY ============ -->
+<section id="executive" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/01</span>
+        <span class="kicker-label">EXECUTIVE SUMMARY</span>
+      </div>
+      <h2 class="h2">6 findings. 3 require action this week.</h2>
+      <p class="sub">Claude Code, Cursor, Codex Desktop, GitHub Copilot and Grok Build are in active use. The items below represent durable secret exposure, persistent permission state with no prompt, and runtime configuration that bypasses sandboxing.</p>
+    </header>
+
+    <div class="sev-strip">
+      <div>
+        <div class="lbl">Critical</div>
+        <div class="v red">3</div>
+        <div class="note">action this week</div>
+      </div>
+      <div>
+        <div class="lbl">High</div>
+        <div class="v amber">2</div>
+        <div class="note">30-day window</div>
+      </div>
+      <div>
+        <div class="lbl">Medium</div>
+        <div class="v yellow">1</div>
+        <div class="note">policy / backlog</div>
+      </div>
+      <div>
+        <div class="lbl">Low</div>
+        <div class="v green">0</div>
+        <div class="note">informational</div>
+      </div>
+    </div>
+
+    <div class="sev-bar">
+      <div class="hdr">
+        <span>severity distribution · n = 6</span>
+        <span>1 / 2 high are gitleaks hits · grouped in appendix</span>
+      </div>
+      <div class="sev-bar-track">
+        <div class="crit" style="flex: 3;"><span class="n">3</span><span>CRIT</span></div>
+        <div class="high" style="flex: 2;"><span class="n">2</span><span>HIGH</span></div>
+        <div class="med" style="flex: 1;"><span class="n">1</span><span>MED</span></div>
+      </div>
+    </div>
+
+    <div class="cases" style="margin-top: 56px;">
+<article class="case">
+  <div class="case-head">
+    <div class="case-num">/01</div>
+    <div>
+      <h3 class="case-title">.env file found in git commit history</h3>
+      <div class="case-meta"><span>Git Posture</span><span class='dot-sep'>·</span><span>collector: git-posture</span></div>
+    </div>
+    <div class="status is-crit"><span class="status-dot"></span>critical</div>
+  </div>
+  <p class="case-summary">project#demo</p>
+  <div class="case-grid">
+    <div>
+      <div class="case-lbl">Category</div>
+      <p>Git Posture</p>
+    </div>
+    <div>
+      <div class="case-lbl">Evidence count</div>
+      <p>1 row</p>
+    </div>
+    <div>
+      <div class="case-lbl">Reference</div>
+      <p class="mono">evidence/git-posture.json</p>
+    </div>
+  </div>
+  <div class="case-foot">
+    <div class="tags">
+      <span class="tag crit">CRIT-01</span>
+      <span class="tag">git posture</span>
+    </div>
+  </div>
+</article>
+<article class="case">
+  <div class="case-head">
+    <div class="case-num">/02</div>
+    <div>
+      <h3 class="case-title">Codex sandbox bypass observed</h3>
+      <div class="case-meta"><span>Shell Execution</span><span class='dot-sep'>·</span><span>collector: codex</span></div>
+    </div>
+    <div class="status is-crit"><span class="status-dot"></span>critical</div>
+  </div>
+  <p class="case-summary">sandbox=disabled</p>
+  <div class="case-grid">
+    <div>
+      <div class="case-lbl">Category</div>
+      <p>Shell Execution</p>
+    </div>
+    <div>
+      <div class="case-lbl">Evidence count</div>
+      <p>1 row</p>
+    </div>
+    <div>
+      <div class="case-lbl">Reference</div>
+      <p class="mono">evidence/codex.json</p>
+    </div>
+  </div>
+  <div class="case-foot">
+    <div class="tags">
+      <span class="tag crit">CRIT-02</span>
+      <span class="tag">shell execution</span>
+    </div>
+  </div>
+</article>
+<article class="case">
+  <div class="case-head">
+    <div class="case-num">/03</div>
+    <div>
+      <h3 class="case-title">Grok Build permission_mode is always-approve</h3>
+      <div class="case-meta"><span>Shell Execution</span><span class='dot-sep'>·</span><span>collector: grok</span></div>
+    </div>
+    <div class="status is-crit"><span class="status-dot"></span>critical</div>
+  </div>
+  <p class="case-summary">permission_mode=always-approve yolo=true</p>
+  <div class="case-grid">
+    <div>
+      <div class="case-lbl">Category</div>
+      <p>Shell Execution</p>
+    </div>
+    <div>
+      <div class="case-lbl">Evidence count</div>
+      <p>1 row</p>
+    </div>
+    <div>
+      <div class="case-lbl">Reference</div>
+      <p class="mono">evidence/grok.json</p>
+    </div>
+  </div>
+  <div class="case-foot">
+    <div class="tags">
+      <span class="tag crit">CRIT-03</span>
+      <span class="tag">shell execution</span>
+    </div>
+  </div>
+</article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ POSTURE AT A GLANCE ============ -->
+<section id="posture" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/02</span>
+        <span class="kicker-label">POSTURE AT A GLANCE</span>
+      </div>
+      <h2 class="h2">Where each tool stands.</h2>
+      <p class="sub">Detected tools, highest observed risk, and permission, approval, and activity counts, side by side.</p>
+    </header>
+    <table class='posture-grid'><thead><tr><th>Platform</th><th>Detected</th><th>Highest-risk</th><th>MCP rules</th><th>Stored allow rules</th><th>Approval evidence</th><th>Chat msgs</th><th>Active est.</th></tr></thead><tbody><tr><td><strong>Claude Code</strong></td><td>yes</td><td>critical</td><td class='num'>1</td><td class='num'>1</td><td class='num'>available via OTEL</td><td class='num'>3 files</td><td class='num'>-</td></tr><tr><td><strong>Codex Desktop</strong></td><td>yes</td><td>critical</td><td class='num'>0</td><td class='num'>1</td><td class='num'>-</td><td class='num'>2 files</td><td class='num'>-</td></tr><tr><td><strong>Grok Build</strong></td><td>yes</td><td>critical</td><td class='num'>1</td><td class='num'>0</td><td class='num'>bypassed</td><td class='num'>1 files</td><td class='num'>-</td></tr><tr><td><strong>Cursor</strong></td><td>yes</td><td>none</td><td class='num'>0</td><td class='num'>0</td><td class='num'>-</td><td class='num'>6 files</td><td class='num'>-</td></tr><tr><td><strong>GitHub Copilot</strong></td><td>yes</td><td>none</td><td class='num'>0</td><td class='num'>0</td><td class='num'>-</td><td class='num'>-</td><td class='num'>-</td></tr></tbody></table><p class='posture-grid-caption'>Stored allow rules are durable non-MCP permission entries. Approval evidence shows recorded prompt decisions when available. For Claude Code, local transcripts do not reliably distinguish a user-click accept from config, mode, or always-allow behavior; use OTEL tool_decision telemetry for click/source attribution. Secrets scan total: 1 hits across 3 targets; reported under Findings / Secrets Exposure.</p>
+  </div>
+</section>
+
+<!-- ============ FINDINGS ============ -->
+<section id="findings" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/03</span>
+        <span class="kicker-label">FINDINGS</span>
+      </div>
+      <h2 class="h2">6 findings across 3 categories.</h2>
+      <p class="sub">Tabs are exposure categories. Use the filter to search across titles, samples, and tags. Per-hit secrets are grouped — full per-row evidence is in the appendix.</p>
+    </header>
+
+    <div class="filter">
+      <input id="findings-search" type="search" placeholder="filter by title, sample text, or tag…" />
+    </div>
+
+    <div class="tab-bar" id="findings-tabs"><button type="button" class="tab-btn active" data-tab="shell-execution">Shell Execution<span class="ct">3</span></button>
+<button type="button" class="tab-btn" data-tab="secrets-exposure">Secrets Exposure<span class="ct">2</span></button>
+<button type="button" class="tab-btn" data-tab="git-posture">Git Posture<span class="ct">1</span></button></div>
+    <div class="tab-panel active" data-tab="shell-execution"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="codex sandbox bypass observed sandbox=disabled  shell execution"><td><span class="pill critical">critical</span></td><td>Codex sandbox bypass observed</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>sandbox=disabled</code></td></tr><tr class="frow" data-search="grok build permission_mode is always-approve permission_mode=always-approve yolo=true auto_approve shell execution"><td><span class="pill critical">critical</span></td><td>Grok Build permission_mode is always-approve</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>permission_mode=always-approve yolo=true</code></td></tr><tr class="frow" data-search="claude dangerous-mode confirmation prompt is disabled skipdangerousmodepermissionprompt=true unbounded_glob shell execution"><td><span class="pill high">high</span></td><td>Claude dangerous-mode confirmation prompt is disabled</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>skipDangerousModePermissionPrompt=true</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="secrets-exposure"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="potential secret in chat export ghp_****  secrets exposure"><td><span class="pill high">high</span></td><td>Potential secret in chat export</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>ghp_****</code></td></tr><tr class="frow" data-search="secret-like value observed in chat export ghp_****redacted****  secrets exposure"><td><span class="pill medium">medium</span></td><td>Secret-like value observed in chat export</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>ghp_****REDACTED****</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="git-posture"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search=".env file found in git commit history project#demo  git posture"><td><span class="pill critical">critical</span></td><td>.env file found in git commit history</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>project#demo</code></td></tr></tbody></table></div></div>
+  </div>
+</section>
+
+<!-- ============ PERMISSIONS ============ -->
+<section id="permissions" class="section section--alt">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/04</span>
+        <span class="kicker-label">PERMISSIONS INVENTORY</span>
+      </div>
+      <h2 class="h2">Configured permission surface.</h2>
+      <p class="sub">Settings-derived allow rules, MCP registrations, and observed approval decisions grouped by platform.</p>
+    </header>
+
+    <div class="platform">
+      <div class="platform-head">
+        <h3>Claude Code</h3>
+        <div class="stats"><span><b>2</b> rules</span><span><b class="warn">1</b> high</span><span><b>1</b> critical</span></div>
+      </div>
+      <div class="perm-summary"><div class="ps"><div class="label">MCP Tooling</div><div class="n">1</div><div class="note">rule</div></div><div class="ps"><div class="label">Shell Execution</div><div class="n">1</div><div class="note">rule</div></div><div class="ps"><div class="label">Stored allow rules</div><div class="n">1</div><div class="note">non-MCP rules</div></div><div class="ps"><div class="label">Highest risk</div><div class="n risk-word" style="color: var(--red);">critical</div><div class="note">1 critical - 1 high - 1 medium</div></div></div>
+      
+      
+      
+      <div class="mcp-summary">
+        <div class="rule-group-head">
+          <h4>MCP servers and allowed tools</h4>
+          <span class="meta">1 server - 1 scoped row</span>
+        </div>
+        <table class="mcp-table">
+          <thead><tr><th>Server</th><th>Scope</th><th>Evidence</th><th>Source</th></tr></thead>
+          <tbody><tr><td><code>playwright</code></td><td class='mono'>user#abc123</td><td>server registered</td><td class='mono'>-</td></tr></tbody>
+        </table>
+      </div>
+      <div class="allow-summary">
+        <div class="rule-group-head">
+          <h4>Configured command allow rules</h4>
+          <span class="meta">1 non-MCP allow rule</span>
+        </div>
+        <div class="allow-source-grid">        <div class="allow-source">
+          <div class="allow-source-head">
+            <h5>Recorded source</h5>
+            <span>1 allow rule - user#abc123</span>
+          </div>
+          <div class="allow-cats"><span>Shell Execution <b>1</b></span></div>
+          <ul class="rule-list compact"><li><code>*</code></li></ul>
+          <div class='more'>evidence/claude.json</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="platform">
+      <div class="platform-head">
+        <h3>Cursor</h3>
+        <div class="stats"><span>no persistent permission rules recorded</span></div>
+      </div>
+      <div class="telemetry-summary">
+        <div class="rule-group-head">
+          <h4>Cursor local permission state</h4>
+          <span class="meta">mcp.json + state.vscdb + agent transcripts</span>
+        </div>
+        <p class="surface-note">The MCP table lists registrations from mcp.json plus project approvals. Known (runtime) counts servers Cursor has seen in state.vscdb; unmatched known servers have no local mcp.json row. Local state cannot reconstruct every clicked approval as a reusable command allow-list.</p>
+        <div class="mode-grid"><div class='mode-chip'><span>Registered MCP</span><strong>0</strong></div><div class='mode-chip'><span>Approved project MCP</span><strong>0</strong></div><div class='mode-chip'><span>Known MCP (runtime)</span><strong>0</strong></div><div class='mode-chip'><span>Unmatched known</span><strong>0</strong></div><div class='mode-chip'><span>Approval-like events</span><strong>0</strong></div><div class='mode-chip'><span>Auto-accept workspaces</span><strong>0</strong></div></div>
+      </div>
+    </div>
+    <div class="platform">
+      <div class="platform-head">
+        <h3>Codex Desktop</h3>
+        <div class="stats"><span><b>1</b> rules</span><span><b class="">0</b> high</span><span><b>1</b> critical</span></div>
+      </div>
+      <div class="perm-summary"><div class="ps"><div class="label">General Tooling</div><div class="n">1</div><div class="note">rule</div></div><div class="ps"><div class="label">Stored allow rules</div><div class="n">1</div><div class="note">non-MCP rules</div></div><div class="ps"><div class="label">Highest risk</div><div class="n risk-word" style="color: var(--red);">critical</div><div class="note">1 critical - 0 high - 0 medium</div></div></div>
+      
+      
+      
+      
+      <div class="allow-summary">
+        <div class="rule-group-head">
+          <h4>Codex permission surface</h4>
+          <span class="meta">1 non-MCP entries</span>
+        </div>
+        <div class="codex-surface-grid">        <div class="codex-surface-card">
+          <div class="allow-source-head">
+            <h5>Other config grants</h5>
+            <span>1 entries - config.toml</span>
+          </div>
+          <ul class="rule-list compact"><li><code>prefix:demo</code></li></ul>
+          <div class="more">evidence/codex.json</div>
+        </div></div>
+      </div>
+    </div>
+<div class="platform"><div class="platform-head"><h3>GitHub Copilot</h3><div class="stats"><span>no persistent permission rules recorded</span></div></div></div>
+    <div class="platform">
+      <div class="platform-head">
+        <h3>Grok Build</h3>
+        <div class="stats"><span><b>1</b> rules</span><span><b class="">0</b> high</span><span><b>1</b> critical</span></div>
+      </div>
+      <div class="perm-summary"><div class="ps"><div class="label">MCP Tooling</div><div class="n">1</div><div class="note">rule</div></div><div class="ps"><div class="label">Stored allow rules</div><div class="n">0</div><div class="note">non-MCP rules</div></div><div class="ps"><div class="label">Highest risk</div><div class="n risk-word" style="color: var(--red);">critical</div><div class="note">1 critical - 0 high - 1 medium</div></div></div>
+      
+      <div class="telemetry-summary">
+        <div class="rule-group-head">
+          <h4>Grok Build local permission state</h4>
+          <span class="meta">config.toml + sessions + events.jsonl</span>
+        </div>
+        <p class="surface-note">Inventory from config.toml, session summary/signals, and events.jsonl MCP resolution. Chat history and updates.jsonl content stay out of evidence. always-approve / yolo means tool use is not prompted.</p>
+        <div class="mode-grid"><div class='mode-chip'><span>Permission mode</span><strong>always-approve</strong></div><div class='mode-chip'><span>Yolo</span><strong>yes</strong></div><div class='mode-chip'><span>Sessions</span><strong>0</strong></div><div class='mode-chip'><span>Messages</span><strong>0</strong></div><div class='mode-chip'><span>Tool calls</span><strong>0</strong></div><div class='mode-chip'><span>Transcript size</span><strong>0 B</strong></div><div class='mode-chip'><span>Models</span><strong>none</strong></div><div class='mode-chip'><span>Prompt-history cwds</span><strong>0</strong></div><div class='mode-chip'><span>Runtime MCP</span><strong>0</strong></div><div class='mode-chip'><span>Config MCP</span><strong>1</strong></div></div>
+      </div>
+      
+      <div class="mcp-summary">
+        <div class="rule-group-head">
+          <h4>MCP servers and allowed tools</h4>
+          <span class="meta">1 server - 1 scoped row</span>
+        </div>
+        <table class="mcp-table">
+          <thead><tr><th>Server</th><th>Scope</th><th>Evidence</th><th>Source</th></tr></thead>
+          <tbody><tr><td><code>demo</code></td><td class='mono'>user#mcp1</td><td>server registered</td><td class='mono'>-</td></tr></tbody>
+        </table>
+      </div>
+      
+    </div>
+  </div>
+</section>
+
+<!-- ============ CHAT EXPOSURE ============ -->
+<section id="chat" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/05</span>
+        <span class="kicker-label">CHAT EXPOSURE</span>
+      </div>
+      <h2 class="h2">Plaintext transcripts on the developer endpoint.</h2>
+      <p class="sub">Transcript text stays in <span class="mono">raw/</span>. Only counts and retention metadata land here. The 90-day mark is the stated policy.</p>
+    </header>
+
+    <div class="chat-grid">
+      <div class="side">
+        <div class="stat">
+          <div class="stat-num">12</div>
+          <div class="stat-lbl">exported transcript files</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num">0m</div>
+          <div class="stat-lbl">estimated active conversation time</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num accent">1<span>·files</span></div>
+          <div class="stat-lbl">transcript files with secret patterns · ≈ 8.3% of all transcripts</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num accent">45<span>·days</span></div>
+          <div class="stat-lbl">max retention · grok</div>
+        </div>
+      </div>
+      <div class="retention">
+        <h3>Retention by tool · days held on disk</h3>
+        <div class="retention-row">
+          <span class="name">claude</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">3 files - 0m active est.</span>
+        </div>        <div class="retention-row">
+          <span class="name">codex</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">2 files - 0m active est.</span>
+        </div>        <div class="retention-row">
+          <span class="name">cursor</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">4 files - 0m active est.</span>
+        </div>        <div class="retention-row">
+          <span class="name">cursor composer</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">2 files - 0m active est.</span>
+        </div>        <div class="retention-row">
+          <span class="name">grok</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">1 files - 0m active est.</span>
+        </div>
+        <div class="ninety-cap">▮ 90-day policy mark</div>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top: 24px;"><table>
+      <thead><tr><th>Tool</th><th>Oldest</th><th>Newest</th><th>Files</th><th>Active estimate</th><th>Secret-hit files</th><th>Retention</th></tr></thead>
+      <tbody>
+        <tr><td class='mono'>claude</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>3</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+        <tr><td class='mono'>codex</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>2</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+        <tr><td class='mono'>cursor</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>4</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+        <tr><td class='mono'>cursor-composer</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>2</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+        <tr><td class='mono'>grok</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>1</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+      </tbody>
+    </table></div>
+    <p class="posture-grid-caption">Active time is a capped-gap estimate from transcript timestamps: gaps between consecutive messages in the same session count up to 30 minutes. It is directional, not a timesheet, and tools with coarse timestamps may undercount.</p>
+  </div>
+</section>
+
+<!-- ============ SECRETS & GIT POSTURE ============ -->
+<section id="secrets-git" class="section section--alt">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/06</span>
+        <span class="kicker-label">SECRETS &amp; GIT POSTURE</span>
+      </div>
+      <h2 class="h2">Secret scanning and git posture.</h2>
+      <p class="sub">gitleaks scans chat exports and repo roots for credential-shaped strings; samples are redacted and full hits stay in <span class="mono">raw/secrets-scan/findings.csv</span>. Git posture checks local repos for .env in history, hook presence, .gitignore coverage, and large blobs.</p>
+    </header>
+
+    <div class="two-col">
+      <div class="panel">
+        <h3>Secrets scan · 1 hits</h3>
+<p style='color: var(--fg-3);'>No rule breakdown recorded.</p>
+<p style="margin-top: 20px; font-family: var(--f-mono); font-size: 11.5px; color: var(--fg-3); line-height: 1.6;">// by location · chat: 0 · repos: 1<br/>// scanner: gitleaks</p>
+      </div>
+
+      <div class="panel">
+        <h3>Git posture · 5 repos</h3>
+        <div class="git-grid">
+          <div>
+            <div class="label">.env in history</div>
+            <div class="v red">1<small>/ 5</small></div>
+          </div>
+          <div>
+            <div class="label">pre-commit coverage</div>
+            <div class="v amber">0%<small>0 / 5</small></div>
+          </div>
+          <div>
+            <div class="label">repos scanned</div>
+            <div class="v">5</div>
+          </div>
+          <div>
+            <div class="label">branch protection</div>
+            <div class="v" style="font-size: 22px; color: var(--fg-3); padding-top: 12px;">not checked</div>
+            <div style="font-family: var(--f-mono); font-size: 11.5px; color: var(--fg-4);">(gh not enabled)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ METHODOLOGY ============ -->
+<section id="methodology" class="section section--alt">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/07</span>
+        <span class="kicker-label">METHODOLOGY &amp; ATTESTATION</span>
+      </div>
+      <h2 class="h2">How the evidence was produced.</h2>
+      <p class="sub">Collectors read local endpoint state and wrote evidence into this output directory. Raw evidence remains local; anything you share should follow the evidence contract in <span class="mono">SCHEMA.md</span>.</p>
+    </header>
+
+    <div class="collection-scope">
+      <div class="collection-scope-head">
+        <h3>Collection scope</h3>
+        <p>8 collectors produced local evidence. Collector versions and completion times are in Methodology.</p>
+      </div>
+      <table>
+        <thead><tr><th>Collector</th><th>Status</th><th>Evidence volume</th></tr></thead>
+        <tbody><tr><td><strong>Claude Code</strong></td><td>collected</td><td>2 permission rules</td></tr><tr><td><strong>Cursor</strong></td><td>collected</td><td>local state found</td></tr><tr><td><strong>Codex Desktop</strong></td><td>collected</td><td>1 permission rules</td></tr><tr><td><strong>GitHub Copilot</strong></td><td>collected</td><td>settings found</td></tr><tr><td><strong>Grok Build</strong></td><td>collected</td><td>1 permission rules</td></tr><tr><td><strong>Chat History</strong></td><td>collected</td><td>340 chat messages</td></tr><tr><td><strong>Secrets Scan</strong></td><td>collected</td><td>1 secret hits</td></tr><tr><td><strong>Git Posture</strong></td><td>collected</td><td>5 git repos</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap" style="max-height: none;"><table>
+      <thead><tr><th>Collector</th><th>Work performed</th><th>Completed at</th><th>Duration</th><th>Version</th><th>Status</th></tr></thead>
+      <tbody>        <tr><td><strong>Chat transcripts</strong><div class='mono'>chat-history</div></td><td>Transcript export across detected AI tools</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Claude posture</strong><div class='mono'>claude</div></td><td>Claude settings, permissions, and MCP posture</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Codex posture</strong><div class='mono'>codex</div></td><td>Codex config, trusted projects, and MCP posture</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>GitHub Copilot posture</strong><div class='mono'>copilot</div></td><td>Copilot local settings detection</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Cursor posture</strong><div class='mono'>cursor</div></td><td>Cursor local state, durable rules, and approval events</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Discovery</strong><div class='mono'>discovery</div></td><td>Local tool path and capability discovery</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Git posture</strong><div class='mono'>git-posture</div></td><td>Local repository hygiene checks</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Grok posture</strong><div class='mono'>grok</div></td><td>Grok config and session posture</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Secrets scan</strong><div class='mono'>secrets-scan</div></td><td>gitleaks scan over chat exports and repo roots</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr></tbody>
+    </table></div>
+
+    <div class="attestation">
+      <p><strong style="color: var(--green); font-weight: 500;">Manifest SHA-256</strong> (first 16 chars · full hashes in bundled manifest): <code>manifest not pre</code></p>
+      <p>Raw evidence remains in the local output directory; shareable bundles should be sanitized per <code>SCHEMA.md</code>.</p>
+      <div class="sig-line">Unknown operator · 2026-07-11 17:39:45</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ APPENDIX ============ -->
+<section id="appendix" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/08</span>
+        <span class="kicker-label">APPENDIX — EVIDENCE INDEX</span>
+      </div>
+      <h2 class="h2">Where to find the raw evidence behind each finding.</h2>
+      <p class="sub">Per-hit gitleaks rows are aggregated by rule type. Identical findings collapse into a single row with a hit count; full per-row detail lives in the linked CSV.</p>
+    </header>
+
+
+
+    <div class="table-wrap appendix-table" style="max-height: none;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 90px;">Severity</th>
+            <th>Finding</th>
+            <th style="width: 100px;">Hits</th>
+            <th>Evidence reference</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><span class='pill critical'>critical</span></td><td>.env file found in git commit history</td><td><span class='count one'>1</span></td><td class='mono'>evidence/git-posture.json</td></tr>
+          <tr><td><span class='pill critical'>critical</span></td><td>Codex sandbox bypass observed</td><td><span class='count one'>1</span></td><td class='mono'>evidence/codex.json</td></tr>
+          <tr><td><span class='pill critical'>critical</span></td><td>Grok Build permission_mode is always-approve</td><td><span class='count one'>1</span></td><td class='mono'>evidence/grok.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>Claude dangerous-mode confirmation prompt is disabled</td><td><span class='count one'>1</span></td><td class='mono'>evidence/claude.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>Potential secret in chat export</td><td><span class='count one'>1</span></td><td class='mono'>evidence/secrets-scan.json</td></tr>
+          <tr><td><span class='pill medium'>medium</span></td><td>Secret-like value observed in chat export</td><td><span class='count one'>1</span></td><td class='mono'>evidence/chat-history.json</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer class="footer">
+  <div class="foot-inner">
+    <span>aiscan briefing · Unknown customer</span>
+    <span class="foot-meta">
+      <span>end of report · 2026-07-11</span>
+    </span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // Tabs
+  const tabBtns = document.querySelectorAll('#findings-tabs .tab-btn');
+  const tabPanels = document.querySelectorAll('[data-tab].tab-panel');
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.tab;
+      tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+      tabPanels.forEach(p => p.classList.toggle('active', p.dataset.tab === target));
+    });
+  });
+
+  // Findings search
+  const searchEl = document.getElementById('findings-search');
+  if (searchEl) {
+    searchEl.addEventListener('input', () => {
+      const q = searchEl.value.toLowerCase();
+      document.querySelectorAll('.frow').forEach(row => {
+        const text = (row.textContent || '').toLowerCase();
+        row.style.display = (!q || text.includes(q)) ? '' : 'none';
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>

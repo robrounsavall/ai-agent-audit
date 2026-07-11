@@ -1,0 +1,57 @@
+{
+  "collector": "claude",
+  "version": "1.0.0",
+  "ran_at": "2026-07-11T21:23:58.915498+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "f05a12f50a46",
+  "summary": {
+    "settings_files": 1,
+    "rules": 2,
+    "findings": 1,
+    "allow_rules": 2,
+    "deny_rules": 0,
+    "ask_rules": 0
+  },
+  "findings": [
+    {
+      "id": "claude.permission.skip_dangerous_prompt",
+      "severity": "critical",
+      "category": "Shell Execution",
+      "title": "Claude skips dangerous-mode permission prompt",
+      "evidence_count": 1,
+      "first_seen": "",
+      "last_seen": "",
+      "sample_redacted": "skipDangerousModePermissionPrompt=${ENABLED}",
+      "secret_redacted": false,
+      "tags": [
+        "unbounded_glob"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "platform": "claude",
+      "scope": "user",
+      "scope_label_redacted": "user#abc123",
+      "rule_type": "mcp_tool",
+      "rule": "mcp__playwright",
+      "decision": "allow",
+      "command_or_tool_redacted": "playwright",
+      "risk": "medium",
+      "exposure_category": "MCP Tooling"
+    },
+    {
+      "platform": "claude",
+      "scope": "user",
+      "scope_label_redacted": "user#abc123",
+      "rule_type": "bash",
+      "rule": "Bash(*)",
+      "decision": "allow",
+      "command_or_tool_redacted": "*",
+      "risk": "high",
+      "exposure_category": "Shell Execution"
+    }
+  ],
+  "raw_pointers": []
+}

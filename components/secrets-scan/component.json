@@ -1,0 +1,1 @@
+{"name":"secrets-scan","evidence":"secrets-scan","in_all":true,"needs_paths":false,"needs_repo_roots":true,"deps":["stdlib","gitleaks"]}
