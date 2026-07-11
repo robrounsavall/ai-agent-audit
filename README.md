@@ -13,8 +13,8 @@ MCP summaries).
 ```
 
 That runs every collector and opens a self-contained HTML report. See a
-[sample report built from synthetic data](docs/sample-report.html) before
-running anything.
+[sample report built from synthetic data](https://robrounsavall.github.io/ai-agent-audit/sample-report.html)
+before running anything.
 
 ## Why
 
