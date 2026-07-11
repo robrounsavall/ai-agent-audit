@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Scan output never gets committed
+evidence/
+raw/
+briefing/
+out/
+output/
+tmp/
+
+# ...except the fully synthetic demo bundle (no real machine data)
+!samples/synthetic-demo/evidence/
+
+# Local path config contains sensitive absolute paths
+paths.json
+
+# Local Claude Code settings (permission allowlists are machine-specific)
+.claude/
+
+# Local creds / env
+.env
+.env.local
+
+# OS junk
+.DS_Store
+Thumbs.db
+*.swp

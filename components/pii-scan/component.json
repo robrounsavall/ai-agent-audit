@@ -1,0 +1,1 @@
+{"name":"pii-scan","evidence":"pii-scan","in_all":false,"needs_paths":false,"needs_repo_roots":false,"deps":["presidio","spacy"]}

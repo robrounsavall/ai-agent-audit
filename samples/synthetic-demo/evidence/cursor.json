@@ -1,0 +1,15 @@
+{
+  "collector": "cursor",
+  "version": "1.0.0",
+  "ran_at": "2026-07-11T21:23:58.915498+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "e816c96ca0f5",
+  "summary": {
+    "rules": 0,
+    "findings": 0
+  },
+  "findings": [],
+  "rules": [],
+  "raw_pointers": []
+}

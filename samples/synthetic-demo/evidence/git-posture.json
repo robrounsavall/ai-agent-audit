@@ -1,0 +1,29 @@
+{
+  "collector": "git-posture",
+  "version": "1.0.0",
+  "ran_at": "2026-07-11T21:23:58.915498+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "24e6facdd324",
+  "summary": {
+    "repos_scanned": 5,
+    "env_in_history": 1,
+    "no_pre_commit": 5,
+    "no_branch_protection": 3,
+    "large_blobs": 0,
+    "gh_checked": false
+  },
+  "findings": [
+    {
+      "id": "git.env.in_history",
+      "severity": "critical",
+      "category": "Git Posture",
+      "title": ".env file found in git commit history",
+      "evidence_count": 1,
+      "sample_redacted": "project#demo",
+      "tags": []
+    }
+  ],
+  "rules": [],
+  "raw_pointers": []
+}

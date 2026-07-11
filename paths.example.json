@@ -1,0 +1,8 @@
+{
+  "_comment": "Template for paths.json (gitignored, local-only). Copy this file to paths.json and edit. Omitted keys fall through to env var then default. Keys: claude_home (overrides CLAUDE_CONFIG_DIR), codex_home (overrides CODEX_HOME), cursor_projects (no env; CLI/config/default only), cursor_db (no env; CLI/config/default only), grok_home (overrides GROK_HOME). Paths containing sensitive absolute values must not be committed.",
+  "claude_home": "C:\\Users\\you\\.claude",
+  "codex_home": "C:\\Users\\you\\.codex",
+  "cursor_projects": "C:\\Users\\you\\.cursor\\projects",
+  "cursor_db": "C:\\Users\\you\\AppData\\Roaming\\Cursor\\User\\globalStorage\\state.vscdb",
+  "grok_home": "C:\\Users\\you\\.grok"
+}

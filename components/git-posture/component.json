@@ -1,0 +1,1 @@
+{"name":"git-posture","evidence":"git-posture","in_all":true,"needs_paths":false,"needs_repo_roots":true,"deps":["stdlib","git"]}

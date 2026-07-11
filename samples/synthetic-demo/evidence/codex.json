@@ -1,0 +1,38 @@
+{
+  "collector": "codex",
+  "version": "1.0.0",
+  "ran_at": "2026-07-11T21:23:58.915498+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "c859b663ec04",
+  "summary": {
+    "sessions": 4,
+    "rules": 1,
+    "findings": 1
+  },
+  "findings": [
+    {
+      "id": "codex.sandbox.bypass",
+      "severity": "critical",
+      "category": "Shell Execution",
+      "title": "Codex sandbox bypass observed",
+      "evidence_count": 1,
+      "sample_redacted": "sandbox=disabled",
+      "tags": []
+    }
+  ],
+  "rules": [
+    {
+      "platform": "codex",
+      "scope": "user",
+      "scope_label_redacted": "user#def456",
+      "rule_type": "other",
+      "rule": "prefix:demo",
+      "decision": "allow",
+      "command_or_tool_redacted": "demo",
+      "risk": "low",
+      "exposure_category": "General Tooling"
+    }
+  ],
+  "raw_pointers": []
+}
