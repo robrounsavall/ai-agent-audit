@@ -16,6 +16,8 @@ That runs every collector and opens a self-contained HTML report. See a
 [sample report built from synthetic data](https://robrounsavall.github.io/ai-agent-audit/sample-report.html)
 before running anything.
 
+[![Sample briefing — synthetic data](docs/briefing-screenshot.png)](https://robrounsavall.github.io/ai-agent-audit/sample-report.html)
+
 ## Why
 
 AI coding agents are privileged, semi-autonomous actors on developer
