@@ -9,7 +9,9 @@ from pathlib import Path
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
-os.environ.pop("AISCAN_NO_REDACT", None)
+# These tests exercise masking behavior; redaction is opt-in (default is
+# unredacted), so turn it on explicitly.
+os.environ["AISCAN_REDACT"] = "1"
 
 import bootstrap  # noqa: E402,F401
 from common import (  # noqa: E402

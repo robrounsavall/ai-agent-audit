@@ -113,9 +113,9 @@ if ($Here -and $OutDir) {
 }
 
 # aiscan runs on your own machine, so it shows real rules/paths/samples by default.
-# The collectors read AISCAN_NO_REDACT centrally (sanitize_text). -Redact restores
+# The collectors read AISCAN_REDACT centrally (sanitize_text). -Redact turns on
 # masking for output you intend to share.
-if ($Redact) { $env:AISCAN_NO_REDACT = $null } else { $env:AISCAN_NO_REDACT = "1" }
+if ($Redact) { $env:AISCAN_REDACT = "1" } else { $env:AISCAN_REDACT = $null }
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 

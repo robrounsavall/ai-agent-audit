@@ -191,13 +191,14 @@ def redact_paths(text: str) -> str:
 
 
 def redaction_disabled() -> bool:
-    """True when AISCAN_NO_REDACT is set to a truthy value.
+    """True unless AISCAN_REDACT is set to a truthy value.
 
-    Local aiscan runs on the operator's own machine, where masking real rules and
-    paths only hides the thing being inspected. aiscan.ps1 sets this by default
-    (pass -Redact to mask). Leave it unset for output you intend to share.
+    aiscan runs on the operator's own machine, where masking real rules and
+    paths only hides the thing being inspected — so unredacted is the default
+    everywhere, including standalone collector runs. Set AISCAN_REDACT=1 (or
+    pass -Redact to aiscan.ps1) to mask output you intend to share.
     """
-    return os.environ.get("AISCAN_NO_REDACT", "").strip().lower() in ("1", "true", "yes")
+    return os.environ.get("AISCAN_REDACT", "").strip().lower() not in ("1", "true", "yes")
 
 
 def sanitize_text(text: str) -> str:
