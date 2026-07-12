@@ -49,7 +49,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "pii-scan"
 
@@ -58,9 +58,11 @@ TEXT_EXTENSIONS = {
     ".csv", ".tsv", ".log", ".yaml", ".yml", ".html", ".htm",
 }
 
-# DATE_TIME and URL are deliberately NOT defaults: on machine-generated chat
-# transcripts (JSONL full of timestamps and links) they fire on nearly every
-# line and drown the real signal. Re-enable via --entities if you want them.
+# DATE_TIME, URL, PERSON, and LOCATION are deliberately NOT defaults. On
+# machine-generated chat transcripts they are almost all noise: timestamps and
+# links fire on nearly every line, and spaCy NER tags code identifiers, paths,
+# and capitalized tokens as people/places (~89% of hit volume on a real dev
+# corpus, near-zero true PII). Re-enable via --entities if you want them.
 DEFAULT_ENTITIES = [
     "EMAIL_ADDRESS",
     "PHONE_NUMBER",
@@ -72,8 +74,6 @@ DEFAULT_ENTITIES = [
     "US_ITIN",
     "IBAN_CODE",
     "IP_ADDRESS",
-    "PERSON",
-    "LOCATION",
     "MEDICAL_LICENSE",
     "CRYPTO",
 ]
