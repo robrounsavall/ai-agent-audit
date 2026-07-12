@@ -49,7 +49,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 COLLECTOR = "pii-scan"
 
@@ -58,6 +58,9 @@ TEXT_EXTENSIONS = {
     ".csv", ".tsv", ".log", ".yaml", ".yml", ".html", ".htm",
 }
 
+# DATE_TIME and URL are deliberately NOT defaults: on machine-generated chat
+# transcripts (JSONL full of timestamps and links) they fire on nearly every
+# line and drown the real signal. Re-enable via --entities if you want them.
 DEFAULT_ENTITIES = [
     "EMAIL_ADDRESS",
     "PHONE_NUMBER",
@@ -71,8 +74,6 @@ DEFAULT_ENTITIES = [
     "IP_ADDRESS",
     "PERSON",
     "LOCATION",
-    "DATE_TIME",
-    "URL",
     "MEDICAL_LICENSE",
     "CRYPTO",
 ]
@@ -214,7 +215,13 @@ def scan_file(analyzer, path: Path, entities: list[str], min_score: float) -> li
     return hits
 
 
-def write_raw_outputs(raw_dir: Path, hits: list[dict], entity_counts: Counter, file_counts: Counter) -> None:
+def write_raw_outputs(
+    raw_dir: Path,
+    hits: list[dict],
+    entity_counts: Counter,
+    file_counts: Counter,
+    samples_truncated: int = 0,
+) -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
     csv_path = raw_dir / "findings.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
@@ -234,8 +241,13 @@ def write_raw_outputs(raw_dir: Path, hits: list[dict], entity_counts: Counter, f
 
     summary_path = raw_dir / "summary.md"
     lines = ["# PII scan summary", ""]
-    lines.append(f"- Total hits: {len(hits)}")
+    lines.append(f"- Total hits: {sum(entity_counts.values())}")
     lines.append(f"- Files with hits: {len(file_counts)}")
+    if samples_truncated:
+        lines.append(
+            f"- Sample rows stored in findings.csv: {len(hits)} "
+            f"({samples_truncated} over the per-file/per-entity cap omitted; counts above are complete)"
+        )
     lines.append("")
     lines.append("## Hits by entity")
     lines.append("")
@@ -253,7 +265,13 @@ def write_raw_outputs(raw_dir: Path, hits: list[dict], entity_counts: Counter, f
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def collect(targets: list[Path], entities: list[str], min_score: float, raw_dir: Path) -> tuple[dict, list[dict]]:
+def collect(
+    targets: list[Path],
+    entities: list[str],
+    min_score: float,
+    raw_dir: Path,
+    max_samples_per_file: int = 25,
+) -> tuple[dict, list[dict]]:
     # Check Presidio availability first — emit tool_unavailable and exit cleanly if missing.
     try:
         from presidio_analyzer import AnalyzerEngine  # noqa: F401
@@ -310,6 +328,8 @@ def collect(targets: list[Path], entities: list[str], min_score: float, raw_dir:
 
     all_hits: list[dict] = []
     files_scanned = 0
+    total_hits = 0
+    samples_truncated = 0
     entity_counts: Counter[str] = Counter()
     file_counts: Counter[str] = Counter()
     per_entity_files: dict[str, set[str]] = defaultdict(set)
@@ -328,23 +348,32 @@ def collect(targets: list[Path], entities: list[str], min_score: float, raw_dir:
             files_scanned += 1
             if files_scanned % 25 == 0:
                 print(
-                    f"pii-scan: {files_scanned} files scanned, {len(all_hits)} hits so far",
+                    f"pii-scan: {files_scanned} files scanned, {total_hits} hits so far",
                     file=sys.stderr, flush=True,
                 )
             hits = scan_file(analyzer, file_path, entities, min_score)
             if not hits:
                 continue
-            all_hits.extend(hits)
+            total_hits += len(hits)
             file_counts[str(file_path)] += len(hits)
+            # True counts always accumulate; stored sample rows are capped per
+            # (file, entity) so one noisy entity cannot flood memory or the CSV.
+            per_file_entity: Counter[str] = Counter()
             for hit in hits:
                 entity_counts[hit["entity"]] += 1
                 per_entity_files[hit["entity"]].add(str(file_path))
+                per_file_entity[hit["entity"]] += 1
+                if per_file_entity[hit["entity"]] <= max_samples_per_file:
+                    all_hits.append(hit)
+                else:
+                    samples_truncated += 1
     print(
-        f"pii-scan: done. {files_scanned} files scanned, {len(all_hits)} hits.",
+        f"pii-scan: done. {files_scanned} files scanned, {total_hits} hits"
+        f" ({samples_truncated} sample rows over the per-file cap not stored).",
         file=sys.stderr, flush=True,
     )
 
-    write_raw_outputs(raw_dir, all_hits, entity_counts, file_counts)
+    write_raw_outputs(raw_dir, all_hits, entity_counts, file_counts, samples_truncated)
 
     for entity, count in entity_counts.most_common():
         sample_hit = next((h for h in all_hits if h["entity"] == entity), None)
@@ -368,7 +397,10 @@ def collect(targets: list[Path], entities: list[str], min_score: float, raw_dir:
         "targets": [str(t) for t in targets],
         "files_scanned": files_scanned,
         "files_with_hits": len(file_counts),
-        "hits": len(all_hits),
+        "hits": total_hits,
+        "sample_rows_stored": len(all_hits),
+        "sample_rows_truncated": samples_truncated,
+        "max_samples_per_file": max_samples_per_file,
         "min_score": min_score,
         "entities_scanned": entities,
         **{f"entity_{k}": v for k, v in entity_counts.items()},
@@ -415,6 +447,13 @@ def main() -> None:
         default=0.5,
         help="Minimum analyzer confidence (0.0-1.0)",
     )
+    parser.add_argument(
+        "--max-samples-per-file",
+        type=int,
+        default=25,
+        help="Max stored sample rows per entity type per file (true counts are "
+        "always complete; this only caps findings.csv detail rows). Default 25.",
+    )
     args = parser.parse_args()
 
     evidence_root = validate_evidence_root(args.evidence_root)
@@ -432,7 +471,10 @@ def main() -> None:
     entities = [e.strip() for e in args.entities.split(",") if e.strip()]
 
     try:
-        envelope, hits = collect(targets, entities, args.min_score, raw_dir)
+        envelope, hits = collect(
+            targets, entities, args.min_score, raw_dir,
+            max_samples_per_file=max(1, args.max_samples_per_file),
+        )
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)
