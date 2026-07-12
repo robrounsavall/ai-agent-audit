@@ -4,7 +4,7 @@
     Run unit tests for one component (or core / integration).
 
 .PARAMETER Name
-    Component name: claude, cursor, codex, copilot, grok, chat-history,
+    Component name: claude, cowork, cursor, codex, copilot, grok, chat-history,
     git-posture, secrets-scan, pii-scan, core, integration, all.
 
 .EXAMPLE
@@ -15,7 +15,7 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet(
-        "claude", "cursor", "codex", "copilot", "grok",
+        "claude", "cowork", "cursor", "codex", "copilot", "grok",
         "chat-history", "git-posture", "secrets-scan", "pii-scan",
         "core", "integration", "all"
     )]
@@ -66,7 +66,7 @@ $failed = 0
 
 if ($Name -eq "all") {
     $order = @(
-        "core", "claude", "cursor", "codex", "copilot", "grok",
+        "core", "claude", "cowork", "cursor", "codex", "copilot", "grok",
         "chat-history", "git-posture", "secrets-scan", "pii-scan", "integration"
     )
     foreach ($n in $order) {

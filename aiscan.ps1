@@ -12,11 +12,11 @@
     stock Python with no install. secrets-scan needs gitleaks.exe on PATH.
 
 .PARAMETER Collector
-    One of: claude cursor codex copilot chat-history git-posture secrets-scan
-    pii-scan grok discover all. Defaults to 'all' when omitted.
+    One of: claude cowork cursor codex copilot chat-history git-posture
+    secrets-scan pii-scan grok discover all. Defaults to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
-    'all' runs the 8 stdlib collectors and prints a combined summary (skips pii-scan).
+    'all' runs the 9 stdlib collectors and prints a combined summary (skips pii-scan).
 
 .PARAMETER Json
     Dump raw collector JSON instead of pretty-printed PowerShell formatting.
@@ -81,7 +81,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false, Position = 0)]
-    [ValidateSet("claude", "cursor", "codex", "copilot", "chat-history",
+    [ValidateSet("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
         "git-posture", "secrets-scan", "pii-scan", "grok", "discover", "all")]
     [string]$Collector = "all",
 
@@ -131,6 +131,7 @@ $env:PYTHONPATH = if ($env:PYTHONPATH) { "$CoreDir;$env:PYTHONPATH" } else { $Co
 # Map collector name -> components/<name>/<script>.py
 $ScriptFor = @{
     "claude"       = "claude\claude.py"
+    "cowork"       = "cowork\cowork.py"
     "cursor"       = "cursor\cursor.py"
     "codex"        = "codex\codex.py"
     "copilot"      = "copilot\copilot.py"
@@ -142,7 +143,7 @@ $ScriptFor = @{
 }
 
 # Stdlib collectors run by 'all' (pii-scan excluded: needs the venv).
-$StdlibOrder = @("claude", "cursor", "codex", "copilot", "chat-history",
+$StdlibOrder = @("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
     "git-posture", "secrets-scan", "grok")
 
 function Test-Presidio {
