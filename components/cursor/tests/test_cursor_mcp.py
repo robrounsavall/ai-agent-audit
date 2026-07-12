@@ -169,7 +169,7 @@ class TestVscdbMcp(unittest.TestCase):
             self.assertEqual(approved[0]["rule"], "mcp__acme-mcp")
             self.assertEqual(approved[0]["command_or_tool_redacted"], "acme-mcp")
             # Scope label must not leak the mangled Cursor project id.
-            # With redaction on it is project#hash; with AISCAN_NO_REDACT it is
+            # With AISCAN_REDACT=1 it is project#hash; unredacted (default) it is
             # project:approval (controlled vocab from the collector).
             label = approved[0]["scope_label_redacted"]
             self.assertTrue(

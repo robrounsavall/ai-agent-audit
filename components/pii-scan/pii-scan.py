@@ -227,7 +227,7 @@ def write_raw_outputs(
     csv_path = raw_dir / "findings.csv"
     # findings.csv lives under raw/, which never leaves the machine (SCHEMA.md).
     # In the default unredacted local mode show the real matched text so hits
-    # can be triaged; -Redact (AISCAN_NO_REDACT unset) restores masking.
+    # can be triaged; -Redact (AISCAN_REDACT=1) restores masking.
     show_raw = redaction_disabled()
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
