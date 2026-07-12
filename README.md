@@ -37,14 +37,15 @@ today?**
 - **Transcripts stay local.** Raw chat content only ever lands in the local
   `raw/` directory. The `evidence/` layer carries counts, sizes, hashes, and
   redacted samples — the contract is [SCHEMA.md](SCHEMA.md).
-- Stdlib-first Python: 8 of 9 collectors run on stock Python 3.10+ with no
+- Stdlib-first Python: 9 of 10 collectors run on stock Python 3.10+ with no
   pip install. Small enough to audit before you run it.
 
 ## What it collects
 
 | Collector | What it reads | What it reports |
 |---|---|---|
-| `claude` | `~/.claude` settings + project settings | allow/deny/ask rules, MCP servers, bypass modes |
+| `claude` | `~/.claude` settings + project settings + desktop app MCP config | allow/deny/ask rules, MCP servers, bypass modes, prompt-history/file-snapshot retention |
+| `cowork` | `%APPDATA%\Claude` (Claude desktop app) | Cowork session workspaces: transcripts, outputs, Office preview cache, cloud bridging |
 | `cursor` | Cursor `state.vscdb` + project data | permission posture, MCP configuration |
 | `codex` | `~/.codex` sessions + `config.toml` | approval events, trusted projects, sandbox/telemetry posture |
 | `copilot` | VS Code / JetBrains Copilot settings | enable state, exclusions, telemetry |
