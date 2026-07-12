@@ -63,7 +63,7 @@ def read_frontmatter(evidence_root: Path) -> dict[str, str]:
 
 SUPPORTED_MAJOR = 1
 
-PLATFORM_COLLECTORS = ("claude", "cursor", "codex", "copilot", "grok")
+PLATFORM_COLLECTORS = ("claude", "cowork", "cursor", "codex", "copilot", "grok")
 
 
 def _is_detected(env: dict[str, Any] | None) -> bool:
@@ -79,6 +79,7 @@ def _visible_platform_collectors(envelopes: dict[str, dict[str, Any]]) -> tuple[
 
 TOOL_LABELS = {
     "claude": "Claude Code",
+    "cowork": "Claude Cowork",
     "cursor": "Cursor",
     "codex": "Codex Desktop",
     "copilot": "GitHub Copilot",
@@ -92,6 +93,7 @@ TOOL_LABELS = {
 COLLECTOR_PURPOSES = {
     "chat-history": ("Chat transcripts", "Transcript export across detected AI tools"),
     "claude": ("Claude posture", "Claude settings, permissions, and MCP posture"),
+    "cowork": ("Cowork posture", "Claude desktop app session workspaces, preview cache, and cloud bridging"),
     "cursor": ("Cursor posture", "Cursor local state, durable rules, and approval events"),
     "codex": ("Codex posture", "Codex config, trusted projects, and MCP posture"),
     "copilot": ("GitHub Copilot posture", "Copilot local settings detection"),
