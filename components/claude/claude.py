@@ -6,6 +6,12 @@ Usage:
 
 Reads ~/.claude/settings.json, settings.local.json, and project-level
 .claude/settings.local.json files. Emits permission rules and security findings.
+
+Also reads the Claude desktop app MCP registry (%APPDATA%/Claude/
+claude_desktop_config.json) and flags ~/.claude side artifacts that persist
+user content outside the transcript store: history.jsonl (global prompt
+history), file-history/ (pre-edit file snapshots), bash-audit.log (shell
+command log).
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ except ImportError:  # pragma: no cover - non-Windows fallback
 
 import paths
 from common import (
+    APPDATA,
     add_base_args,
     classify_rule,
     compute_scope_hash,
@@ -36,7 +43,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 COLLECTOR = "claude"
 
@@ -340,9 +347,95 @@ def extract_rules_from_settings(
     return rules, findings
 
 
+def desktop_config_path() -> Path:
+    return APPDATA / "Claude" / "claude_desktop_config.json"
+
+
+def collect_desktop_mcp(config_path: Path) -> tuple[list[dict], list[dict], int]:
+    """Parse mcpServers from the Claude desktop app config, if present."""
+    if not config_path.exists():
+        return [], [], 0
+    data = load_json(config_path)
+    servers = (data or {}).get("mcpServers")
+    if not isinstance(servers, dict) or not servers:
+        return [], [], 0
+    rules, findings = extract_rules_from_settings(
+        "user", "desktop", {"mcpServers": servers}, config_path
+    )
+    return rules, findings, len(servers)
+
+
+def scan_side_artifacts(claude_home: Path) -> list[dict]:
+    """Flag ~/.claude artifacts that persist user content outside transcripts."""
+    findings: list[dict] = []
+
+    history = claude_home / "history.jsonl"
+    try:
+        history_kb = history.stat().st_size // 1024 if history.exists() else 0
+    except OSError:
+        history_kb = 0
+    if history_kb > 0:
+        findings.append(
+            make_finding(
+                "claude.history.global_prompt_log",
+                "medium",
+                "Cross-Agent Visibility",
+                "Global prompt history persists in ~/.claude/history.jsonl",
+                sample_redacted=f"size_kb={history_kb}",
+                tags=["history_retention"],
+            )
+        )
+
+    file_history = claude_home / "file-history"
+    snapshot_count = 0
+    snapshot_bytes = 0
+    if file_history.exists():
+        for p in file_history.rglob("*"):
+            if p.is_file():
+                snapshot_count += 1
+                try:
+                    snapshot_bytes += p.stat().st_size
+                except OSError:
+                    continue
+    if snapshot_count > 0:
+        findings.append(
+            make_finding(
+                "claude.file_history.snapshots",
+                "medium",
+                "Cross-Agent Visibility",
+                "Pre-edit file snapshots persist under ~/.claude/file-history",
+                evidence_count=snapshot_count,
+                sample_redacted=f"files={snapshot_count}; size_mb={snapshot_bytes // (1024 * 1024)}",
+                tags=["history_retention"],
+            )
+        )
+
+    bash_audit = claude_home / "bash-audit.log"
+    try:
+        audit_kb = bash_audit.stat().st_size // 1024 if bash_audit.exists() else 0
+    except OSError:
+        audit_kb = 0
+    if audit_kb > 0:
+        findings.append(
+            make_finding(
+                "claude.shell_audit.log_present",
+                "low",
+                "Cross-Agent Visibility",
+                "Shell command audit log persists in ~/.claude/bash-audit.log",
+                sample_redacted=f"size_kb={audit_kb}",
+                tags=["history_retention"],
+            )
+        )
+
+    return findings
+
+
 def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
     settings_files = discover_settings(scope_filter, tp.claude_home, tp.claude_projects)
+    desktop_config = desktop_config_path()
     scanned_paths = [str(p) for _, _, p in settings_files]
+    if desktop_config.exists():
+        scanned_paths.append(str(desktop_config))
     scope_hash = compute_scope_hash(scanned_paths or [str(tp.claude_home)])
 
     platform_detected = tp.claude_home.exists()
@@ -376,6 +469,18 @@ def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
                 seen_finding_ids.add(finding["id"])
                 all_findings.append(finding)
 
+    desktop_rules, desktop_findings, desktop_servers = collect_desktop_mcp(desktop_config)
+    all_rules.extend(desktop_rules)
+    for finding in desktop_findings:
+        if finding["id"] not in seen_finding_ids:
+            seen_finding_ids.add(finding["id"])
+            all_findings.append(finding)
+
+    for finding in scan_side_artifacts(tp.claude_home):
+        if finding["id"] not in seen_finding_ids:
+            seen_finding_ids.add(finding["id"])
+            all_findings.append(finding)
+
     otel = claude_otel_summary(settings_envs)
     if otel["enabled"]:
         destination = str(otel.get("destination") or "destination not recorded")
@@ -400,6 +505,7 @@ def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
         "allow_rules": sum(1 for r in all_rules if r["decision"] == "allow"),
         "deny_rules": sum(1 for r in all_rules if r["decision"] == "deny"),
         "ask_rules": sum(1 for r in all_rules if r["decision"] == "ask"),
+        "desktop_mcp_servers": desktop_servers,
         "otel_enabled": bool(otel.get("enabled")),
         "otel_destination": str(otel.get("destination") or ""),
         "otel_protocol": str(otel.get("protocol") or ""),
