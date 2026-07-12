@@ -44,6 +44,7 @@ from common import (
     make_envelope,
     make_finding,
     redact_sample,
+    redaction_disabled,
     resolve_raw_root,
     secret_types_in,
     validate_evidence_root,
@@ -224,9 +225,16 @@ def write_raw_outputs(
 ) -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
     csv_path = raw_dir / "findings.csv"
+    # findings.csv lives under raw/, which never leaves the machine (SCHEMA.md).
+    # In the default unredacted local mode show the real matched text so hits
+    # can be triaged; -Redact (AISCAN_NO_REDACT unset) restores masking.
+    show_raw = redaction_disabled()
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["file", "entity", "score", "start", "end", "sample_redacted"])
+        writer.writerow(
+            ["file", "entity", "score", "start", "end",
+             "sample" if show_raw else "sample_redacted"]
+        )
         for hit in hits:
             writer.writerow(
                 [
@@ -235,7 +243,7 @@ def write_raw_outputs(
                     hit["score"],
                     hit["start"],
                     hit["end"],
-                    redact_sample(hit["sample"], hit["entity"]),
+                    hit["sample"] if show_raw else redact_sample(hit["sample"], hit["entity"]),
                 ]
             )
 
