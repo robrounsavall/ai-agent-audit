@@ -37,7 +37,7 @@ today?**
 - **Transcripts stay local.** Raw chat content only ever lands in the local
   `raw/` directory. The `evidence/` layer carries counts, sizes, hashes, and
   redacted samples — the contract is [SCHEMA.md](SCHEMA.md).
-- Stdlib-first Python: 9 of 10 collectors run on stock Python 3.10+ with no
+- Pure stdlib Python: every collector runs on stock Python 3.10+ with no
   pip install. Small enough to audit before you run it.
 
 ## What it collects
@@ -53,7 +53,7 @@ today?**
 | `chat-history` | all transcript sources | volume, retention, secret-hit indicators (content stays in local `raw/`) |
 | `git-posture` | repos under `~/repos`, `~/code`, `~/src`, `~/projects`, `~/source` | `.env` in history, hooks, ignore posture, large blobs |
 | `secrets-scan` | chat corpus + repo roots | gitleaks findings with redacted samples |
-| `pii-scan` (optional) | chat corpus | Presidio PII entities; needs venv + ~600MB model |
+| `pii-scan` | chat corpus | regulated-data indicators: cards (Luhn), SSNs, IBANs, emails, phones, public IPs |
 | `tools/mcp-visibility` | MCP configs across all tools | server inventory, definition drift, auth posture (tokens always masked) |
 
 ## Prerequisites
@@ -63,9 +63,9 @@ Required:
 - Windows 10/11, PowerShell 5.1+
 - Python 3.10+ on PATH
 
-Every collector except `pii-scan` runs on that alone — pure stdlib, no pip
-install. Two collectors depend on extra tooling and report a finding instead
-of results when it is missing:
+Every collector runs on that alone — pure stdlib, no pip install. One
+collector depends on extra tooling and reports a finding instead of results
+when it is missing:
 
 **`secrets-scan`** shells out to [gitleaks](https://github.com/gitleaks/gitleaks).
 Install it and make sure it is on PATH:
@@ -74,17 +74,6 @@ Install it and make sure it is on PATH:
 winget install Gitleaks.Gitleaks
 # or: scoop install gitleaks / choco install gitleaks
 # or download the release binary and add its folder to PATH
-```
-
-**`pii-scan`** needs Microsoft Presidio plus a spaCy model (~600MB). It is the
-only collector that needs a venv, and `aiscan.ps1 all` skips it by design:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m spacy download en_core_web_lg
-.\aiscan.ps1 pii-scan   # run inside the venv
 ```
 
 macOS/Linux are not supported yet. The evidence schema and collector logic are
