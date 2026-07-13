@@ -1,7 +1,13 @@
-# PII-scan collector (optional)
+# PII-scan collector
 
-Presidio-based PII scan of a chat corpus. Skipped by `aiscan all` (needs venv).
-Run it directly with `.\aiscan.ps1 pii-scan` inside the venv.
+Stdlib scan of a chat corpus for regulated-data indicators: credit cards
+(IIN prefix + Luhn), SSNs (issuance rules), IBANs (mod-97), emails, phone
+numbers (separators required), and public IP addresses (private/loopback are
+counted in the summary but are not findings). No models, no pip install.
+
+v2 dropped Microsoft Presidio: its NER entities tagged code identifiers as
+people and places, and everything that survived triage was validatable with
+patterns and checksums.
 
 With no `--target`, it scans the chat-history export under the raw root (if a
 chat-history run produced one) plus every native chat location that exists
@@ -11,13 +17,12 @@ chat-history run produced one) plus every native chat location that exists
 | | |
 |---|---|
 | Evidence | `evidence/pii-scan.json` |
-| In `aiscan all` | no |
-| Deps | `requirements.txt` (Presidio + spaCy model) |
+| In `aiscan all` | yes |
+| Deps | stdlib only |
 
 ## Test
 
 ```powershell
 .\scripts\test-component.ps1 -Name pii-scan
-# full scan requires venv:
-# python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt
+.\aiscan.ps1 pii-scan
 ```

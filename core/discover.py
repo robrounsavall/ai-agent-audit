@@ -15,7 +15,6 @@ Three modes (mutually compatible; default is console):
                          No raw paths in the written file.
 
 Capability preflight (shown at top of console report):
-  Presidio importable?  PII scan available?
   gitleaks/trufflehog on PATH?  Secrets scan available?
 """
 
@@ -38,16 +37,6 @@ __version__ = "1.0.0"
 # Capability preflight
 # --------------------------------------------------------------------------- #
 
-def _check_presidio() -> tuple[bool, str]:
-    """Return (available, label)."""
-    try:
-        import importlib
-        importlib.import_module("presidio_analyzer")
-        return True, "available"
-    except ImportError:
-        return False, "NOT available (pip install -r requirements.txt in a venv to enable)"
-
-
 def _check_secrets_scanner() -> tuple[bool, str]:
     """Return (available, label). Checks gitleaks then trufflehog."""
     for tool in ("gitleaks", "trufflehog"):
@@ -57,11 +46,13 @@ def _check_secrets_scanner() -> tuple[bool, str]:
 
 
 def preflight_lines() -> list[str]:
-    """Return two preflight status lines (no trailing newline)."""
-    _pii_ok, pii_label = _check_presidio()
+    """Return preflight status lines (no trailing newline).
+
+    pii-scan went pure stdlib in v2 (no Presidio), so the only external
+    capability left to check is the secrets scanner binary.
+    """
     _sec_ok, sec_label = _check_secrets_scanner()
     return [
-        f"PII scan (Presidio): {pii_label}",
         f"Secrets scan: {sec_label}",
     ]
 
@@ -181,10 +172,8 @@ def _write_discovery(p: paths.ToolPaths, evidence_root: str) -> Path:
     envelope["summary"]["tools_detected"] = detected_count
 
     # Preflight capability flags (no paths involved).
-    pii_ok, _ = _check_presidio()
     sec_ok, sec_label = _check_secrets_scanner()
     envelope["summary"]["capabilities"] = {
-        "presidio_available": pii_ok,
         "secrets_scanner": sec_label if sec_ok else None,
     }
 

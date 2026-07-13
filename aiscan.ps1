@@ -8,15 +8,15 @@
     the console. Read-only against tool data, offline, no network calls. Use this
     to see what the collectors find on your own machine.
 
-    Only pii-scan needs the venv + presidio deps. Every other collector runs on
-    stock Python with no install. secrets-scan needs gitleaks.exe on PATH.
+    Every collector runs on stock Python with no install. secrets-scan needs
+    gitleaks.exe on PATH.
 
 .PARAMETER Collector
     One of: claude cowork cursor codex copilot chat-history git-posture
     secrets-scan pii-scan grok discover all. Defaults to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
-    'all' runs the 9 stdlib collectors and prints a combined summary (skips pii-scan).
+    'all' runs all 10 collectors and prints a combined summary.
 
 .PARAMETER Json
     Dump raw collector JSON instead of pretty-printed PowerShell formatting.
@@ -142,14 +142,10 @@ $ScriptFor = @{
     "grok"         = "grok\grok.py"
 }
 
-# Stdlib collectors run by 'all' (pii-scan excluded: needs the venv).
+# Collectors run by 'all', in order. pii-scan runs last so it can pick up the
+# chat-history export under raw/ from the same run.
 $StdlibOrder = @("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
-    "git-posture", "secrets-scan", "grok")
-
-function Test-Presidio {
-    & $Python -c "import presidio_analyzer" 2>$null
-    return ($LASTEXITCODE -eq 0)
-}
+    "git-posture", "secrets-scan", "grok", "pii-scan")
 
 # Resolve real tool-history paths via the shared discover.py so coverage
 # includes override locations. The --json output is SENSITIVE (raw filesystem
@@ -419,17 +415,7 @@ if ($Collector -eq "discover") {
 # Feeds the shared path overrides into every collector.
 Resolve-Discovery
 
-# --- pii-scan preflight ---
-if ($Collector -eq "pii-scan") {
-    if (-not (Test-Presidio)) {
-        Write-Host "pii-scan needs Presidio (venv + deps). It is the only collector that does." -ForegroundColor Yellow
-        Write-Host "Set up:  python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt" -ForegroundColor Yellow
-        Write-Host "Then:    python -m spacy download en_core_web_lg   (and re-run inside the venv)" -ForegroundColor Yellow
-        exit 1
-    }
-}
-
-# --- all: run stdlib collectors, combined summary ---
+# --- all: run collectors, combined summary ---
 if ($Collector -eq "all") {
     $root = New-PeekRoot
     $rows = @()
@@ -456,7 +442,6 @@ if ($Collector -eq "all") {
         }
         $rows += [PSCustomObject]@{ Collector = $name; Detected = $detected; Findings = $findings }
     }
-    $rows += [PSCustomObject]@{ Collector = "pii-scan"; Detected = "skipped (needs venv + Presidio; run .\aiscan.ps1 pii-scan)"; Findings = "-" }
     Write-Host ""
     $rows | Format-Table -AutoSize
     if ($Briefing) { Invoke-AiscanBriefing -Root $root }

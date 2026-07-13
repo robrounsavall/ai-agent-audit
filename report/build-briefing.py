@@ -101,7 +101,7 @@ COLLECTOR_PURPOSES = {
     "grok": ("Grok posture", "Grok config and session posture"),
     "secrets-scan": ("Secrets scan", "gitleaks scan over chat exports and repo roots"),
     "discovery": ("Discovery", "Local tool path and capability discovery"),
-    "pii-scan": ("PII scan", "Presidio PII scan"),
+    "pii-scan": ("PII scan", "Regulated-data scan: cards, SSNs, IBANs, emails, phones, public IPs"),
 }
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}

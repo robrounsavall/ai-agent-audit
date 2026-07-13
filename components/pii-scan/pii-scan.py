@@ -1,16 +1,30 @@
 """
-PII scanner collector (Microsoft Presidio).
+PII scanner collector (pure stdlib: patterns + checksum validation).
 
-Scans one or more target directory trees for personally identifiable information
-using presidio-analyzer (regex + spaCy NER + context words) plus the secret
-patterns from common. Designed for the personal chat-history use case but works
-on any text corpus.
+Scans one or more target directory trees for regulated-data indicators using
+regex patterns backed by real validation (Luhn for cards, mod-97 for IBANs,
+SSN issuance rules), plus the secret patterns from common. No models, no pip
+install, runs in `aiscan all`.
+
+v2 dropped Microsoft Presidio. Its NER entities (PERSON, LOCATION) tagged code
+identifiers and paths as people and places (~89% of hit volume, near-zero true
+PII on a dev corpus), and its pattern-only entities (US_DRIVER_LICENSE,
+MEDICAL_LICENSE) matched version strings and git hashes. What survived triage
+was exactly the validatable, structured set below — all detectable in stdlib.
+
+Entities:
+    CREDIT_CARD     IIN prefix + Luhn checksum          critical
+    US_SSN          ddd-dd-dddd + issuance rules        critical
+    IBAN_CODE       pattern + mod-97 checksum           critical
+    EMAIL_ADDRESS   pattern                             medium
+    PHONE_NUMBER    NANP with separators or +intl       medium
+    IP_ADDRESS      public/global only (private and     medium
+                    loopback are counted in the summary
+                    but are not findings)
 
 Usage:
     python pii-scan.py --evidence-root ./out
-    python pii-scan.py --evidence-root ./out --target "C:\\Users\\me\\cursor-projects\\chat_history"
-    python pii-scan.py --evidence-root ./out --target ./corpus --min-score 0.6 --entities EMAIL_ADDRESS,PHONE_NUMBER
-    python pii-scan.py --evidence-root ./out --target ./dir1 --target ./dir2
+    python pii-scan.py --evidence-root ./out --target ./corpus --entities EMAIL_ADDRESS,CREDIT_CARD
 
 With no --target, scans the chat-history export (<raw-root>/chat-history, if a
 chat-history run left one) plus the native chat-history locations resolved via
@@ -18,29 +32,26 @@ paths.py (Claude projects, Codex sessions, Cursor projects, Grok sessions).
 
 Outputs:
     <evidence-root>/evidence/pii-scan.json  (envelope, severity findings only)
-    <evidence-root>/raw/pii-scan/findings.csv  (one row per hit, redacted)
+    <evidence-root>/raw/pii-scan/findings.csv  (one row per stored hit)
     <evidence-root>/raw/pii-scan/summary.md  (human-readable rollup)
-
-Requires:
-    pip install presidio-analyzer presidio-anonymizer spacy
-    python -m spacy download en_core_web_lg   (or en_core_web_sm for faster/smaller)
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import ipaddress
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import paths
 from common import (
     add_base_args,
     compute_scope_hash,
     finish_collector,
-    looks_like_secret,
     make_envelope,
     make_finding,
     redact_sample,
@@ -50,7 +61,10 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.2.0"
+# Major stays 1: the envelope version doubles as the evidence schema major
+# (build-briefing.py gates on it) and the envelope shape is unchanged. The
+# Presidio->stdlib engine swap is internal to the collector.
+__version__ = "1.3.0"
 
 COLLECTOR = "pii-scan"
 
@@ -59,47 +73,124 @@ TEXT_EXTENSIONS = {
     ".csv", ".tsv", ".log", ".yaml", ".yml", ".html", ".htm",
 }
 
-# DATE_TIME, URL, PERSON, and LOCATION are deliberately NOT defaults. On
-# machine-generated chat transcripts they are almost all noise: timestamps and
-# links fire on nearly every line, and spaCy NER tags code identifiers, paths,
-# and capitalized tokens as people/places (~89% of hit volume on a real dev
-# corpus, near-zero true PII). Re-enable via --entities if you want them.
-DEFAULT_ENTITIES = [
-    "EMAIL_ADDRESS",
-    "PHONE_NUMBER",
-    "CREDIT_CARD",
-    "US_SSN",
-    "US_PASSPORT",
-    "US_DRIVER_LICENSE",
-    "US_BANK_NUMBER",
-    "US_ITIN",
-    "IBAN_CODE",
-    "IP_ADDRESS",
-    "MEDICAL_LICENSE",
-    "CRYPTO",
-]
-
 SEVERITY_BY_ENTITY = {
     "CREDIT_CARD": "critical",
     "US_SSN": "critical",
-    "US_PASSPORT": "critical",
-    "US_BANK_NUMBER": "critical",
-    "US_ITIN": "critical",
     "IBAN_CODE": "critical",
-    "CRYPTO": "critical",
-    "MEDICAL_LICENSE": "high",
-    "US_DRIVER_LICENSE": "high",
     "EMAIL_ADDRESS": "medium",
     "PHONE_NUMBER": "medium",
     "IP_ADDRESS": "medium",
-    "PERSON": "low",
-    "LOCATION": "low",
-    "DATE_TIME": "low",
-    "URL": "low",
 }
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
-CHUNK_CHARS = 20_000
+
+
+# --------------------------------------------------------------------------- #
+# Validators
+# --------------------------------------------------------------------------- #
+def luhn_ok(digits: str) -> bool:
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
+# Major-network IIN prefixes. A Luhn pass alone is 1-in-10 on random digit
+# runs; requiring a known prefix keeps sequential fixture numbers out.
+_CC_PREFIX_RE = re.compile(
+    r"^(?:4\d*|5[1-5]\d*|2(?:22[1-9]|2[3-9]\d|[3-6]\d{2}|7[01]\d|720)\d*"
+    r"|3[47]\d*|6011\d*|64[4-9]\d*|65\d*|35\d*)$"
+)
+
+
+def credit_card_ok(raw: str) -> bool:
+    digits = re.sub(r"[ -]", "", raw)
+    if not 13 <= len(digits) <= 19:
+        return False
+    if len(set(digits)) == 1:
+        return False
+    return bool(_CC_PREFIX_RE.match(digits)) and luhn_ok(digits)
+
+
+def ssn_ok(raw: str) -> bool:
+    area, group, serial = raw.split("-")
+    if area in ("000", "666") or area >= "900":
+        return False
+    return group != "00" and serial != "0000"
+
+
+def iban_ok(raw: str) -> bool:
+    rearranged = raw[4:] + raw[:4]
+    try:
+        numeric = int("".join(str(int(c, 36)) for c in rearranged))
+    except ValueError:
+        return False
+    return numeric % 97 == 1
+
+
+def public_ip_ok(raw: str) -> bool:
+    try:
+        return ipaddress.ip_address(raw).is_global
+    except ValueError:
+        return False
+
+
+def private_ip(raw: str) -> bool:
+    try:
+        return not ipaddress.ip_address(raw).is_global
+    except ValueError:
+        return False
+
+
+# --------------------------------------------------------------------------- #
+# Detectors: entity -> (regex, validator or None, score)
+# Score 1.0 = checksum/rule validated, 0.9 = pattern-only.
+# --------------------------------------------------------------------------- #
+DETECTORS: dict[str, tuple[re.Pattern, Callable[[str], bool] | None, float]] = {
+    "CREDIT_CARD": (
+        re.compile(r"(?<![\d.])(?:\d[ -]?){12,18}\d(?![\d.])"),
+        credit_card_ok,
+        1.0,
+    ),
+    "US_SSN": (
+        re.compile(r"(?<![\d-])(\d{3}-\d{2}-\d{4})(?![\d-])"),
+        ssn_ok,
+        1.0,
+    ),
+    "IBAN_CODE": (
+        re.compile(r"\b([A-Z]{2}\d{2}[A-Z0-9]{10,30})\b"),
+        iban_ok,
+        1.0,
+    ),
+    "EMAIL_ADDRESS": (
+        re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b"),
+        None,
+        0.9,
+    ),
+    # Separators or +intl prefix required: bare 10-digit runs are timestamps
+    # and IDs far more often than phone numbers in a dev corpus.
+    "PHONE_NUMBER": (
+        re.compile(
+            r"(?:\+1[-. ]?)?\(\d{3}\)\s?\d{3}[-.]\d{4}"
+            r"|(?<![\d-])\d{3}[-.]\d{3}[-.]\d{4}(?![\d-])"
+            r"|\+\d{1,3}[-. ]\d{2,4}[-. ]\d{3,4}[-. ]\d{3,4}"
+        ),
+        None,
+        0.9,
+    ),
+    "IP_ADDRESS": (
+        re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])"),
+        public_ip_ok,
+        0.9,
+    ),
+}
+
+DEFAULT_ENTITIES = list(DETECTORS)
 
 
 def iter_text_files(root: Path) -> Iterable[Path]:
@@ -123,97 +214,49 @@ def read_text(path: Path) -> str | None:
         return None
 
 
-def chunk_text(text: str, size: int = CHUNK_CHARS) -> Iterable[tuple[int, str]]:
-    for offset in range(0, len(text), size):
-        yield offset, text[offset : offset + size]
-
-
 def severity_for(entity: str) -> str:
     return SEVERITY_BY_ENTITY.get(entity, "medium")
 
 
-def build_analyzer(entities: list[str]):
-    try:
-        from presidio_analyzer import AnalyzerEngine
-        from presidio_analyzer.nlp_engine import NlpEngineProvider
-    except ImportError as exc:
-        raise RuntimeError(
-            "presidio-analyzer is not installed. Run: pip install -r requirements.txt "
-            "and python -m spacy download en_core_web_lg"
-        ) from exc
-
-    model = _resolve_spacy_model()
-    provider = NlpEngineProvider(
-        nlp_configuration={
-            "nlp_engine_name": "spacy",
-            "models": [{"lang_code": "en", "model_name": model}],
-        }
-    )
-    nlp_engine = provider.create_engine()
-    return AnalyzerEngine(nlp_engine=nlp_engine, supported_languages=["en"])
-
-
-def _resolve_spacy_model() -> str:
-    import importlib.util
-
-    for candidate in ("en_core_web_lg", "en_core_web_md", "en_core_web_sm"):
-        if importlib.util.find_spec(candidate) is not None:
-            return candidate
-    raise RuntimeError(
-        "No spaCy English model installed. Run: python -m spacy download en_core_web_lg"
-    )
-
-
-def scan_file(analyzer, path: Path, entities: list[str], min_score: float) -> list[dict]:
+def scan_file(path: Path, entities: list[str]) -> tuple[list[dict], int]:
+    """Return (hits, private_ip_count) for one file."""
     text = read_text(path)
     if not text:
-        return []
+        return [], 0
 
     hits: list[dict] = []
-    for offset, chunk in chunk_text(text):
-        try:
-            results = analyzer.analyze(text=chunk, entities=entities, language="en")
-        except Exception as exc:
-            hits.append(
-                {
-                    "file": str(path),
-                    "entity": "ANALYZER_ERROR",
-                    "score": 0.0,
-                    "start": 0,
-                    "end": 0,
-                    "sample": str(exc)[:120],
-                }
-            )
-            continue
+    private_ips = 0
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for entity in entities:
+            pattern, validator, score = DETECTORS[entity]
+            for match in pattern.finditer(line):
+                value = match.group(0)
+                if validator is not None and not validator(value):
+                    if entity == "IP_ADDRESS" and private_ip(value):
+                        private_ips += 1
+                    continue
+                hits.append(
+                    {
+                        "file": str(path),
+                        "entity": entity,
+                        "score": score,
+                        "line": line_no,
+                        "sample": value,
+                    }
+                )
 
-        for result in results:
-            if result.score < min_score:
-                continue
-            sample = chunk[result.start : result.end]
-            hits.append(
-                {
-                    "file": str(path),
-                    "entity": result.entity_type,
-                    "score": round(float(result.score), 3),
-                    "start": offset + result.start,
-                    "end": offset + result.end,
-                    "sample": sample,
-                }
-            )
+    for secret_type in secret_types_in(text):
+        hits.append(
+            {
+                "file": str(path),
+                "entity": f"SECRET_{secret_type.upper()}",
+                "score": 1.0,
+                "line": 0,
+                "sample": secret_type,
+            }
+        )
 
-        for secret_type in secret_types_in(chunk):
-            hits.append(
-                {
-                    "file": str(path),
-                    "entity": f"SECRET_{secret_type.upper()}",
-                    "score": 1.0,
-                    "start": offset,
-                    "end": offset,
-                    "sample": secret_type,
-                }
-            )
-
-    return hits
+    return hits, private_ips
 
 
 def write_raw_outputs(
@@ -232,7 +275,7 @@ def write_raw_outputs(
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
-            ["file", "entity", "score", "start", "end",
+            ["file", "entity", "score", "line",
              "sample" if show_raw else "sample_redacted"]
         )
         for hit in hits:
@@ -241,8 +284,7 @@ def write_raw_outputs(
                     hit["file"],
                     hit["entity"],
                     hit["score"],
-                    hit["start"],
-                    hit["end"],
+                    hit["line"],
                     hit["sample"] if show_raw else redact_sample(hit["sample"], hit["entity"]),
                 ]
             )
@@ -276,30 +318,9 @@ def write_raw_outputs(
 def collect(
     targets: list[Path],
     entities: list[str],
-    min_score: float,
     raw_dir: Path,
     max_samples_per_file: int = 25,
 ) -> tuple[dict, list[dict]]:
-    # Check Presidio availability first — emit tool_unavailable and exit cleanly if missing.
-    try:
-        from presidio_analyzer import AnalyzerEngine  # noqa: F401
-    except ImportError:
-        scope_hash = compute_scope_hash(str(t) for t in targets)
-        envelope = make_envelope(COLLECTOR, __version__, scope_hash, platform_detected=bool(targets))
-        envelope["findings"] = [
-            make_finding(
-                "pii-scan.tool_unavailable",
-                "medium",
-                "PII Exposure",
-                "presidio-analyzer is not installed; PII scan skipped. "
-                "Run: pip install presidio-analyzer presidio-anonymizer spacy && "
-                "python -m spacy download en_core_web_lg",
-                tags=["env_read"],
-            )
-        ]
-        envelope["summary"] = {"scanner": "none", "hits": 0, "targets": len(targets)}
-        return envelope, []
-
     existing_targets = [t for t in targets if t.exists()]
     missing_targets = [t for t in targets if not t.exists()]
 
@@ -328,23 +349,17 @@ def collect(
         }
         return envelope, []
 
-    print(
-        f"pii-scan: loading NLP model ({_resolve_spacy_model()})...",
-        file=sys.stderr, flush=True,
-    )
-    analyzer = build_analyzer(entities)
-
     all_hits: list[dict] = []
     files_scanned = 0
     total_hits = 0
     samples_truncated = 0
+    private_ip_total = 0
     entity_counts: Counter[str] = Counter()
     file_counts: Counter[str] = Counter()
     per_entity_files: dict[str, set[str]] = defaultdict(set)
 
     # Progress goes to stderr: aiscan.ps1 suppresses collector stdout but
-    # passes stderr through, and a Presidio pass over a real chat corpus
-    # runs for minutes with nothing else to show for it.
+    # passes stderr through.
     for target in existing_targets:
         target_files = list(iter_text_files(target))
         print(
@@ -354,12 +369,13 @@ def collect(
         )
         for file_path in target_files:
             files_scanned += 1
-            if files_scanned % 25 == 0:
+            if files_scanned % 200 == 0:
                 print(
                     f"pii-scan: {files_scanned} files scanned, {total_hits} hits so far",
                     file=sys.stderr, flush=True,
                 )
-            hits = scan_file(analyzer, file_path, entities, min_score)
+            hits, private_ips = scan_file(file_path, entities)
+            private_ip_total += private_ips
             if not hits:
                 continue
             total_hits += len(hits)
@@ -377,7 +393,8 @@ def collect(
                     samples_truncated += 1
     print(
         f"pii-scan: done. {files_scanned} files scanned, {total_hits} hits"
-        f" ({samples_truncated} sample rows over the per-file cap not stored).",
+        f" ({samples_truncated} sample rows over the per-file cap not stored;"
+        f" {private_ip_total} private/loopback IPs counted, not findings).",
         file=sys.stderr, flush=True,
     )
 
@@ -409,7 +426,7 @@ def collect(
         "sample_rows_stored": len(all_hits),
         "sample_rows_truncated": samples_truncated,
         "max_samples_per_file": max_samples_per_file,
-        "min_score": min_score,
+        "private_ips_skipped": private_ip_total,
         "entities_scanned": entities,
         **{f"entity_{k}": v for k, v in entity_counts.items()},
     }
@@ -433,7 +450,7 @@ def default_targets(raw_root: Path, tp: paths.ToolPaths) -> list[Path]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Presidio PII scan collector")
+    parser = argparse.ArgumentParser(description="Stdlib PII scan collector")
     add_base_args(parser)
     paths.add_path_args(parser)
     parser.add_argument(
@@ -447,13 +464,7 @@ def main() -> None:
     parser.add_argument(
         "--entities",
         default=",".join(DEFAULT_ENTITIES),
-        help="Comma-separated Presidio entity types",
-    )
-    parser.add_argument(
-        "--min-score",
-        type=float,
-        default=0.5,
-        help="Minimum analyzer confidence (0.0-1.0)",
+        help=f"Comma-separated entity types (supported: {', '.join(DETECTORS)})",
     )
     parser.add_argument(
         "--max-samples-per-file",
@@ -476,16 +487,15 @@ def main() -> None:
                 "no default targets found (no chat-history export under the raw "
                 "root and no native chat locations detected); pass --target DIR"
             )
-    entities = [e.strip() for e in args.entities.split(",") if e.strip()]
+    entities = [e.strip().upper() for e in args.entities.split(",") if e.strip()]
+    unknown = [e for e in entities if e not in DETECTORS]
+    if unknown:
+        parser.error(f"unknown entities: {unknown}; supported: {list(DETECTORS)}")
 
-    try:
-        envelope, hits = collect(
-            targets, entities, args.min_score, raw_dir,
-            max_samples_per_file=max(1, args.max_samples_per_file),
-        )
-    except RuntimeError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(2)
+    envelope, hits = collect(
+        targets, entities, raw_dir,
+        max_samples_per_file=max(1, args.max_samples_per_file),
+    )
 
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)
 
