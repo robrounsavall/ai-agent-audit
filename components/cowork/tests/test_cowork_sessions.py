@@ -42,6 +42,11 @@ def make_fixture(root: Path) -> None:
         encoding="utf-8",
     )
 
+    (root / "design").write_text("{}", encoding="utf-8")
+    idb = root / "IndexedDB" / "https_claude.ai_0.indexeddb.leveldb"
+    idb.mkdir(parents=True)
+    (idb / "000001.log").write_bytes(b"x")
+
 
 class TestCoworkCollect(unittest.TestCase):
     def setUp(self):
@@ -64,6 +69,9 @@ class TestCoworkCollect(unittest.TestCase):
         self.assertEqual(s["preview_pdfs"], 1)
         self.assertEqual(s["bridge_synced_sessions"], 1)
         self.assertEqual(s["metadata_files"], 1)
+        self.assertTrue(s["webview_state_present"])
+        self.assertTrue(s["last_webview_activity"])
+        self.assertEqual(s["org_backups_files"], 0)
 
     def test_findings_emitted(self):
         env = cowork.collect(self.root)
@@ -72,6 +80,7 @@ class TestCoworkCollect(unittest.TestCase):
         self.assertIn("cowork.workspace.artifacts_on_disk", found)
         self.assertIn("cowork.office_cache.previews", found)
         self.assertIn("cowork.bridge.remote_sync", found)
+        self.assertIn("cowork.webview.local_state", found)
         # Fresh fixture dirs: no retention finding.
         self.assertNotIn("cowork.retention.exceeds_90d", found)
 
@@ -80,6 +89,15 @@ class TestCoworkCollect(unittest.TestCase):
             env = cowork.collect(Path(empty))
             self.assertFalse(env["platform_detected"])
             self.assertEqual(env["summary"]["sessions"], 0)
+
+    def test_webview_only_root_detected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "design").write_text("{}", encoding="utf-8")
+            env = cowork.collect(root)
+            self.assertTrue(env["platform_detected"])
+            self.assertEqual(env["summary"]["sessions"], 0)
+            self.assertIn("cowork.webview.local_state", ids(env["findings"]))
 
     def test_bridge_disabled_not_counted(self):
         (self.root / "bridge-state.json").write_text(

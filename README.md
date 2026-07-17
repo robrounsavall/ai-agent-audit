@@ -45,7 +45,7 @@ today?**
 | Collector | What it reads | What it reports |
 |---|---|---|
 | `claude` | `~/.claude` settings + project settings + desktop app MCP config | allow/deny/ask rules, MCP servers, bypass modes, prompt-history/file-snapshot retention |
-| `cowork` | `%APPDATA%\Claude` (Claude desktop app) | Cowork session workspaces: transcripts, outputs, Office preview cache, cloud bridging |
+| `cowork` | `%APPDATA%\Claude` (Claude desktop app) | Cowork session workspaces: transcripts, outputs, Office preview cache (if present), cloud bridging, claude.ai webview local-state presence |
 | `cursor` | Cursor `state.vscdb` + project data | permission posture, MCP configuration |
 | `codex` | `~/.codex` sessions + `config.toml` | approval events, trusted projects, sandbox/telemetry posture |
 | `copilot` | VS Code / JetBrains Copilot settings | enable state, exclusions, telemetry |

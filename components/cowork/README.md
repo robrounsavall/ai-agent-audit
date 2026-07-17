@@ -1,9 +1,13 @@
 # Cowork collector
 
 Inventories Claude desktop app (Cowork) session workspaces under `%APPDATA%\Claude`:
-transcripts, audit logs, outputs/uploads, cached Office-document PDF previews,
-and local-to-cloud session bridging. Structure and counts only; session content
-is never read.
+transcripts, audit logs, outputs/uploads, cached Office-document PDF previews
+(if present; newer builds unpack Office files into per-session `outputs/` instead),
+and local-to-cloud session bridging. Also reports the claude.ai desktop webview
+state (`design` window file, IndexedDB, Local Storage) — existence and newest
+mtime date only, since those stores persist draft composer state and attachment
+metadata locally. Structure and counts only; session and webview content is
+never read.
 
 | | |
 |---|---|
