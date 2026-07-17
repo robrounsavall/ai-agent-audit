@@ -681,6 +681,27 @@ def render_executive_sub(envelopes: dict[str, dict[str, Any]], counts: Counter[s
     return f"{detected_list} are in active use. Posture is largely clean — review the medium-tier items below."
 
 
+def _tool_last_used(key: str, envelopes: dict[str, dict[str, Any]]) -> str:
+    """Newest activity date for a tool, from chat-history's discovery block
+    (per-data-path `newest` mtimes) or the tool's own summary."""
+    disc = ((envelopes.get("chat-history") or {}).get("summary") or {}).get("discovery") or {}
+
+    def newest(*names: str) -> str:
+        return max(((disc.get(n) or {}).get("newest") or "" for n in names), default="")
+
+    if key == "claude":
+        return newest("claude_projects")
+    if key == "codex":
+        return newest("codex_sessions")
+    if key == "cursor":
+        return newest("cursor_projects", "cursor_db")
+    if key == "grok":
+        return newest("grok_sessions")
+    if key == "cowork":
+        return str(((envelopes.get(key) or {}).get("summary") or {}).get("newest_session") or "")
+    return ""
+
+
 def render_cover_status(
     envelopes: dict[str, dict[str, Any]],
     runs_map: dict[str, dict[str, Any]],
@@ -699,20 +720,22 @@ def render_cover_status(
             rows.append((label, "not detected", "-", "-"))
             continue
         detected_tools += 1
-        rules_n = len(env.get("rules") or [])
         run = runs_map.get(key)
         dur = _duration_sec(run) if run else ""
-        version = str(env.get("version") or "unknown")
         duration = dur if dur and dur != "unknown" else "-"
-        rows.append((label, "detected", duration, version))
+        rows.append((label, "detected", duration, _tool_last_used(key, envelopes) or "unknown"))
 
     # Claude Design is not a collector; its usage signal rides in the cowork
     # summary (design window file presence + last-open date).
     cowork_summary = (envelopes.get("cowork") or {}).get("summary") or {}
     if cowork_summary.get("design_used"):
         detected_tools += 1
-        last_opened = cowork_summary.get("last_design_activity") or "unknown"
-        rows.append(("Claude Design", "detected", "-", f"last opened {last_opened}"))
+        rows.append((
+            "Claude Design",
+            "detected",
+            "-",
+            cowork_summary.get("last_design_activity") or "unknown",
+        ))
 
     crit = counts.get("critical", 0)
     high = counts.get("high", 0)
@@ -741,7 +764,7 @@ def render_cover_status(
           <span>low {low}</span>
         </div>
         <table class="evidence-status-table">
-          <thead><tr><th>Tool</th><th>Status</th><th>Duration</th><th>Collector</th></tr></thead>
+          <thead><tr><th>Tool</th><th>Status</th><th>Duration</th><th>Last used</th></tr></thead>
           <tbody>{''.join(row_html)}</tbody>
         </table>
       </div>"""
@@ -1086,15 +1109,16 @@ def render_collection_scope(rows: list[dict[str, Any]]) -> str:
         row_html.append(
             f"<tr><td><strong>{_esc(row.get('tool', ''))}</strong></td>"
             f"<td>{_esc(status_label)}</td>"
+            f"<td>{_esc(str(row.get('version') or 'unknown'))}</td>"
             f"<td>{_esc(evidence)}</td></tr>"
         )
     return f"""    <div class="collection-scope">
       <div class="collection-scope-head">
         <h3>Collection scope</h3>
-        <p>{len(visible)} collectors produced local evidence. Collector versions and completion times are in Methodology.</p>
+        <p>{len(visible)} collectors produced local evidence. Completion times are in Methodology.</p>
       </div>
       <table>
-        <thead><tr><th>Collector</th><th>Status</th><th>Evidence volume</th></tr></thead>
+        <thead><tr><th>Collector</th><th>Status</th><th>Version</th><th>Evidence volume</th></tr></thead>
         <tbody>{''.join(row_html)}</tbody>
       </table>
     </div>"""
