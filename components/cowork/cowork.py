@@ -45,7 +45,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "cowork"
 
@@ -189,7 +189,17 @@ def scan_webview_state(root: Path) -> dict:
             )
         if stamp > newest:
             newest = stamp
-    return {"webview_state_present": present, "last_webview_activity": newest}
+    # The `design` window-geometry file exists only once the Claude Design
+    # window has been opened; its mtime is the last open. This is the one
+    # Design-specific signal on disk (Design documents themselves are
+    # cloud-side).
+    design = root / "design"
+    return {
+        "webview_state_present": present,
+        "last_webview_activity": newest,
+        "design_used": design.is_file(),
+        "last_design_activity": _mtime_date(design) if design.is_file() else "",
+    }
 
 
 def scan_metadata(root: Path) -> int:
@@ -201,6 +211,21 @@ def scan_metadata(root: Path) -> int:
 
 def build_findings(session_info: dict, office: dict, bridge: dict, webview: dict) -> list[dict]:
     findings: list[dict] = []
+
+    if webview["design_used"]:
+        findings.append(
+            make_finding(
+                "cowork.design.in_use",
+                "low",
+                "Cross-Agent Visibility",
+                "Claude Design is in use on this machine",
+                evidence_count=1,
+                sample_redacted=(
+                    f"last_opened={webview['last_design_activity'] or 'unknown'}"
+                ),
+                tags=["chat_history"],
+            )
+        )
 
     if webview["webview_state_present"]:
         findings.append(
