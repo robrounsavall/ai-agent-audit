@@ -706,6 +706,14 @@ def render_cover_status(
         duration = dur if dur and dur != "unknown" else "-"
         rows.append((label, "detected", duration, version))
 
+    # Claude Design is not a collector; its usage signal rides in the cowork
+    # summary (design window file presence + last-open date).
+    cowork_summary = (envelopes.get("cowork") or {}).get("summary") or {}
+    if cowork_summary.get("design_used"):
+        detected_tools += 1
+        last_opened = cowork_summary.get("last_design_activity") or "unknown"
+        rows.append(("Claude Design", "detected", "-", f"last opened {last_opened}"))
+
     crit = counts.get("critical", 0)
     high = counts.get("high", 0)
     med = counts.get("medium", 0)
