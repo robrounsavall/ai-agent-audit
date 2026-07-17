@@ -13,7 +13,14 @@ a full workspace on disk:
         outputs/ uploads/             files the agent produced or received
     claude-code-sessions/<account>/<org>/local_*.json   session metadata
     cowork-file-preview/office-cache/*.pdf   rendered previews of Office docs
+                                      (older installs; newer builds unpack
+                                      Office files into per-session outputs/)
     bridge-state.json                 local -> remote cloud session mapping
+
+The same %APPDATA%\\Claude root also holds the claude.ai desktop webview state
+(the `design` window file, IndexedDB, Local Storage). Those stores persist
+draft composer state and attachment metadata locally; this collector reports
+their existence and newest mtime date only, never their contents.
 
 This collector inventories that surface and reports persistence and egress
 findings. Read-only; no session content is read, only structure and counts.
@@ -38,7 +45,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 COLLECTOR = "cowork"
 
@@ -137,6 +144,54 @@ def scan_bridge_state(root: Path) -> dict:
     return {"bridge_synced_sessions": synced}
 
 
+# Org-level dirs that sit alongside the local_* session dirs.
+ORG_SIDE_DIRS = ("backups", "cowork_plugins", "spaces")
+
+
+def scan_org_dirs(agent_sessions_root: Path) -> dict:
+    counts = {f"org_{name}_files": 0 for name in ORG_SIDE_DIRS}
+    if not agent_sessions_root.exists():
+        return counts
+    for account in agent_sessions_root.iterdir():
+        if not account.is_dir():
+            continue
+        for org in account.iterdir():
+            if not org.is_dir():
+                continue
+            for name in ORG_SIDE_DIRS:
+                counts[f"org_{name}_files"] += _count_files(org / name)
+    return counts
+
+
+# claude.ai desktop webview state under %APPDATA%\Claude. Existence and mtime
+# only — the leveldb stores hold draft composer state and attachment metadata.
+WEBVIEW_MARKERS = (
+    Path("design"),
+    Path("IndexedDB") / "https_claude.ai_0.indexeddb.leveldb",
+    Path("Local Storage") / "leveldb",
+)
+
+
+def scan_webview_state(root: Path) -> dict:
+    present = False
+    newest = ""
+    for rel in WEBVIEW_MARKERS:
+        p = root / rel
+        if not p.exists():
+            continue
+        present = True
+        if p.is_file():
+            stamp = _mtime_date(p)
+        else:
+            stamp = max(
+                (_mtime_date(f) for f in p.glob("*") if f.is_file()),
+                default=_mtime_date(p),
+            )
+        if stamp > newest:
+            newest = stamp
+    return {"webview_state_present": present, "last_webview_activity": newest}
+
+
 def scan_metadata(root: Path) -> int:
     meta_root = root / "claude-code-sessions"
     if not meta_root.exists():
@@ -144,8 +199,23 @@ def scan_metadata(root: Path) -> int:
     return sum(1 for _ in meta_root.rglob("local_*.json"))
 
 
-def build_findings(session_info: dict, office: dict, bridge: dict) -> list[dict]:
+def build_findings(session_info: dict, office: dict, bridge: dict, webview: dict) -> list[dict]:
     findings: list[dict] = []
+
+    if webview["webview_state_present"]:
+        findings.append(
+            make_finding(
+                "cowork.webview.local_state",
+                "low",
+                "Cross-Agent Visibility",
+                "claude.ai desktop webview persists draft/composer state locally",
+                evidence_count=1,
+                sample_redacted=(
+                    f"last_activity={webview['last_webview_activity'] or 'unknown'}"
+                ),
+                tags=["chat_history"],
+            )
+        )
 
     if session_info["transcript_files"] > 0:
         findings.append(
@@ -233,10 +303,12 @@ def collect(root: Path) -> dict:
         root / "claude-code-sessions",
         root / "cowork-file-preview" / "office-cache",
         root / "bridge-state.json",
+        *(root / rel for rel in WEBVIEW_MARKERS),
     ]
     scope_hash = compute_scope_hash(str(p) for p in scanned)
 
-    platform_detected = agent_sessions_root.exists()
+    webview = scan_webview_state(root)
+    platform_detected = agent_sessions_root.exists() or webview["webview_state_present"]
     envelope = make_envelope(
         COLLECTOR,
         __version__,
@@ -253,13 +325,15 @@ def collect(root: Path) -> dict:
     bridge = scan_bridge_state(root)
     metadata_files = scan_metadata(root)
 
-    findings = build_findings(session_info, office, bridge)
+    findings = build_findings(session_info, office, bridge, webview)
 
     envelope["findings"] = findings
     envelope["summary"] = {
         **session_info,
         **office,
         **bridge,
+        **webview,
+        **scan_org_dirs(agent_sessions_root),
         "metadata_files": metadata_files,
         "findings": len(findings),
     }
