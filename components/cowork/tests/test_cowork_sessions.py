@@ -71,6 +71,8 @@ class TestCoworkCollect(unittest.TestCase):
         self.assertEqual(s["metadata_files"], 1)
         self.assertTrue(s["webview_state_present"])
         self.assertTrue(s["last_webview_activity"])
+        self.assertTrue(s["design_used"])
+        self.assertTrue(s["last_design_activity"])
         self.assertEqual(s["org_backups_files"], 0)
 
     def test_findings_emitted(self):
@@ -81,6 +83,7 @@ class TestCoworkCollect(unittest.TestCase):
         self.assertIn("cowork.office_cache.previews", found)
         self.assertIn("cowork.bridge.remote_sync", found)
         self.assertIn("cowork.webview.local_state", found)
+        self.assertIn("cowork.design.in_use", found)
         # Fresh fixture dirs: no retention finding.
         self.assertNotIn("cowork.retention.exceeds_90d", found)
 
@@ -98,6 +101,7 @@ class TestCoworkCollect(unittest.TestCase):
             self.assertTrue(env["platform_detected"])
             self.assertEqual(env["summary"]["sessions"], 0)
             self.assertIn("cowork.webview.local_state", ids(env["findings"]))
+            self.assertIn("cowork.design.in_use", ids(env["findings"]))
 
     def test_bridge_disabled_not_counted(self):
         (self.root / "bridge-state.json").write_text(
