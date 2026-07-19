@@ -4,7 +4,7 @@ Chat history exporter and evidence collector.
 Usage:
     python chat-history.py --evidence-root ./audit-run [--raw-root ./raw] [--include-tool-details] [--dry-run]
 
-Writes raw markdown under <raw-root>/chat-history/{claude,codex,cursor,cursor-composer}/YYYY-MM-DD.md
+Writes raw markdown under <raw-root>/chat-history/{claude,codex,cursor,cursor-composer,grok,copilot}/YYYY-MM-DD.md
 and emits evidence/chat-history.json with counts, sizes, and secret-hit findings only.
 """
 
@@ -36,7 +36,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 COLLECTOR = "chat-history"
 
@@ -331,6 +331,85 @@ def claude_history_roots(tp: paths.ToolPaths) -> list[Path]:
 def collect_claude_roots(buckets, include_tool_details, roots: list[Path], metrics=None, problems=None):
     for root in roots:
         collect_claude(buckets, include_tool_details, root, metrics=metrics, problems=problems)
+
+
+def _copilot_response_text(response, include_tool_details=False):
+    """Pull readable text out of a Copilot response part list. Defensive:
+    the part schema is version-drifty, so harvest known string fields and
+    fall back to a typed placeholder."""
+    parts = response if isinstance(response, list) else [response]
+    chunks = []
+    for part in parts:
+        if isinstance(part, str):
+            chunks.append(part)
+        elif isinstance(part, dict):
+            text = part.get("value") or part.get("text")
+            if isinstance(text, str) and text.strip():
+                chunks.append(text)
+            elif include_tool_details and part.get("kind"):
+                chunks.append(f"[{part['kind']} omitted]")
+    return "\n".join(chunks)
+
+
+def parse_copilot_requests(reqs, include_tool_details=False):
+    """Pure: Copilot chat requests[] -> [(ts, role, text)]. Unknown fields skipped."""
+    out = []
+    for req in reqs:
+        if not isinstance(req, dict):
+            continue
+        ts_ms = req.get("timestamp")
+        try:
+            ts = datetime.fromtimestamp(float(ts_ms) / 1000.0)
+        except (TypeError, ValueError, OSError, OverflowError):
+            continue
+        msg = (req.get("message") or {}).get("text")
+        if isinstance(msg, str) and msg.strip():
+            out.append((ts, "user", msg))
+        resp_text = _copilot_response_text(req.get("response"), include_tool_details)
+        if resp_text.strip():
+            out.append((ts, "assistant", resp_text))
+    return out
+
+
+def collect_copilot(buckets, include_tool_details, workspace_storage, problems=None):
+    """
+    VS Code Copilot Chat sessions:
+
+        <workspaceStorage>/<md5>/chatSessions/<uuid>.jsonl
+
+    Log-structured JSONL: kind=0 carries initial state (may embed requests),
+    kind=2 with k=["requests"] appends request batches. Only user prompt text
+    and response text are exported; rendered context blobs stay behind.
+    A file that cannot be decoded is recorded in ``problems`` and skipped.
+    """
+    if not workspace_storage.exists():
+        return
+    try:
+        session_files = list(workspace_storage.glob("*/chatSessions/*.jsonl"))
+    except OSError:
+        if problems is not None:
+            problems.append("unreadable")
+        return
+    for jsonl in session_files:
+        workspace = jsonl.parent.parent.name
+        lines = read_text_lines(jsonl, problems)
+        if lines is None:
+            continue
+        for raw in lines:
+            obj = _json_object(raw)
+            if obj is None:
+                continue
+            kind = obj.get("kind")
+            v = obj.get("v")
+            reqs = None
+            if kind == 0 and isinstance(v, dict):
+                reqs = v.get("requests")
+            elif kind == 2 and obj.get("k") == ["requests"] and isinstance(v, list):
+                reqs = v
+            if not reqs:
+                continue
+            for ts, role, text in parse_copilot_requests(reqs, include_tool_details):
+                add_entry(buckets, ts, "Copilot", role, text, str(jsonl), workspace=workspace)
 
 
 def collect_codex(buckets, include_tool_details, root, problems=None):
@@ -820,6 +899,17 @@ def main():
                 b, args.include_tool_details, tp.grok_sessions, problems=parse_problems
             ),
             "grok",
+        ),
+        (
+            "Copilot",
+            defaultdict(list),
+            lambda b: collect_copilot(
+                b,
+                args.include_tool_details,
+                tp.vscode_workspace_storage,
+                problems=parse_problems,
+            ),
+            "copilot",
         ),
     ]
     for tool_name, buckets, collector, folder in sources:

@@ -232,19 +232,19 @@ class TestAiscanLauncher(unittest.TestCase):
 
     def test_exit_0_with_an_envelope_is_success(self):
         out = self.tmp / "scan-ok"
-        proc = self._run("ok-exit0", "copilot", "-OutDir", str(out))
+        proc = self._run("ok-exit0", "vscode", "-OutDir", str(out))
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertTrue((out / "evidence" / "copilot.json").is_file())
+        self.assertTrue((out / "evidence" / "vscode.json").is_file())
 
     def test_not_detected_with_an_envelope_is_success(self):
         out = self.tmp / "scan-missing-tool"
-        proc = self._run("ok-exit2", "copilot", "-OutDir", str(out))
+        proc = self._run("ok-exit2", "vscode", "-OutDir", str(out))
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("platform not detected", proc.stdout)
 
     def test_exit_0_with_no_file_is_a_failure(self):
         out = self.tmp / "scan-empty"
-        proc = self._run("no-file", "copilot", "-OutDir", str(out))
+        proc = self._run("no-file", "vscode", "-OutDir", str(out))
         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
         self.assertIn("produced no evidence file", proc.stdout)
 
@@ -252,7 +252,7 @@ class TestAiscanLauncher(unittest.TestCase):
         for mode in ("bad-json", "null-json", "not-envelope"):
             with self.subTest(mode=mode):
                 out = self.tmp / mode
-                proc = self._run(mode, "copilot", "-OutDir", str(out))
+                proc = self._run(mode, "vscode", "-OutDir", str(out))
                 self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
                 self.assertIn("could not be parsed", proc.stdout)
 
@@ -260,10 +260,10 @@ class TestAiscanLauncher(unittest.TestCase):
         out = self.tmp / "scan-stale"
         evidence = out / "evidence"
         evidence.mkdir(parents=True)
-        (evidence / "copilot.json").write_text(
+        (evidence / "vscode.json").write_text(
             json.dumps(
                 {
-                    "collector": "copilot",
+                    "collector": "vscode",
                     "version": "1.0.0",
                     "platform_detected": False,
                     "findings": [],
@@ -272,15 +272,15 @@ class TestAiscanLauncher(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        proc = self._run("stale-fail", "copilot", "-OutDir", str(out))
+        proc = self._run("stale-fail", "vscode", "-OutDir", str(out))
         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
         self.assertNotIn("STALE_MARKER", proc.stdout)
         self.assertNotIn("platform not detected", proc.stdout)
-        self.assertFalse((evidence / "copilot.json").exists())
+        self.assertFalse((evidence / "vscode.json").exists())
 
     def test_agent_mode_omits_the_scan_folder_path(self):
         out = self.tmp / "scan-agent"
-        proc = self._run("ok-exit0", "copilot", "-OutDir", str(out), "-AgentMode")
+        proc = self._run("ok-exit0", "vscode", "-OutDir", str(out), "-AgentMode")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertNotIn("Evidence kept at", proc.stdout)
         self.assertNotIn(str(out), proc.stdout)
@@ -296,7 +296,7 @@ class TestAiscanLauncher(unittest.TestCase):
         out = self.tmp / "scan-missing-script"
         proc = self._run(
             "ok-exit0",
-            "copilot",
+            "vscode",
             "-OutDir",
             str(out),
             "-AgentMode",
@@ -304,13 +304,13 @@ class TestAiscanLauncher(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
         self.assertIn("Collector script missing:", proc.stdout)
-        self.assertIn("copilot.py", proc.stdout)
+        self.assertIn("vscode.py", proc.stdout)
         self.assertNotIn(str(copy), proc.stdout)
         self.assertNotIn(str(out), proc.stdout)
 
     def test_throwaway_folders_differ_inside_the_same_second(self):
-        first = self._run("ok-exit0", "copilot", "-Keep")
-        second = self._run("ok-exit0", "copilot", "-Keep")
+        first = self._run("ok-exit0", "vscode", "-Keep")
+        second = self._run("ok-exit0", "vscode", "-Keep")
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         kept = self._kept_dirs(first.stdout) + self._kept_dirs(second.stdout)
@@ -337,7 +337,7 @@ class TestAiscanLauncher(unittest.TestCase):
         secret = "AKIA" + "0" * 16
         proc = self._run(
             "ok-exit0",
-            "copilot",
+            "vscode",
             "-OutDir",
             str(out),
             "-LaunchedBy",
@@ -377,7 +377,7 @@ class TestAiscanLauncher(unittest.TestCase):
         out = self.tmp / "origin-env"
         proc = self._run(
             "ok-exit0",
-            "copilot",
+            "vscode",
             "-OutDir",
             str(out),
             extra_env={
@@ -392,7 +392,7 @@ class TestAiscanLauncher(unittest.TestCase):
 
     def test_run_origin_unknown_when_nothing_is_set(self):
         out = self.tmp / "origin-unknown"
-        proc = self._run("ok-exit0", "copilot", "-OutDir", str(out))
+        proc = self._run("ok-exit0", "vscode", "-OutDir", str(out))
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         text = (out / "run-origin.txt").read_text(encoding="utf-8")
         self.assertIn("launched_by=unknown", text)

@@ -654,7 +654,7 @@ class TestNewestFolder(unittest.TestCase):
 
     def test_older_extra_collector_does_not_win_forever(self):
         names = (
-            "claude", "cowork", "cursor", "codex", "copilot", "chat-history",
+            "claude", "cowork", "cursor", "codex", "vscode", "chat-history",
             "git-posture", "secrets-scan", "grok", "grok-bot", "pii-scan",
             "accounts",
         )

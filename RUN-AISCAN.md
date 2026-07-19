@@ -189,7 +189,7 @@ Do not open `run-origin.txt`. Step 6's summary already has the line.
   `briefing.html`. Don't open it with a remote or screenshot tool, and
   don't read the file.
 - The console prints a table with Collector, Detected and Findings for 12
-  collectors: claude, cowork, cursor, codex, copilot, chat-history,
+  collectors: claude, cowork, cursor, codex, vscode, chat-history,
   git-posture, secrets-scan, grok, grok-bot, pii-scan, accounts.
   `accounts` records email, username, organization, and plan on purpose.
   Those identifiers can appear in `evidence\accounts.json`, the briefing,

@@ -101,7 +101,7 @@ teams have no inventory of any of it. aiscan answers the first question:
 | `cowork` | `%APPDATA%\Claude` (Claude desktop app) | Cowork session workspaces: transcripts, outputs, Office preview cache (if present), cloud bridging, claude.ai webview local-state presence |
 | `cursor` | Cursor `state.vscdb`, `mcp.json` files, agent-transcript metadata | permission allow-lists, MCP configuration |
 | `codex` | `~/.codex` sessions + `config.toml` | approval events, trusted projects, sandbox/telemetry posture |
-| `copilot` | VS Code / JetBrains Copilot settings | enable state, exclusions, telemetry, public-code suggestion policy |
+| `vscode` | VS Code user + workspace settings, `.vscode/mcp.json`, extensions, chat-session metadata; JetBrains Copilot config | Copilot enable state/SKU, agent-mode auto-approve, MCP servers, workspace trust, AI extensions, chat-session counts (no prompt text). Replaces `copilot` |
 | `grok` | `~/.grok/config.toml` + session metadata | permission mode (always-approve/yolo), MCP servers |
 | `grok-bot` | `%APPDATA%\Grok Bot` presence, sizes, and mtimes | desktop app data, secrets-store and lockfile presence, newest activity. Local execution is reported unknown, not absent |
 | `accounts` | Plain identity fields in local config for Claude Code, Codex, Cursor, Copilot, Grok CLI, Grok Bot, git, `gh`, and MCP auth method | signed-in yes/no/unknown, email or username, org, plan, auth method, home-relative source, last sign-in when a timestamp is stored. No token or API key values |
@@ -113,12 +113,6 @@ teams have no inventory of any of it. aiscan answers the first question:
 | `telemetry` (not in `all`) | Local OTLP and Splunk export files | Approval counts and usage. Cursor `cost_cents` is labeled as from the Cursor dashboard usage export. Dollars are never estimated from tokens |
 | `tools/mcp-visibility` (separate tool, not in `aiscan.ps1`) | MCP configs for Claude, Cursor, Codex, Grok Build, shared `.mcp.json` and repo-scoped files | server inventory, definition drift, auth posture (tokens always masked) |
 | `tools/github-access` (separate tool, not in `aiscan.ps1`) | GitHub API, with a token you already have | GitHub Apps installed on organizations you own, and SAML-authorized credentials. A token cannot list personal-account installs, OAuth grants, or tokens you created |
-
-**Coming next:** a `vscode` collector that treats VS Code as a place where
-agents run (agent mode and auto-approve settings, MCP servers, workspace
-trust, AI extensions, chat-session counts) and replaces `copilot`. It is in
-draft [PR #9](https://github.com/robrounsavall/ai-agent-audit/pull/9) and is
-not in v0.2.0.
 
 ## Prerequisites
 
@@ -343,7 +337,7 @@ components/
   cowork/             # Claude desktop app Cowork sessions (counts, not contents)
   cursor/
   codex/
-  copilot/
+  vscode/
   grok/               # Grok Build (~/.grok), not the Grok Bot desktop app
   grok-bot/           # Grok Bot desktop presence (AppData names, contents unread)
   accounts/           # signed-in identity per tool (no token values)
