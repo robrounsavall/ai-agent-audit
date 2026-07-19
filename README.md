@@ -124,7 +124,7 @@ components/
   claude/             # collector + tests + fixtures + README
   cursor/
   codex/
-  copilot/
+  vscode/
   grok/
   chat-history/
   git-posture/

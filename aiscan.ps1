@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Local AI coding agent posture scan (one collector or all stdlib collectors).
@@ -12,7 +12,7 @@
     gitleaks.exe on PATH.
 
 .PARAMETER Collector
-    One of: claude cowork cursor codex copilot chat-history git-posture
+    One of: claude cowork cursor codex vscode chat-history git-posture
     secrets-scan pii-scan grok discover all. Defaults to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
@@ -81,7 +81,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false, Position = 0)]
-    [ValidateSet("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
+    [ValidateSet("claude", "cowork", "cursor", "codex", "vscode", "chat-history",
         "git-posture", "secrets-scan", "pii-scan", "grok", "discover", "all")]
     [string]$Collector = "all",
 
@@ -134,7 +134,7 @@ $ScriptFor = @{
     "cowork"       = "cowork\cowork.py"
     "cursor"       = "cursor\cursor.py"
     "codex"        = "codex\codex.py"
-    "copilot"      = "copilot\copilot.py"
+    "vscode"       = "vscode\vscode.py"
     "chat-history" = "chat-history\chat-history.py"
     "git-posture"  = "git-posture\git-posture.py"
     "secrets-scan" = "secrets-scan\secrets-scan.py"
@@ -144,7 +144,7 @@ $ScriptFor = @{
 
 # Collectors run by 'all', in order. pii-scan runs last so it can pick up the
 # chat-history export under raw/ from the same run.
-$StdlibOrder = @("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
+$StdlibOrder = @("claude", "cowork", "cursor", "codex", "vscode", "chat-history",
     "git-posture", "secrets-scan", "grok", "pii-scan")
 
 # Resolve real tool-history paths via the shared discover.py so coverage
@@ -184,6 +184,10 @@ function Get-CollectorExtras {
     switch ($Name) {
         { $_ -in @("claude", "codex") } {
             $extra += $script:PathArgs
+        }
+        "vscode" {
+            $extra += $script:PathArgs
+            if ($RepoRoots) { $extra += @("--repo-roots", $RepoRoots) }
         }
         "cursor" {
             $extra += $script:PathArgs

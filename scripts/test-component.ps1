@@ -1,10 +1,10 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Run unit tests for one component (or core / integration).
 
 .PARAMETER Name
-    Component name: claude, cowork, cursor, codex, copilot, grok, chat-history,
+    Component name: claude, cowork, cursor, codex, vscode, grok, chat-history,
     git-posture, secrets-scan, pii-scan, core, integration, all.
 
 .EXAMPLE
@@ -15,7 +15,7 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet(
-        "claude", "cowork", "cursor", "codex", "copilot", "grok",
+        "claude", "cowork", "cursor", "codex", "vscode", "grok",
         "chat-history", "git-posture", "secrets-scan", "pii-scan",
         "core", "integration", "all"
     )]
@@ -66,7 +66,7 @@ $failed = 0
 
 if ($Name -eq "all") {
     $order = @(
-        "core", "claude", "cowork", "cursor", "codex", "copilot", "grok",
+        "core", "claude", "cowork", "cursor", "codex", "vscode", "grok",
         "chat-history", "git-posture", "secrets-scan", "pii-scan", "integration"
     )
     foreach ($n in $order) {
