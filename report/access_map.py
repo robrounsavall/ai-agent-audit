@@ -23,7 +23,7 @@ AGENTS: tuple[tuple[str, str, str], ...] = (
     ("cowork", "Claude Cowork", "cowork"),
     ("cursor", "Cursor", "cursor"),
     ("codex", "Codex", "codex"),
-    ("copilot", "Copilot/VS Code", "copilot"),
+    ("vscode", "VS Code / Copilot", "vscode"),
     ("grok", "Grok Build", "grok"),
     ("grok-bot", "Grok Bot", "grok-bot"),
     ("cloud-agents", "Cursor cloud agents", "cloud-agents"),
@@ -63,20 +63,14 @@ UNCAPTURED: dict[tuple[str, str], str] = {
     ("codex", "remote"): (
         "Codex evidence is local config and sessions; remote execution is not recorded."
     ),
-    ("copilot", "shell"): (
-        "Copilot settings evidence does not record shell or terminal access."
+    ("vscode", "files"): (
+        "VS Code evidence does not record file writes."
     ),
-    ("copilot", "files"): (
-        "Copilot settings evidence does not record file writes."
+    ("vscode", "secrets"): (
+        "VS Code evidence does not record secret stores or env grants."
     ),
-    ("copilot", "secrets"): (
-        "Copilot settings evidence does not record secret stores or env grants."
-    ),
-    ("copilot", "git"): (
-        "Copilot settings evidence does not record git or GitHub pushes."
-    ),
-    ("copilot", "approval"): (
-        "Copilot settings evidence does not record an approval mode."
+    ("vscode", "git"): (
+        "VS Code evidence does not record git or GitHub pushes."
     ),
     ("grok", "remote"): (
         "Grok Build evidence is local config and sessions; remote execution is not recorded."
@@ -107,6 +101,9 @@ UNCAPTURED: dict[tuple[str, str], str] = {
         "The Cloud Agents API inventory does not record an approval mode."
     ),
 }
+
+# Older scans wrote the VS Code row as copilot.json (copilot collector 1.0.0).
+_LEGACY_ENVELOPES = {"vscode": "copilot"}
 
 _MCP_TRACKED = {"claude", "cursor", "codex", "grok"}
 _SHELL_TYPES = {"bash", "powershell"}
@@ -156,6 +153,8 @@ def build_access_map(envelopes: dict[str, dict]) -> dict[str, Any]:
 
     for agent_id, label, collector in AGENTS:
         env = envelopes.get(collector)
+        if env is None and collector in _LEGACY_ENVELOPES:
+            env = envelopes.get(_LEGACY_ENVELOPES[collector])
         present, absent = _presence(collector, env if isinstance(env, dict) else None)
         rows.append(
             {
@@ -513,6 +512,8 @@ def _shell(view: _View) -> Cell:
         return forced
     if view.agent_id == "grok-bot":
         return _grok_bot_shell(view)
+    if view.agent_id == "vscode":
+        return _vscode_shell(view)
 
     allows = _shell_allows(view)
     unrestricted = [rule for rule in allows if _is_unrestricted_shell(rule)]
@@ -811,8 +812,8 @@ def _network(view: _View) -> Cell:
             ["network grant"],
             mcp_count=count,
         )
-    if view.agent_id == "copilot":
-        return _copilot_network(view)
+    if view.agent_id == "vscode":
+        return _vscode_network(view)
     if view.agent_id == "cloud-agents":
         return _cloud_network(view, count)
     if _unrestricted_execution(view):
@@ -855,31 +856,126 @@ def _sentence(bits: list[str], prefix: str | None) -> str:
     return text[0].upper() + text[1:]
 
 
-def _copilot_network(view: _View) -> Cell:
+def _vscode_mcp_count(view: _View) -> int | None:
+    """Workspace .vscode/mcp.json servers; None when the evidence predates 1.1.0."""
+    if "workspace_mcp_servers" not in view.summary:
+        return None
+    return _as_int(view.summary.get("workspace_mcp_servers"))
+
+
+def _vscode_network(view: _View) -> Cell:
     public = view.summary.get("public_code_suggestions")
     telemetry = view.summary.get("telemetry") if "telemetry" in view.summary else None
+    mcp_count = _vscode_mcp_count(view)
+    non_local = view.has_id("vscode.mcp.non_local_server")
+    if mcp_count and mcp_count > 0:
+        noun = "server" if mcp_count == 1 else "servers"
+        reason = f"{mcp_count} MCP {noun} configured in workspace .vscode/mcp.json"
+        if non_local:
+            reason += ", including a non-local server"
+        return _cell(
+            view,
+            "network",
+            "yes",
+            reason + ".",
+            "high" if non_local else "moderate",
+            ["summary.workspace_mcp_servers"],
+            mcp_count=mcp_count,
+        )
     bits: list[str] = []
     if _flag_on(public):
         bits.append("public code suggestions are enabled")
     if telemetry is not None and str(telemetry).strip().lower() not in {"", "unset", "off", "false", "none", "0"}:
         bits.append(f"telemetry is {telemetry}")
+    if _flag_on(view.summary.get("mcp_enabled")):
+        bits.append("MCP is enabled in VS Code chat settings")
+    mcp_tail = (
+        " MCP servers are not in this evidence."
+        if mcp_count is None
+        else " No workspace MCP servers were recorded."
+    )
     if not bits:
         return _cell(
             view,
             "network",
             "unknown",
-            "Copilot evidence does not record MCP servers or network grants.",
-            "none",
-            mcp_count=None,
+            "VS Code evidence does not record network grants." + mcp_tail,
+            "none" if mcp_count is None else "low",
+            mcp_count=mcp_count,
         )
     return _cell(
         view,
         "network",
         "partial",
-        _sentence(bits, "data can leave the machine") + " MCP servers are not in this evidence.",
+        _sentence(bits, "data can leave the machine") + mcp_tail,
         "low",
         ["copilot egress setting"],
-        mcp_count=None,
+        mcp_count=mcp_count,
+    )
+
+
+def _vscode_shell(view: _View) -> Cell:
+    if _flag_on(view.summary.get("tools_auto_approve")) or view.has_id("vscode.copilot.tools.auto_approve"):
+        return _cell(
+            view,
+            "shell",
+            "yes",
+            "Copilot agent tool auto-approve is on, so terminal commands can run without a prompt.",
+            "high",
+            ["finding vscode.copilot.tools.auto_approve"],
+        )
+    if _flag_on(view.summary.get("agent_enabled")):
+        return _cell(
+            view,
+            "shell",
+            "partial",
+            "Copilot agent mode is enabled; terminal commands still prompt unless auto-approved.",
+            "moderate",
+            ["summary.agent_enabled"],
+        )
+    return _cell(
+        view,
+        "shell",
+        "unknown",
+        "VS Code evidence does not record agent-mode terminal access.",
+        "none",
+    )
+
+
+def _vscode_approval(view: _View) -> Cell:
+    if _flag_on(view.summary.get("tools_auto_approve")) or view.has_id("vscode.copilot.tools.auto_approve"):
+        return _cell(
+            view,
+            "approval",
+            "yes",
+            "Auto-approve: Copilot agent tool calls run without a prompt.",
+            "high",
+            ["finding vscode.copilot.tools.auto_approve"],
+        )
+    if view.has_id("vscode.copilot.permission_level_relaxed"):
+        return _cell(
+            view,
+            "approval",
+            "partial",
+            "Chat sessions ran with a relaxed permission level; a global auto-approve is not set.",
+            "moderate",
+            ["finding vscode.copilot.permission_level_relaxed"],
+        )
+    if view.summary.get("tools_auto_approve") is False:
+        return _cell(
+            view,
+            "approval",
+            "no",
+            "Ask: no Copilot tool auto-approve setting is on.",
+            "moderate",
+            ["summary.tools_auto_approve"],
+        )
+    return _cell(
+        view,
+        "approval",
+        "unknown",
+        "Approval mode is not recorded in this VS Code evidence.",
+        "none",
     )
 
 
@@ -1095,7 +1191,7 @@ def _remote(view: _View) -> Cell:
             "No Cowork cloud bridge is recorded.",
             "none",
         )
-    if view.agent_id == "copilot" and _flag_on(view.summary.get("public_code_suggestions")):
+    if view.agent_id == "vscode" and _flag_on(view.summary.get("public_code_suggestions")):
         return _cell(
             view,
             "remote",
@@ -1180,6 +1276,8 @@ def _approval(view: _View) -> Cell:
         return _claude_approval(view)
     if view.agent_id == "cursor":
         return _cursor_approval(view)
+    if view.agent_id == "vscode":
+        return _vscode_approval(view)
     return _cell(
         view,
         "approval",

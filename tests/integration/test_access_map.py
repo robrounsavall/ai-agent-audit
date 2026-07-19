@@ -175,15 +175,15 @@ class AccessMapSyntheticTests(unittest.TestCase):
         self.assertEqual(cells["git"]["value"], "unknown")
         self.assertEqual(cells["remote"]["value"], "unknown")
 
-    def test_cursor_and_copilot_stay_unknown_without_signals(self) -> None:
-        for agent in ("cursor", "copilot"):
+    def test_cursor_and_vscode_stay_unknown_without_signals(self) -> None:
+        for agent in ("cursor", "vscode"):
             cells = self.grid["cells"][agent]
             for column in ("shell", "files", "secrets", "git", "remote", "approval"):
                 self.assertEqual(cells[column]["value"], "unknown", f"{agent}.{column}")
         self.assertEqual(self.grid["cells"]["cursor"]["network"]["value"], "unknown")
         self.assertEqual(self.grid["cells"]["cursor"]["network"]["mcp_count"], 0)
-        self.assertIsNone(self.grid["cells"]["copilot"]["network"]["mcp_count"])
-        self.assertEqual(self.grid["cells"]["copilot"]["network"]["value"], "unknown")
+        self.assertIsNone(self.grid["cells"]["vscode"]["network"]["mcp_count"])
+        self.assertEqual(self.grid["cells"]["vscode"]["network"]["value"], "unknown")
 
     def test_optional_collectors_in_the_integrated_demo(self) -> None:
         # grok-bot and cloud-agents ship in the synthetic demo after those
@@ -400,7 +400,7 @@ class AccessMapFixtureTests(unittest.TestCase):
         self.assertEqual(cells["shell"]["value"], "unknown")
         self.assertEqual(cells["approval"]["value"], "unknown")
 
-    def test_copilot_egress_is_partial(self) -> None:
+    def test_legacy_copilot_envelope_fills_vscode_row(self) -> None:
         grid = build_access_map(
             {
                 "copilot": {
@@ -416,11 +416,69 @@ class AccessMapFixtureTests(unittest.TestCase):
                 }
             }
         )
-        cells = grid["cells"]["copilot"]
+        self.assertNotIn("copilot", grid["cells"])
+        cells = grid["cells"]["vscode"]
         self.assertEqual(cells["network"]["value"], "partial")
         self.assertEqual(cells["remote"]["value"], "partial")
         self.assertEqual(cells["shell"]["value"], "unknown")
         self.assertEqual(cells["approval"]["value"], "unknown")
+
+    def test_vscode_surface_signals(self) -> None:
+        grid = build_access_map(
+            {
+                "vscode": {
+                    "collector": "vscode",
+                    "version": "1.1.0",
+                    "platform_detected": True,
+                    "summary": {
+                        "copilot_enabled": True,
+                        "agent_enabled": True,
+                        "tools_auto_approve": True,
+                        "mcp_enabled": True,
+                        "workspace_mcp_servers": 2,
+                        "public_code_suggestions": "unset",
+                        "telemetry": "unset",
+                    },
+                    "findings": [
+                        {"id": "vscode.copilot.tools.auto_approve", "severity": "high"},
+                        {"id": "vscode.mcp.non_local_server", "severity": "medium"},
+                    ],
+                    "rules": [],
+                }
+            }
+        )
+        cells = grid["cells"]["vscode"]
+        self.assertEqual(cells["shell"]["value"], "yes")
+        self.assertEqual(cells["approval"]["value"], "yes")
+        self.assertEqual(cells["network"]["value"], "yes")
+        self.assertEqual(cells["network"]["mcp_count"], 2)
+        self.assertIn("non-local", cells["network"]["reason"])
+        for column in ("files", "secrets", "git"):
+            self.assertEqual(cells[column]["value"], "unknown", column)
+
+    def test_vscode_agent_mode_without_auto_approve(self) -> None:
+        grid = build_access_map(
+            {
+                "vscode": {
+                    "collector": "vscode",
+                    "version": "1.1.0",
+                    "platform_detected": True,
+                    "summary": {
+                        "agent_enabled": True,
+                        "tools_auto_approve": False,
+                        "mcp_enabled": "unset",
+                        "workspace_mcp_servers": 0,
+                    },
+                    "findings": [],
+                    "rules": [],
+                }
+            }
+        )
+        cells = grid["cells"]["vscode"]
+        self.assertEqual(cells["shell"]["value"], "partial")
+        self.assertEqual(cells["approval"]["value"], "no")
+        self.assertEqual(cells["network"]["value"], "unknown")
+        self.assertEqual(cells["network"]["mcp_count"], 0)
 
     def test_cursor_other_rule_bash_text_counts_as_shell(self) -> None:
         grid = build_access_map(
