@@ -1,0 +1,18 @@
+{
+  "collector": "discovery",
+  "version": "1.0.0",
+  "ran_at": "2026-07-01T15:00:00+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "disc-prev",
+  "summary": {
+    "tools_detected": 4,
+    "claude_version": "2.x (demo)",
+    "cursor_version": "0.48 (demo)",
+    "codex_version": "26.x (demo)",
+    "copilot_version": "not detected"
+  },
+  "findings": [],
+  "rules": [],
+  "raw_pointers": []
+}
