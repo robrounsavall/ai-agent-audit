@@ -25,6 +25,7 @@ import html
 import json
 import re
 import sys
+import urllib.parse
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -89,6 +90,7 @@ TOOL_LABELS = {
     "git-posture": "Git Posture",
     "discovery": "Discovery",
     "pii-scan": "PII Scan",
+    "cloud-agents": "Cursor Cloud Agents",
 }
 COLLECTOR_PURPOSES = {
     "chat-history": ("Chat transcripts", "Transcript export across detected AI tools"),
@@ -102,6 +104,10 @@ COLLECTOR_PURPOSES = {
     "secrets-scan": ("Secrets scan", "gitleaks scan over chat exports and repo roots"),
     "discovery": ("Discovery", "Local tool path and capability discovery"),
     "pii-scan": ("PII scan", "Regulated-data scan: cards, SSNs, IBANs, emails, phones, public IPs"),
+    "cloud-agents": (
+        "Cursor cloud agents",
+        "Opt-in read-only inventory via the official Cloud Agents API (api.cursor.com)",
+    ),
 }
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -554,7 +560,7 @@ def build_tools_table(
             }
         )
 
-    for key in ("chat-history", "secrets-scan", "git-posture"):
+    for key in ("chat-history", "secrets-scan", "git-posture", "cloud-agents"):
         env = envelopes.get(key)
         if not env:
             continue
@@ -574,6 +580,9 @@ def build_tools_table(
         elif key == "git-posture":
             n = int(summary.get("repos_scanned") or 0)
             extra = f"{n} git repos" if n else ""
+        elif key == "cloud-agents":
+            n = int(summary.get("total_agents") or 0)
+            extra = f"{n} cloud agents" if n else "no agents listed"
         rows.append(
             {
                 "tool": TOOL_LABELS.get(key, key),
@@ -825,6 +834,14 @@ def render_cover_terminal(
         s = env.get("summary") or {}
         repos = int(s.get("repos_scanned") or 0)
         rows.append(("ok", "git-posture", f"{repos} repos"))
+
+    # cloud-agents (opt-in; absent from offline `all` runs)
+    env = envelopes.get("cloud-agents")
+    if env:
+        s = env.get("summary") or {}
+        n = int(s.get("total_agents") or 0)
+        state = "ok" if env.get("platform_detected", True) else "com"
+        rows.append((state, "cloud-agents", f"{n} agents"))
 
     # secrets-scan
     env = envelopes.get("secrets-scan")
@@ -2206,6 +2223,228 @@ def render_chat_section(chat_env: dict[str, Any] | None) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _safe_https(url: str) -> str | None:
+    text = str(url or "").strip()
+    parsed = urllib.parse.urlparse(text)
+    if parsed.scheme != "https" or not parsed.netloc:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    return text
+
+
+def _maybe_link(url: str, label: str | None = None) -> str:
+    safe = _safe_https(url)
+    text = _esc(label if label is not None else url)
+    if not safe:
+        return text
+    return f'<a href="{html.escape(safe, quote=True)}">{text}</a>'
+
+
+def _fmt_duration_ms(value: Any) -> str:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return "n/a"
+    seconds = value / 1000
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    rem = int(round(seconds - minutes * 60))
+    return f"{minutes}m {rem}s"
+
+
+def _fmt_token_count(value: Any) -> str:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return "n/a"
+    return f"{value:,}"
+
+
+def _cloud_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    return value
+
+
+def render_cloud_agents_nav(env: dict[str, Any] | None) -> str:
+    if not env:
+        return ""
+    return '<a href="#cloud-agents">Cloud agents</a>'
+
+
+def render_cloud_agents_section(env: dict[str, Any] | None) -> str:
+    """Opt-in panel. Omitted entirely when cloud-agents evidence was not collected."""
+    if not env:
+        return ""
+    summary = env.get("summary") if isinstance(env.get("summary"), dict) else {}
+    agents = env.get("agents") if isinstance(env.get("agents"), list) else []
+    limits = env.get("limits") if isinstance(env.get("limits"), list) else []
+    detected = bool(env.get("platform_detected", True))
+
+    if not detected:
+        body = (
+            '<p class="surface-note">No Cursor API key was set, so no cloud agents were queried. '
+            "This inventory is opt-in and is not part of an offline aiscan all run.</p>"
+        )
+    else:
+        total = _cloud_int(summary.get("total_agents"))
+        active = _cloud_int(summary.get("agents_active"))
+        with_prs = _cloud_int(summary.get("agents_with_prs"))
+        tokens = _cloud_int(summary.get("total_tokens"))
+        active_cls = " amber" if active else ""
+        cells = [
+            ("agents", str(total), ""),
+            ("still active", str(active), active_cls),
+            ("with pull requests", str(with_prs), ""),
+            ("total tokens", _fmt_token_count(tokens), ""),
+        ]
+        grid = "\n".join(
+            f"""          <div>
+            <div class="label">{_esc(label)}</div>
+            <div class="v{cls}">{value}</div>
+          </div>"""
+            for label, value, cls in cells
+        )
+        by_status = summary.get("by_status") if isinstance(summary.get("by_status"), dict) else {}
+        status_bits = []
+        for name in sorted(by_status):
+            status_bits.append(f"{_esc(name)} {_cloud_int(by_status.get(name))}")
+        status_line = ""
+        if status_bits:
+            status_line = (
+                '<p class="surface-note">By status · '
+                + " · ".join(status_bits)
+                + "</p>"
+            )
+        rows = _cloud_agent_rows(agents)
+        table = (
+            '<div class="table-wrap" style="max-height: none; margin-top: 8px;"><table>'
+            "<thead><tr><th>Agent</th><th>Status</th><th>Env</th><th>Write</th>"
+            "<th>Pull requests</th><th>Latest run</th><th>Tokens</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table></div>"
+        )
+        result_note = ""
+        if summary.get("include_run_result"):
+            result_note = (
+                '<p class="surface-note">Latest run result text was stored in evidence '
+                "and may contain source code. It follows the scan redaction setting.</p>"
+            )
+        else:
+            result_note = (
+                '<p class="surface-note">Run result text was not stored. '
+                "Pass -IncludeRunResult to keep it.</p>"
+            )
+        body = f"""        <div class="git-grid">
+{grid}
+        </div>
+{status_line}
+{table}
+{result_note}"""
+
+    limit_html = ""
+    if limits:
+        items = "\n".join(
+            f"          <li>{_esc(item)}</li>" for item in limits if str(item).strip()
+        )
+        limit_html = f"""        <ul class="surface-note">
+{items}
+        </ul>"""
+
+    return f"""<section id="cloud-agents" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/06b</span>
+        <span class="kicker-label">CURSOR CLOUD AGENTS</span>
+      </div>
+      <h2 class="h2">Cloud agents on this Cursor account.</h2>
+      <p class="sub">Opt-in read-only inventory from the official Cloud Agents API at api.cursor.com. Not part of an offline aiscan all run. The user API key is not stored. Dollar cost, conversation text, and pull-request state are outside this data.</p>
+    </header>
+    <div class="panel">
+{body}
+{limit_html}
+    </div>
+  </div>
+</section>
+"""
+
+
+def _cloud_agent_rows(agents: list[Any]) -> str:
+    if not agents:
+        return "<tr><td colspan='7'>No cloud agents returned.</td></tr>"
+    rows: list[str] = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        name = str(agent.get("name") or "").strip() or "(unnamed)"
+        url = str(agent.get("url") or "")
+        created = str(agent.get("created_at") or "")
+        updated = str(agent.get("updated_at") or "")
+        when = " · ".join(
+            part for part in (
+                f"created {_esc(created)}" if created else "",
+                f"updated {_esc(updated)}" if updated else "",
+            ) if part
+        )
+        name_html = _maybe_link(url, name) if _safe_https(url) else _esc(name)
+        meta = f"<div class='mono'>{when}</div>" if when else ""
+        env_type = str(agent.get("env_type") or "")
+        env_name = str(agent.get("env_name") or "")
+        env = _esc(env_type or "unknown")
+        if env_name:
+            env += f"<div class='mono'>{_esc(env_name)}</div>"
+        repos = agent.get("repos") if isinstance(agent.get("repos"), list) else []
+        repo_urls = [
+            str(repo.get("url") or "").strip()
+            for repo in repos
+            if isinstance(repo, dict) and str(repo.get("url") or "").strip()
+        ]
+        if not repo_urls:
+            write = "none"
+        elif agent.get("work_on_current_branch") is True:
+            write = "current branch"
+        elif agent.get("work_on_current_branch") is False:
+            write = "new branch"
+        else:
+            write = "unknown"
+        prs: list[str] = []
+        for branch in agent.get("branches") or []:
+            if isinstance(branch, dict) and str(branch.get("pr_url") or "").strip():
+                prs.append(str(branch["pr_url"]).strip())
+        for repo in repos:
+            if isinstance(repo, dict) and str(repo.get("pr_url") or "").strip():
+                prs.append(str(repo["pr_url"]).strip())
+        deduped: list[str] = []
+        for pr in prs:
+            if pr not in deduped:
+                deduped.append(pr)
+        if deduped:
+            pr_html = "<br/>".join(_maybe_link(pr) for pr in deduped)
+        else:
+            pr_html = "—"
+        run = agent.get("latest_run") if isinstance(agent.get("latest_run"), dict) else {}
+        run_status = str(run.get("status") or "none")
+        duration = _fmt_duration_ms(run.get("duration_ms"))
+        tokens = agent.get("tokens") if isinstance(agent.get("tokens"), dict) else None
+        token_html = "n/a" if agent.get("usage_unavailable") or not tokens else _fmt_token_count(tokens.get("total_tokens"))
+        repo_line = ""
+        if repo_urls:
+            shown = ", ".join(_esc(url) for url in repo_urls[:3])
+            if len(repo_urls) > 3:
+                shown += _esc(f" +{len(repo_urls) - 3}")
+            repo_line = f"<div class='mono'>{shown}</div>"
+        rows.append(
+            "<tr>"
+            f"<td><strong>{name_html}</strong>{meta}{repo_line}</td>"
+            f"<td class='mono'>{_esc(agent.get('status') or 'UNKNOWN')}</td>"
+            f"<td class='mono'>{env}</td>"
+            f"<td class='mono'>{_esc(write)}</td>"
+            f"<td class='mono'>{pr_html}</td>"
+            f"<td class='mono'>{_esc(run_status)}<div class='mono'>{_esc(duration)}</div></td>"
+            f"<td class='mono'>{token_html}</td>"
+            "</tr>"
+        )
+    return "\n".join(rows) if rows else "<tr><td colspan='7'>No cloud agents returned.</td></tr>"
+
+
 def render_secrets_section(secrets_env: dict[str, Any] | None) -> str:
     if not secrets_env:
         return "<p>Secrets scan did not run.</p>"
@@ -2499,6 +2738,8 @@ def build_html(
         "%%CHAT_SECTION%%": render_chat_section(envelopes.get("chat-history")),
         "%%SECRETS_SECTION%%": render_secrets_section(secrets_env),
         "%%GIT_SECTION%%": render_git_section(git_env),
+        "%%CLOUD_AGENTS_NAV%%": render_cloud_agents_nav(envelopes.get("cloud-agents")),
+        "%%CLOUD_AGENTS_SECTION%%": render_cloud_agents_section(envelopes.get("cloud-agents")),
         "%%SECRETS_TOTAL_HITS%%": str(total_secret_hits),
         "%%GIT_REPOS%%": str(git_repos),
 

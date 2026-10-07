@@ -7,3 +7,4 @@ Use with:
     python report\build-briefing.py --evidence-root samples\synthetic-demo --out demo-briefing.html
 
 Contains no real paths, identities, or credentials.
+cloud-agents.json is synthetic opt-in evidence for the Cloud Agents API inventory.
