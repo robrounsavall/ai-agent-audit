@@ -6,25 +6,22 @@ Usage:
 
 Grok Bot is not Grok Build. Grok Build lives in ~/.grok and is collected by
 components/grok. Grok Bot is Cursor's desktop and mobile assistant: chat runs
-in the desktop app, and Bot work runs on a per-user cloud computer. This
-collector is the Cowork-style endpoint check for the Windows desktop client.
+in the desktop app, and Bot work runs on a per-user cloud computer.
 
-It reports whether the roaming app directory exists and whether the
-local-execution channel has left artifacts. Those artifacts mean this machine
-can run commands and move files for a Bot. It does not open settings,
-credential, connection, or log contents. The ask / always / never policy is
-not read: Cursor documents it as an in-app and dashboard control, not as a
-published local file schema.
+This collector only stats %APPDATA%\\Grok Bot. It never opens or parses file
+contents. Names below are the top-level entries observed on a real Windows
+install. Local execution (commands on this machine) is not among them, so
+the summary says unknown rather than absent.
 
 Cloud controls stay out of this evidence on purpose. Connector grants, Cloud
 Agent delegation, outbound messaging, network policy, and Auto-review
-enforcement live in Cursor's cloud. An offline scan cannot see them, and this
-collector does not invent rules for them.
+enforcement live in Cursor's cloud.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -39,15 +36,66 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 COLLECTOR = "grok-bot"
 
-SETTINGS_NAME = "settings.json"
-LOCAL_EXEC_LOG = "local-exec-daemon.log"
-LOCAL_EXEC_CREDENTIAL = "local-exec-daemon-credential.json"
-LOCAL_EXEC_CONNECTION = "local-exec-daemon-connection.json"
-LOCAL_EXEC_DIR = "local-exec-daemon"
+# Top-level names from a real %APPDATA%\Grok Bot install. Presence and size
+# only; none of these files are opened.
+KNOWN_FILES = (
+    "box-secrets-push-state.v1.json",
+    "desktop-status.json",
+    "DIPS",
+    "DIPS-wal",
+    "gateway-descriptor.json",
+    "Local State",
+    "lockfile",
+    "notification-permission-sent.json",
+    "Preferences",
+    "sand-secrets.json",
+    "sand-statsig-bootstrap.json",
+    "SharedStorage",
+    "SharedStorage-wal",
+    "window-state.json",
+)
+KNOWN_DIRS = (
+    "attachment-image-cache",
+    "blob_storage",
+    "Cache",
+    "Code Cache",
+    "Crashpad",
+    "DawnGraphiteCache",
+    "DawnWebGPUCache",
+    "dune-reliability",
+    "GPUCache",
+    "link-preview-cache",
+    "Local Storage",
+    "Network",
+    "Partitions",
+    "plugin-logo-cache",
+    "sand-client-persistence",
+    "sentry",
+    "Session Storage",
+    "Shared Dictionary",
+    "v8-code-cache",
+)
+
+SECRET_FILES = (
+    "sand-secrets.json",
+    "box-secrets-push-state.v1.json",
+)
+LOCKFILE_NAME = "lockfile"
+# Browser and client stores. Stat the directory only; never walk into contents
+# for evidence text. Counts below still come from a size-only tree walk.
+STATE_DIRS = (
+    "Local Storage",
+    "Session Storage",
+    "Network",
+    "sand-client-persistence",
+)
+
+LOCAL_EXECUTION = "unknown"
+LOCAL_EXECUTION_REASON = "not_determinable_offline"
 
 
 def default_root() -> Path:
@@ -68,48 +116,105 @@ def _file_size(path: Path) -> int:
         return 0
 
 
+def _walk_stats(root: Path) -> tuple[int, int, int, str]:
+    """Return (file_count, dir_count, total_bytes, newest YYYY-MM-DD).
+
+    os.walk lists names and stat reads sizes and mtimes. File bytes are not read.
+    """
+    files = 0
+    dirs = 0
+    total_bytes = 0
+    newest = _mtime_date(root)
+    try:
+        walker = os.walk(root, followlinks=False)
+    except OSError:
+        return 0, 0, 0, newest
+    for dirpath, dirnames, filenames in walker:
+        dirs += len(dirnames)
+        for name in filenames:
+            files += 1
+            path = Path(dirpath) / name
+            total_bytes += _file_size(path)
+            stamp = _mtime_date(path)
+            if stamp > newest:
+                newest = stamp
+        for name in dirnames:
+            stamp = _mtime_date(Path(dirpath) / name)
+            if stamp > newest:
+                newest = stamp
+    return files, dirs, total_bytes, newest
+
+
 def scan_root(root: Path) -> dict:
-    settings = root / SETTINGS_NAME
-    log_file = root / LOCAL_EXEC_LOG
-    credential = root / LOCAL_EXEC_CREDENTIAL
-    connection = root / LOCAL_EXEC_CONNECTION
-    daemon_dir = root / LOCAL_EXEC_DIR
-
-    settings_present = settings.is_file()
-    log_present = log_file.is_file()
-    credential_present = credential.is_file()
-    connection_present = connection.is_file()
-    daemon_dir_present = daemon_dir.is_dir()
-    local_exec_present = any(
-        (log_present, credential_present, connection_present, daemon_dir_present)
-    )
-
-    newest = ""
-    for path in (settings, log_file, credential, connection, daemon_dir):
-        if not path.exists():
-            continue
-        stamp = _mtime_date(path)
-        if stamp > newest:
-            newest = stamp
-
-    return {
-        "app_present": root.is_dir(),
-        "settings_present": settings_present,
-        "local_exec_present": local_exec_present,
-        "local_exec_log_present": log_present,
-        "local_exec_log_bytes": _file_size(log_file),
-        "local_exec_credential_present": credential_present,
-        "local_exec_connection_present": connection_present,
-        "local_exec_daemon_dir_present": daemon_dir_present,
-        "newest_local_activity": newest,
+    app_present = root.is_dir()
+    info: dict = {
+        "app_present": app_present,
+        "local_execution": LOCAL_EXECUTION,
+        "local_execution_reason": LOCAL_EXECUTION_REASON,
+        "file_count": 0,
+        "dir_count": 0,
+        "total_bytes": 0,
+        "newest_local_activity": "",
+        "known_files_present": 0,
+        "known_dirs_present": 0,
+        "sand_secrets_present": False,
+        "sand_secrets_bytes": 0,
+        "box_secrets_push_state_present": False,
+        "box_secrets_push_state_bytes": 0,
+        "lockfile_present": False,
+        "lockfile_bytes": 0,
+        "browser_state_present": False,
+        "client_persistence_present": False,
     }
+    if not app_present:
+        return info
+
+    files, dirs, total_bytes, newest = _walk_stats(root)
+    info["file_count"] = files
+    info["dir_count"] = dirs
+    info["total_bytes"] = total_bytes
+    info["newest_local_activity"] = newest
+
+    known_files = 0
+    for name in KNOWN_FILES:
+        if (root / name).is_file():
+            known_files += 1
+    known_dirs = 0
+    for name in KNOWN_DIRS:
+        if (root / name).is_dir():
+            known_dirs += 1
+    info["known_files_present"] = known_files
+    info["known_dirs_present"] = known_dirs
+
+    sand_secrets = root / "sand-secrets.json"
+    box_secrets = root / "box-secrets-push-state.v1.json"
+    lockfile = root / LOCKFILE_NAME
+    info["sand_secrets_present"] = sand_secrets.is_file()
+    info["sand_secrets_bytes"] = _file_size(sand_secrets)
+    info["box_secrets_push_state_present"] = box_secrets.is_file()
+    info["box_secrets_push_state_bytes"] = _file_size(box_secrets)
+    info["lockfile_present"] = lockfile.is_file()
+    info["lockfile_bytes"] = _file_size(lockfile)
+    info["browser_state_present"] = any((root / name).is_dir() for name in STATE_DIRS[:3])
+    info["client_persistence_present"] = (root / "sand-client-persistence").is_dir()
+    return info
 
 
-def build_findings(info: dict) -> list[dict]:
+def _present_names(root: Path, names: tuple[str, ...]) -> list[str]:
+    found = []
+    for name in names:
+        path = root / name
+        if path.is_file() or path.is_dir():
+            found.append(name)
+    return found
+
+
+def build_findings(root: Path, info: dict) -> list[dict]:
     findings: list[dict] = []
     if not info["app_present"]:
         return findings
 
+    newest = info["newest_local_activity"] or "unknown"
     findings.append(
         make_finding(
             "grok_bot.desktop.present",
@@ -118,42 +223,50 @@ def build_findings(info: dict) -> list[dict]:
             "Grok Bot desktop app data is present on this endpoint",
             evidence_count=1,
             sample_redacted=(
-                f"settings={'present' if info['settings_present'] else 'absent'}"
+                f"files={info['file_count']}; newest={newest}"
             ),
             tags=["desktop_app"],
         )
     )
 
-    if info["local_exec_present"]:
+    secret_names = _present_names(root, SECRET_FILES)
+    if secret_names:
         findings.append(
             make_finding(
-                "grok_bot.local_exec.capability_present",
+                "grok_bot.secrets.store_present",
                 "medium",
-                "Shell Execution",
-                "Grok Bot local-execution channel is present on this endpoint",
-                evidence_count=1,
-                sample_redacted=(
-                    "log="
-                    + ("present" if info["local_exec_log_present"] else "absent")
-                    + " credential="
-                    + ("present" if info["local_exec_credential_present"] else "absent")
-                    + " connection="
-                    + ("present" if info["local_exec_connection_present"] else "absent")
-                ),
-                tags=["local_exec"],
+                "Secrets Exposure",
+                "Grok Bot secrets store is present on this endpoint (contents excluded)",
+                evidence_count=len(secret_names),
+                sample_redacted="; ".join(f"{name} present" for name in secret_names),
+                tags=["auth_excluded"],
             )
         )
 
-    if info["local_exec_credential_present"]:
+    if info["lockfile_present"]:
         findings.append(
             make_finding(
-                "grok_bot.local_exec.credential_present",
+                "grok_bot.lockfile.present",
                 "low",
-                "Identity & SSO",
-                "Grok Bot local-exec credential file present (contents excluded)",
+                "Cross-Agent Visibility",
+                "Grok Bot lockfile is present (app is running or ran recently)",
                 evidence_count=1,
-                sample_redacted="local-exec-daemon-credential.json present",
-                tags=["auth_excluded"],
+                sample_redacted="lockfile present",
+                tags=["desktop_app"],
+            )
+        )
+
+    state_names = _present_names(root, STATE_DIRS)
+    if state_names:
+        findings.append(
+            make_finding(
+                "grok_bot.state.local_stores_present",
+                "low",
+                "Cross-Agent Visibility",
+                "Grok Bot keeps browser and client state on disk (contents excluded)",
+                evidence_count=len(state_names),
+                sample_redacted="; ".join(f"{name} present" for name in state_names),
+                tags=["chat_history"],
             )
         )
 
@@ -161,15 +274,8 @@ def build_findings(info: dict) -> list[dict]:
 
 
 def collect(root: Path) -> dict:
-    markers = [
-        root,
-        root / SETTINGS_NAME,
-        root / LOCAL_EXEC_LOG,
-        root / LOCAL_EXEC_CREDENTIAL,
-        root / LOCAL_EXEC_CONNECTION,
-        root / LOCAL_EXEC_DIR,
-    ]
-    scope_hash = compute_scope_hash(str(p) for p in markers)
+    markers = [root, *(root / name for name in (*KNOWN_FILES, *KNOWN_DIRS))]
+    scope_hash = compute_scope_hash(str(path) for path in markers)
     info = scan_root(root)
     envelope = make_envelope(
         COLLECTOR,
@@ -180,14 +286,13 @@ def collect(root: Path) -> dict:
     if not info["app_present"]:
         envelope["summary"] = {
             "app_present": False,
-            "settings_present": False,
-            "local_exec_present": False,
-            "local_exec_credential_present": False,
+            "local_execution": LOCAL_EXECUTION,
+            "local_execution_reason": LOCAL_EXECUTION_REASON,
             "findings": 0,
         }
         return envelope
 
-    findings = build_findings(info)
+    findings = build_findings(root, info)
     envelope["findings"] = findings
     envelope["summary"] = {**info, "findings": len(findings)}
     return envelope

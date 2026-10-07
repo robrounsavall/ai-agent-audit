@@ -102,7 +102,7 @@ COLLECTOR_PURPOSES = {
     "grok": ("Grok Build posture", "Grok Build config and session posture"),
     "grok-bot": (
         "Grok Bot posture",
-        "Grok Bot desktop presence and local-execution artifacts",
+        "Grok Bot desktop presence, secrets-store and lockfile signals",
     ),
     "secrets-scan": ("Secrets scan", "gitleaks scan over chat exports and repo roots"),
     "discovery": ("Discovery", "Local tool path and capability discovery"),
@@ -1764,12 +1764,14 @@ def _render_grok_bot_state_summary(summary: dict[str, Any]) -> str:
         return "yes" if value else "no"
 
     newest = str(summary.get("newest_local_activity") or "none")
+    local_exec = str(summary.get("local_execution") or "unknown")
     chips = [
         ("Desktop app data", yes_no(summary.get("app_present"))),
-        ("Settings file", yes_no(summary.get("settings_present"))),
-        ("Local execution", yes_no(summary.get("local_exec_present"))),
-        ("Local-exec credential", yes_no(summary.get("local_exec_credential_present"))),
-        ("Local-exec log", _format_byte_size(int(summary.get("local_exec_log_bytes") or 0))),
+        ("Secrets store", yes_no(summary.get("sand_secrets_present"))),
+        ("Lockfile", yes_no(summary.get("lockfile_present"))),
+        ("Browser/client state", yes_no(summary.get("browser_state_present") or summary.get("client_persistence_present"))),
+        ("Local execution", local_exec),
+        ("Files", str(int(summary.get("file_count") or 0))),
         ("Newest local activity", newest),
     ]
     chip_html = "".join(
@@ -1778,9 +1780,10 @@ def _render_grok_bot_state_summary(summary: dict[str, Any]) -> str:
     )
     note = (
         "Cursor's Grok Bot desktop app, separate from Grok Build. "
-        "Evidence is presence only: settings, credential, and connection files are not opened, "
-        "and the local-exec log is counted by size. The ask/always/never policy, connector grants, "
-        "Cloud Agent delegation, and outbound messaging are cloud controls and are not inferred here."
+        "Evidence is presence, size, and mtime only. sand-secrets.json, browser storage, "
+        "and sand-client-persistence are not opened. Local execution is unknown: a real "
+        "install does not leave a file that shows the ask/always/never policy. Connector grants, "
+        "Cloud Agent delegation, and outbound messaging stay in Cursor's cloud."
     )
     return f"""<div class="telemetry-summary">
         <div class="rule-group-head">

@@ -7,15 +7,23 @@
   "scope_hash": "c0b07b0a1e22",
   "summary": {
     "app_present": true,
-    "settings_present": true,
-    "local_exec_present": true,
-    "local_exec_log_present": true,
-    "local_exec_log_bytes": 4096,
-    "local_exec_credential_present": true,
-    "local_exec_connection_present": true,
-    "local_exec_daemon_dir_present": true,
+    "local_execution": "unknown",
+    "local_execution_reason": "not_determinable_offline",
+    "file_count": 40,
+    "dir_count": 19,
+    "total_bytes": 120000,
     "newest_local_activity": "2026-07-07",
-    "findings": 3
+    "known_files_present": 14,
+    "known_dirs_present": 19,
+    "sand_secrets_present": true,
+    "sand_secrets_bytes": 256,
+    "box_secrets_push_state_present": true,
+    "box_secrets_push_state_bytes": 128,
+    "lockfile_present": true,
+    "lockfile_bytes": 0,
+    "browser_state_present": true,
+    "client_persistence_present": true,
+    "findings": 4
   },
   "findings": [
     {
@@ -24,26 +32,35 @@
       "category": "Cross-Agent Visibility",
       "title": "Grok Bot desktop app data is present on this endpoint",
       "evidence_count": 1,
-      "sample_redacted": "settings=present",
+      "sample_redacted": "files=40; newest=2026-07-07",
       "tags": ["desktop_app"]
     },
     {
-      "id": "grok_bot.local_exec.capability_present",
+      "id": "grok_bot.secrets.store_present",
       "severity": "medium",
-      "category": "Shell Execution",
-      "title": "Grok Bot local-execution channel is present on this endpoint",
-      "evidence_count": 1,
-      "sample_redacted": "log=present credential=present connection=present",
-      "tags": ["local_exec"]
+      "category": "Secrets Exposure",
+      "title": "Grok Bot secrets store is present on this endpoint (contents excluded)",
+      "evidence_count": 2,
+      "sample_redacted": "sand-secrets.json present; box-secrets-push-state.v1.json present",
+      "tags": ["auth_excluded"]
     },
     {
-      "id": "grok_bot.local_exec.credential_present",
+      "id": "grok_bot.lockfile.present",
       "severity": "low",
-      "category": "Identity & SSO",
-      "title": "Grok Bot local-exec credential file present (contents excluded)",
+      "category": "Cross-Agent Visibility",
+      "title": "Grok Bot lockfile is present (app is running or ran recently)",
       "evidence_count": 1,
-      "sample_redacted": "local-exec-daemon-credential.json present",
-      "tags": ["auth_excluded"]
+      "sample_redacted": "lockfile present",
+      "tags": ["desktop_app"]
+    },
+    {
+      "id": "grok_bot.state.local_stores_present",
+      "severity": "low",
+      "category": "Cross-Agent Visibility",
+      "title": "Grok Bot keeps browser and client state on disk (contents excluded)",
+      "evidence_count": 4,
+      "sample_redacted": "Local Storage present; Session Storage present; Network present; sand-client-persistence present",
+      "tags": ["chat_history"]
     }
   ],
   "rules": [],

@@ -50,7 +50,7 @@ today?**
 | `codex` | `~/.codex` sessions + `config.toml` | approval events, trusted projects, sandbox/telemetry posture |
 | `copilot` | VS Code / JetBrains Copilot settings | enable state, exclusions, telemetry |
 | `grok` | `~/.grok/config.toml` + session metadata | permission mode (always-approve/yolo), MCP servers |
-| `grok-bot` | `%APPDATA%\Grok Bot` presence only | desktop app installed, local-execution channel artifacts (credential contents excluded) |
+| `grok-bot` | `%APPDATA%\Grok Bot` presence, sizes, and mtimes | desktop app data, secrets-store and lockfile presence, newest activity. Local execution is reported unknown, not absent |
 | `chat-history` | all transcript sources | volume, retention, secret-hit indicators (content stays in local `raw/`) |
 | `git-posture` | repos under `~/repos`, `~/code`, `~/src`, `~/projects`, `~/source` | `.env` in history, hooks, ignore posture, large blobs |
 | `secrets-scan` | chat corpus + repo roots | gitleaks findings with redacted samples |
@@ -127,7 +127,7 @@ components/
   codex/
   copilot/
   grok/               # Grok Build (~/.grok), not the Grok Bot desktop app
-  grok-bot/           # Grok Bot desktop presence + local-exec artifacts
+  grok-bot/           # Grok Bot desktop presence (AppData names, contents unread)
   chat-history/
   git-posture/
   secrets-scan/

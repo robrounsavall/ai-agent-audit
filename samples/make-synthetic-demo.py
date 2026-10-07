@@ -105,22 +105,31 @@ def main() -> None:
     grok_findings = [{"id": "grok.permission.always_approve", "severity": "critical", "category": "Shell Execution", "title": "Grok Build permission_mode is always-approve", "evidence_count": 1, "sample_redacted": "permission_mode=always-approve yolo=true", "tags": ["auto_approve"]}]
     write("grok", envelope("grok", {"permission_mode": "always-approve", "yolo": True, "mcp_servers": 1, "rules": 1}, grok_findings, grok_rules))
 
-    # grok-bot (desktop presence + local-exec artifacts; no policy value)
+    # grok-bot (real AppData names; local execution is not on disk)
     grok_bot_findings = [
-        {"id": "grok_bot.desktop.present", "severity": "low", "category": "Cross-Agent Visibility", "title": "Grok Bot desktop app data is present on this endpoint", "evidence_count": 1, "sample_redacted": "settings=present", "tags": ["desktop_app"]},
-        {"id": "grok_bot.local_exec.capability_present", "severity": "medium", "category": "Shell Execution", "title": "Grok Bot local-execution channel is present on this endpoint", "evidence_count": 1, "sample_redacted": "log=present credential=present connection=present", "tags": ["local_exec"]},
-        {"id": "grok_bot.local_exec.credential_present", "severity": "low", "category": "Identity & SSO", "title": "Grok Bot local-exec credential file present (contents excluded)", "evidence_count": 1, "sample_redacted": "local-exec-daemon-credential.json present", "tags": ["auth_excluded"]},
+        {"id": "grok_bot.desktop.present", "severity": "low", "category": "Cross-Agent Visibility", "title": "Grok Bot desktop app data is present on this endpoint", "evidence_count": 1, "sample_redacted": "files=40; newest=2026-07-07", "tags": ["desktop_app"]},
+        {"id": "grok_bot.secrets.store_present", "severity": "medium", "category": "Secrets Exposure", "title": "Grok Bot secrets store is present on this endpoint (contents excluded)", "evidence_count": 2, "sample_redacted": "sand-secrets.json present; box-secrets-push-state.v1.json present", "tags": ["auth_excluded"]},
+        {"id": "grok_bot.lockfile.present", "severity": "low", "category": "Cross-Agent Visibility", "title": "Grok Bot lockfile is present (app is running or ran recently)", "evidence_count": 1, "sample_redacted": "lockfile present", "tags": ["desktop_app"]},
+        {"id": "grok_bot.state.local_stores_present", "severity": "low", "category": "Cross-Agent Visibility", "title": "Grok Bot keeps browser and client state on disk (contents excluded)", "evidence_count": 4, "sample_redacted": "Local Storage present; Session Storage present; Network present; sand-client-persistence present", "tags": ["chat_history"]},
     ]
     write("grok-bot", envelope("grok-bot", {
         "app_present": True,
-        "settings_present": True,
-        "local_exec_present": True,
-        "local_exec_log_present": True,
-        "local_exec_log_bytes": 4096,
-        "local_exec_credential_present": True,
-        "local_exec_connection_present": True,
-        "local_exec_daemon_dir_present": True,
+        "local_execution": "unknown",
+        "local_execution_reason": "not_determinable_offline",
+        "file_count": 40,
+        "dir_count": 19,
+        "total_bytes": 120000,
         "newest_local_activity": "2026-07-07",
+        "known_files_present": 14,
+        "known_dirs_present": 19,
+        "sand_secrets_present": True,
+        "sand_secrets_bytes": 256,
+        "box_secrets_push_state_present": True,
+        "box_secrets_push_state_bytes": 128,
+        "lockfile_present": True,
+        "lockfile_bytes": 0,
+        "browser_state_present": True,
+        "client_persistence_present": True,
         "findings": len(grok_bot_findings),
     }, grok_bot_findings, []))
 
