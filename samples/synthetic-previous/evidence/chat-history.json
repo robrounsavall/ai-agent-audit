@@ -1,0 +1,33 @@
+{
+  "collector": "chat-history",
+  "version": "1.0.0",
+  "ran_at": "2026-07-01T15:00:00+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "chat-prev",
+  "summary": {
+    "total_files": 8,
+    "total_messages": 100,
+    "total_bytes": 40000,
+    "retention_days": 30,
+    "secret_hit_files": 1,
+    "claude_files": 2,
+    "codex_files": 2,
+    "cursor_files": 3,
+    "grok_files": 1
+  },
+  "findings": [
+    {
+      "id": "chat_history.secret_hit",
+      "severity": "medium",
+      "category": "Secrets Exposure",
+      "title": "Secret-like value observed in chat export",
+      "evidence_count": 1,
+      "sample_redacted": "ghp_****REDACTED****",
+      "secret_redacted": true,
+      "tags": []
+    }
+  ],
+  "rules": [],
+  "raw_pointers": []
+}

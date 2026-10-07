@@ -1,0 +1,46 @@
+{
+  "collector": "cursor",
+  "version": "1.0.0",
+  "ran_at": "2026-07-01T15:00:00+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "cursor-prev",
+  "summary": {
+    "rules": 1,
+    "findings": 1,
+    "durable_rules": 0,
+    "mcp_rules": 1,
+    "mcp_registered": 1,
+    "permission_events": 4,
+    "composer_messages": 80,
+    "state_tokens": 1200
+  },
+  "findings": [
+    {
+      "id": "cursor.state.local_tokens",
+      "severity": "low",
+      "category": "Data Access",
+      "title": "Cursor local state still holds token counts",
+      "evidence_count": 1,
+      "sample_redacted": "state_tokens=1200",
+      "secret_redacted": false,
+      "tags": [
+        "history_retention"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "platform": "cursor",
+      "scope": "user",
+      "scope_label_redacted": "user#cur1",
+      "rule_type": "mcp_tool",
+      "rule": "mcp__filesystem",
+      "decision": "allow",
+      "command_or_tool_redacted": "filesystem",
+      "risk": "medium",
+      "exposure_category": "MCP Tooling"
+    }
+  ],
+  "raw_pointers": []
+}
