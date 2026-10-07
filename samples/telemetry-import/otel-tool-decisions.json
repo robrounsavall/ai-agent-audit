@@ -1,0 +1,102 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": { "stringValue": "claude-code" }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": { "name": "com.anthropic.claude_code" },
+          "logRecords": [
+            {
+              "timeUnixNano": "1775142245000000000",
+              "attributes": [
+                { "key": "event.name", "value": { "stringValue": "tool_decision" } },
+                { "key": "event.timestamp", "value": { "stringValue": "2026-04-02T15:04:05Z" } },
+                { "key": "event.sequence", "value": { "intValue": "1" } },
+                { "key": "tool_name", "value": { "stringValue": "Bash" } },
+                { "key": "tool_use_id", "value": { "stringValue": "toolu_SENTINEL_USE_ID" } },
+                { "key": "decision", "value": { "stringValue": "accept" } },
+                { "key": "source", "value": { "stringValue": "config" } },
+                { "key": "tool_source", "value": { "stringValue": "builtin" } },
+                {
+                  "key": "tool_parameters",
+                  "value": {
+                    "stringValue": "{\"bash_command\":\"echo SENTINEL_COMMAND_do_not_store\",\"full_command\":\"echo SENTINEL_COMMAND_do_not_store\",\"url\":\"https://sentinel.example/do-not-store\"}"
+                  }
+                },
+                { "key": "notes", "value": { "stringValue": "SENTINEL_NOTES_do_not_store" } }
+              ]
+            },
+            {
+              "timeUnixNano": "1775142300000000000",
+              "attributes": [
+                { "key": "event.name", "value": { "stringValue": "tool_decision" } },
+                { "key": "event.timestamp", "value": { "stringValue": "2026-04-02T15:05:00Z" } },
+                { "key": "tool_name", "value": { "stringValue": "Write" } },
+                { "key": "decision", "value": { "stringValue": "accept" } },
+                { "key": "source", "value": { "stringValue": "config" } },
+                { "key": "tool_source", "value": { "stringValue": "builtin" } }
+              ]
+            },
+            {
+              "timeUnixNano": "1775142360000000000",
+              "attributes": [
+                { "key": "event.name", "value": { "stringValue": "tool_decision" } },
+                { "key": "event.timestamp", "value": { "stringValue": "2026-04-02T15:06:00Z" } },
+                { "key": "tool_name", "value": { "stringValue": "WebFetch" } },
+                { "key": "decision", "value": { "stringValue": "accept" } },
+                { "key": "source", "value": { "stringValue": "hook" } },
+                { "key": "tool_source", "value": { "stringValue": "builtin" } }
+              ]
+            },
+            {
+              "timeUnixNano": "1775142420000000000",
+              "attributes": [
+                { "key": "event.name", "value": { "stringValue": "tool_decision" } },
+                { "key": "event.timestamp", "value": { "stringValue": "2026-04-02T15:07:00Z" } },
+                { "key": "tool_name", "value": { "stringValue": "mcp_tool" } },
+                { "key": "decision", "value": { "stringValue": "accept" } },
+                { "key": "source", "value": { "stringValue": "config" } },
+                { "key": "tool_source", "value": { "stringValue": "mcp" } },
+                {
+                  "key": "tool_parameters",
+                  "value": {
+                    "stringValue": "{\"mcp_server_name\":\"SENTINEL_SERVER_do_not_store\",\"mcp_tool_name\":\"demo_tool\",\"bash_command\":\"echo SENTINEL_COMMAND_do_not_store\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "timeUnixNano": "1775142480000000000",
+              "attributes": [
+                { "key": "event.name", "value": { "stringValue": "user_prompt" } },
+                { "key": "event.timestamp", "value": { "stringValue": "2026-04-02T15:08:00Z" } },
+                { "key": "prompt", "value": { "stringValue": "SENTINEL_PROMPT_do_not_store" } },
+                { "key": "prompt_text", "value": { "stringValue": "SENTINEL_PROMPT_do_not_store" } },
+                { "key": "user.email", "value": { "stringValue": "sentinel.user@example.com" } }
+              ],
+              "body": { "stringValue": "SENTINEL_PROMPT_do_not_store" }
+            },
+            {
+              "timeUnixNano": "1775228523000000000",
+              "attributes": [
+                { "key": "event.name", "value": { "stringValue": "tool_decision" } },
+                { "key": "event.timestamp", "value": { "stringValue": "2026-04-03T01:02:03Z" } },
+                { "key": "tool_name", "value": { "stringValue": "Bash" } },
+                { "key": "decision", "value": { "stringValue": "reject" } },
+                { "key": "source", "value": { "stringValue": "user_reject" } },
+                { "key": "tool_source", "value": { "stringValue": "builtin" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

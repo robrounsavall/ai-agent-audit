@@ -1,0 +1,27 @@
+{
+  "preview": false,
+  "init_offset": 0,
+  "results": [
+    {
+      "_time": "2026-04-04T00:00:00Z",
+      "event.name": "tool_decision",
+      "tool_name": "Bash",
+      "decision": "approve",
+      "source": "config",
+      "tool_parameters": "{\"full_command\":\"echo SENTINEL_COMMAND_do_not_store\"}"
+    },
+    {
+      "_time": "2026-04-04T01:00:00Z",
+      "event": "cursor_usage_event",
+      "sourcetype": "cursor:usage_events",
+      "model": "example-small",
+      "kind": "agent",
+      "input_tokens": "5",
+      "output_tokens": "5",
+      "cache_read_tokens": "1",
+      "cache_write_tokens": "1",
+      "total_tokens": "12",
+      "cost_cents": "3"
+    }
+  ]
+}
