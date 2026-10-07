@@ -1,0 +1,8 @@
+{
+  "name": "grok-bot",
+  "evidence": "grok-bot",
+  "in_all": true,
+  "needs_paths": false,
+  "needs_repo_roots": false,
+  "deps": ["stdlib"]
+}

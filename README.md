@@ -1,8 +1,8 @@
 # ai-agent-audit
 
 Offline Windows endpoint scanner for AI coding agent security posture. One
-command inventories what Claude Code, Cursor, Codex, GitHub Copilot, and Grok
-Build are allowed to do on a machine, what chat history they have stored
+command inventories what Claude Code, Cursor, Codex, GitHub Copilot, Grok
+Build, and Grok Bot are allowed to do on a machine, what chat history they have stored
 locally, and where secrets may have landed. Output is an evidence layer that
 never contains raw transcripts or identifying filesystem paths, plus an
 executive HTML briefing (dark editorial layout with posture grid and per-tool
@@ -50,6 +50,7 @@ today?**
 | `codex` | `~/.codex` sessions + `config.toml` | approval events, trusted projects, sandbox/telemetry posture |
 | `copilot` | VS Code / JetBrains Copilot settings | enable state, exclusions, telemetry |
 | `grok` | `~/.grok/config.toml` + session metadata | permission mode (always-approve/yolo), MCP servers |
+| `grok-bot` | `%APPDATA%\Grok Bot` presence only | desktop app installed, local-execution channel artifacts (credential contents excluded) |
 | `chat-history` | all transcript sources | volume, retention, secret-hit indicators (content stays in local `raw/`) |
 | `git-posture` | repos under `~/repos`, `~/code`, `~/src`, `~/projects`, `~/source` | `.env` in history, hooks, ignore posture, large blobs |
 | `secrets-scan` | chat corpus + repo roots | gitleaks findings with redacted samples |
@@ -125,7 +126,8 @@ components/
   cursor/
   codex/
   copilot/
-  grok/
+  grok/               # Grok Build (~/.grok), not the Grok Bot desktop app
+  grok-bot/           # Grok Bot desktop presence + local-exec artifacts
   chat-history/
   git-posture/
   secrets-scan/

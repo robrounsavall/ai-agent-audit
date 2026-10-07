@@ -1,0 +1,51 @@
+{
+  "collector": "grok-bot",
+  "version": "1.0.0",
+  "ran_at": "2026-07-11T21:23:58.915498+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "c0b07b0a1e22",
+  "summary": {
+    "app_present": true,
+    "settings_present": true,
+    "local_exec_present": true,
+    "local_exec_log_present": true,
+    "local_exec_log_bytes": 4096,
+    "local_exec_credential_present": true,
+    "local_exec_connection_present": true,
+    "local_exec_daemon_dir_present": true,
+    "newest_local_activity": "2026-07-07",
+    "findings": 3
+  },
+  "findings": [
+    {
+      "id": "grok_bot.desktop.present",
+      "severity": "low",
+      "category": "Cross-Agent Visibility",
+      "title": "Grok Bot desktop app data is present on this endpoint",
+      "evidence_count": 1,
+      "sample_redacted": "settings=present",
+      "tags": ["desktop_app"]
+    },
+    {
+      "id": "grok_bot.local_exec.capability_present",
+      "severity": "medium",
+      "category": "Shell Execution",
+      "title": "Grok Bot local-execution channel is present on this endpoint",
+      "evidence_count": 1,
+      "sample_redacted": "log=present credential=present connection=present",
+      "tags": ["local_exec"]
+    },
+    {
+      "id": "grok_bot.local_exec.credential_present",
+      "severity": "low",
+      "category": "Identity & SSO",
+      "title": "Grok Bot local-exec credential file present (contents excluded)",
+      "evidence_count": 1,
+      "sample_redacted": "local-exec-daemon-credential.json present",
+      "tags": ["auth_excluded"]
+    }
+  ],
+  "rules": [],
+  "raw_pointers": []
+}

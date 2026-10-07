@@ -105,6 +105,25 @@ def main() -> None:
     grok_findings = [{"id": "grok.permission.always_approve", "severity": "critical", "category": "Shell Execution", "title": "Grok Build permission_mode is always-approve", "evidence_count": 1, "sample_redacted": "permission_mode=always-approve yolo=true", "tags": ["auto_approve"]}]
     write("grok", envelope("grok", {"permission_mode": "always-approve", "yolo": True, "mcp_servers": 1, "rules": 1}, grok_findings, grok_rules))
 
+    # grok-bot (desktop presence + local-exec artifacts; no policy value)
+    grok_bot_findings = [
+        {"id": "grok_bot.desktop.present", "severity": "low", "category": "Cross-Agent Visibility", "title": "Grok Bot desktop app data is present on this endpoint", "evidence_count": 1, "sample_redacted": "settings=present", "tags": ["desktop_app"]},
+        {"id": "grok_bot.local_exec.capability_present", "severity": "medium", "category": "Shell Execution", "title": "Grok Bot local-execution channel is present on this endpoint", "evidence_count": 1, "sample_redacted": "log=present credential=present connection=present", "tags": ["local_exec"]},
+        {"id": "grok_bot.local_exec.credential_present", "severity": "low", "category": "Identity & SSO", "title": "Grok Bot local-exec credential file present (contents excluded)", "evidence_count": 1, "sample_redacted": "local-exec-daemon-credential.json present", "tags": ["auth_excluded"]},
+    ]
+    write("grok-bot", envelope("grok-bot", {
+        "app_present": True,
+        "settings_present": True,
+        "local_exec_present": True,
+        "local_exec_log_present": True,
+        "local_exec_log_bytes": 4096,
+        "local_exec_credential_present": True,
+        "local_exec_connection_present": True,
+        "local_exec_daemon_dir_present": True,
+        "newest_local_activity": "2026-07-07",
+        "findings": len(grok_bot_findings),
+    }, grok_bot_findings, []))
+
     # chat-history (per-tool file counts mirror real collector summary shape)
     chat_sum = {
         "total_files": 12,

@@ -13,10 +13,10 @@
 
 .PARAMETER Collector
     One of: claude cowork cursor codex copilot chat-history git-posture
-    secrets-scan pii-scan grok discover all. Defaults to 'all' when omitted.
+    secrets-scan pii-scan grok grok-bot discover all. Defaults to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
-    'all' runs all 10 collectors and prints a combined summary.
+    'all' runs all 11 collectors and prints a combined summary.
 
 .PARAMETER Json
     Dump raw collector JSON instead of pretty-printed PowerShell formatting.
@@ -82,7 +82,7 @@
 param(
     [Parameter(Mandatory = $false, Position = 0)]
     [ValidateSet("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
-        "git-posture", "secrets-scan", "pii-scan", "grok", "discover", "all")]
+        "git-posture", "secrets-scan", "pii-scan", "grok", "grok-bot", "discover", "all")]
     [string]$Collector = "all",
 
     [switch]$Json,
@@ -140,12 +140,13 @@ $ScriptFor = @{
     "secrets-scan" = "secrets-scan\secrets-scan.py"
     "pii-scan"     = "pii-scan\pii-scan.py"
     "grok"         = "grok\grok.py"
+    "grok-bot"     = "grok-bot\grok-bot.py"
 }
 
 # Collectors run by 'all', in order. pii-scan runs last so it can pick up the
 # chat-history export under raw/ from the same run.
 $StdlibOrder = @("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
-    "git-posture", "secrets-scan", "grok", "pii-scan")
+    "git-posture", "secrets-scan", "grok", "grok-bot", "pii-scan")
 
 # Resolve real tool-history paths via the shared discover.py so coverage
 # includes override locations. The --json output is SENSITIVE (raw filesystem

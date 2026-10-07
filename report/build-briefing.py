@@ -63,7 +63,7 @@ def read_frontmatter(evidence_root: Path) -> dict[str, str]:
 
 SUPPORTED_MAJOR = 1
 
-PLATFORM_COLLECTORS = ("claude", "cowork", "cursor", "codex", "copilot", "grok")
+PLATFORM_COLLECTORS = ("claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot")
 
 
 def _is_detected(env: dict[str, Any] | None) -> bool:
@@ -84,6 +84,7 @@ TOOL_LABELS = {
     "codex": "Codex Desktop",
     "copilot": "GitHub Copilot",
     "grok": "Grok Build",
+    "grok-bot": "Grok Bot",
     "chat-history": "Chat History",
     "secrets-scan": "Secrets Scan",
     "git-posture": "Git Posture",
@@ -98,7 +99,11 @@ COLLECTOR_PURPOSES = {
     "codex": ("Codex posture", "Codex config, trusted projects, and MCP posture"),
     "copilot": ("GitHub Copilot posture", "Copilot local settings detection"),
     "git-posture": ("Git posture", "Local repository hygiene checks"),
-    "grok": ("Grok posture", "Grok config and session posture"),
+    "grok": ("Grok Build posture", "Grok Build config and session posture"),
+    "grok-bot": (
+        "Grok Bot posture",
+        "Grok Bot desktop presence and local-execution artifacts",
+    ),
     "secrets-scan": ("Secrets scan", "gitleaks scan over chat exports and repo roots"),
     "discovery": ("Discovery", "Local tool path and capability discovery"),
     "pii-scan": ("PII scan", "Regulated-data scan: cards, SSNs, IBANs, emails, phones, public IPs"),
@@ -697,6 +702,11 @@ def _tool_last_used(key: str, envelopes: dict[str, dict[str, Any]]) -> str:
         return newest("cursor_projects", "cursor_db")
     if key == "grok":
         return newest("grok_sessions")
+    if key == "grok-bot":
+        return str(
+            ((envelopes.get(key) or {}).get("summary") or {}).get("newest_local_activity")
+            or ""
+        )
     if key == "cowork":
         return str(((envelopes.get(key) or {}).get("summary") or {}).get("newest_session") or "")
     return ""
@@ -1746,6 +1756,42 @@ def _render_grok_state_summary(summary: dict[str, Any]) -> str:
       </div>"""
 
 
+def _render_grok_bot_state_summary(summary: dict[str, Any]) -> str:
+    if not summary:
+        return ""
+
+    def yes_no(value: Any) -> str:
+        return "yes" if value else "no"
+
+    newest = str(summary.get("newest_local_activity") or "none")
+    chips = [
+        ("Desktop app data", yes_no(summary.get("app_present"))),
+        ("Settings file", yes_no(summary.get("settings_present"))),
+        ("Local execution", yes_no(summary.get("local_exec_present"))),
+        ("Local-exec credential", yes_no(summary.get("local_exec_credential_present"))),
+        ("Local-exec log", _format_byte_size(int(summary.get("local_exec_log_bytes") or 0))),
+        ("Newest local activity", newest),
+    ]
+    chip_html = "".join(
+        f"<div class='mode-chip'><span>{_esc(label)}</span><strong>{_esc(value)}</strong></div>"
+        for label, value in chips
+    )
+    note = (
+        "Cursor's Grok Bot desktop app, separate from Grok Build. "
+        "Evidence is presence only: settings, credential, and connection files are not opened, "
+        "and the local-exec log is counted by size. The ask/always/never policy, connector grants, "
+        "Cloud Agent delegation, and outbound messaging are cloud controls and are not inferred here."
+    )
+    return f"""<div class="telemetry-summary">
+        <div class="rule-group-head">
+          <h4>Grok Bot local desktop state</h4>
+          <span class="meta">AppData presence only</span>
+        </div>
+        <p class="surface-note">{_esc(note)}</p>
+        <div class="mode-grid">{chip_html}</div>
+      </div>"""
+
+
 def render_permissions_section(envelopes: dict[str, dict[str, Any]]) -> str:
     chunks: list[str] = []
     chat_sum = (envelopes.get("chat-history") or {}).get("summary") or {}
@@ -1774,6 +1820,8 @@ def render_permissions_section(envelopes: dict[str, dict[str, Any]]) -> str:
             state_early = _render_cursor_state_summary(env.get("summary") or {})
         elif platform == "grok":
             state_early = _render_grok_state_summary(env.get("summary") or {})
+        elif platform == "grok-bot":
+            state_early = _render_grok_bot_state_summary(env.get("summary") or {})
         if not rules:
             posture_findings = [
                 f for f in (env.get("findings") or [])

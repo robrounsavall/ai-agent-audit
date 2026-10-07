@@ -2,6 +2,8 @@
 
 Standalone tool for inventorying MCP server registrations across Claude,
 Cursor, Codex, Grok Build, shared `.mcp.json`, and repo-scoped config files.
+Grok Bot connectors are not in this inventory: they follow the team's Cursor
+MCP policy in the cloud, and this tool only reads local config files.
 
 It is intentionally not wired into `aiscan.ps1` or the SCHEMA.md evidence
 contract yet. It prints real local paths by default for operator use, while

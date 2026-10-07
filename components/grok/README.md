@@ -2,6 +2,9 @@
 
 Inventories Grok Build permission mode, MCP servers, and session metadata from `~/.grok`.
 
+This is not Cursor's Grok Bot desktop app. That client is
+[components/grok-bot](../grok-bot/README.md).
+
 | | |
 |---|---|
 | Evidence | `evidence/grok.json` |
