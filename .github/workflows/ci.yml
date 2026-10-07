@@ -43,6 +43,16 @@ jobs:
       - name: MCP visibility tests
         run: python -m unittest discover -s tools/mcp-visibility/tests -v
 
+  github-access:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: GitHub access inventory tests
+        run: python -m unittest discover -s tools/github-access/tests -v
+
   scrub-gate:
     runs-on: windows-latest
     steps:
