@@ -197,6 +197,51 @@ before sharing it.
 | `chat-history` | All 4 transcript sources | Writes raw markdown to `raw/chat-history/`. Evidence is counts + secret-hit findings only. |
 | `git-posture` | Repos under user-specified roots | `.env` in history, hook presence, branch protection (opt-in `gh`), large blobs. |
 | `secrets-scan` | `raw/chat-history/` + repo roots | gitleaks wrapper. Findings only, redacted samples. |
+| `cloud-agents` | Official Cloud Agents API, `GET https://api.cursor.com` only, with a user-supplied `CURSOR_API_KEY` | Opt-in. Not part of `aiscan all`. Does not read the Cursor IDE session token or call `cursor.com/api/dashboard`. Does not call `GET /v1/repositories` or the enterprise Admin API. |
+
+## Cloud agent inventory (`cloud-agents`)
+
+`evidence/cloud-agents.json` uses the envelope above plus two extra fields. It is produced only by the opt-in `cloud-agents` command.
+
+| Field | Take-home? | Notes |
+|---|---|---|
+| `agents` | YES, review first | One object per cloud agent. Names, repository URLs, starting refs, branch names, and pull request URLs are operational inventory, not transcripts. |
+| `limits` | YES | Fixed sentences describing what this API call does not include. |
+
+`summary` for this collector:
+
+| Field | Type | Notes |
+|---|---|---|
+| `key_configured` | bool | False when `CURSOR_API_KEY` was unset. The key itself is never stored. |
+| `api` | string | Always `https://api.cursor.com` on a real run. |
+| `total_agents` | int | Agents returned, including archived. |
+| `agents_active` | int | Status `ACTIVE`, compared case-insensitively. Any other status, including undocumented ones, is not counted here. |
+| `agents_running` | int | Latest run status `CREATING` or `RUNNING`. |
+| `agents_with_prs` | int | Agents with at least one `prUrl`. Open, merged, and closed are not known; GitHub is not called. |
+| `total_tokens` | int | Sum of per-agent `totalTokens`. Not dollars. |
+| `by_status` | object | Map of the API's status string (any string) to a count. |
+| `agent_errors` | int | Agents whose detail or run could not be read. |
+| `usage_unavailable` | int | Agents whose usage endpoint returned 403 or 404. |
+| `include_run_result` | bool | True only when `--include-run-result` / `-IncludeRunResult` was set. |
+
+Each `agents[]` object:
+
+| Field | Notes |
+|---|---|
+| `id`, `name`, `status`, `url` | Status is stored as returned. Unknown values are kept, not coerced. |
+| `env_type`, `env_name` | From `env.type` / `env.name`. |
+| `created_at`, `updated_at` | ISO-8601 timestamps from the API. |
+| `repos[]` | `url`, `starting_ref`, `pr_url`. |
+| `work_on_current_branch`, `auto_create_pr` | Booleans, or null when the API omitted them. |
+| `branches[]` | `repo_url` (no scheme, as the API returns it), `branch`, `pr_url`. |
+| `latest_run` | `id`, `status`, `duration_ms`. `result` is omitted unless the flag is set. |
+| `tokens` | `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `total_tokens`. |
+| `usage_unavailable` | True when the usage endpoint is not enabled for the key. |
+| `error` | Short scrubbed note when a per-agent GET failed. |
+
+Run `result` text can contain source code or secrets. It is not stored by default. With the flag, it is passed through `sanitize_text`, so `-Redact` / `AISCAN_REDACT` masks paths and secrets. The API key is removed either way. `/v1/me` is called only to authenticate; the response's email and name are not written.
+
+The API key never appears in this file. Personal keys cannot be scoped to read-only; the collector still refuses every method except GET and every host except `api.cursor.com`.
 
 ## Versioning
 

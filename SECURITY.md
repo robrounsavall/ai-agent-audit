@@ -15,7 +15,11 @@ mask.
 
 - Read-only against AI tool data. Collectors never modify tool configuration,
   sessions, or credential stores.
-- Offline. No network calls. Nothing is uploaded anywhere.
+- Offline by default. The collectors in `aiscan all` make no network calls
+  and nothing is uploaded. `cloud-agents` is opt-in and is not part of
+  `all`. It sends HTTPS GET requests only to `https://api.cursor.com`
+  using a user-supplied `CURSOR_API_KEY`, which is never printed or written.
+  It does not read the Cursor IDE session token or call dashboard APIs.
 - Credential stores (`auth.json` and equivalents) are checked for presence and
   key names only. Token values are never read into output.
 - Raw transcript content only ever lands in the local `raw/` directory on your

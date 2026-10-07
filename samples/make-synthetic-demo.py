@@ -159,6 +159,150 @@ def main() -> None:
     sec_findings = [{"id": "secrets-scan.hit", "severity": "high", "category": "Secrets Exposure", "title": "Potential secret in chat export", "evidence_count": 1, "sample_redacted": "ghp_****", "secret_redacted": True, "tags": []}]
     write("secrets-scan", envelope("secrets-scan", sec_sum, sec_findings, []))
 
+    # cloud-agents (opt-in; not produced by `aiscan all`)
+    cloud_limits = [
+        "Dollar cost is not in the Cloud Agents API. Per-agent cost exists only on the enterprise Admin API, which this command does not call.",
+        "Full conversations are not collected. Run result text is omitted unless --include-run-result (aiscan -IncludeRunResult), and then it follows AISCAN_REDACT.",
+        "Personal user API keys cannot be scoped to read-only. The same key can create or delete agents. This command only sends HTTPS GET requests to api.cursor.com.",
+        "Pull request open, merged, or closed state is not in the API response. This command records prUrl values and does not call GitHub.",
+        "GET /v1/repositories is not called. Repository URLs come only from each agent's repos and run git branches.",
+        "The Cursor IDE session token and cursor.com/api/dashboard endpoints are not read or called. Auth is the user-supplied CURSOR_API_KEY only.",
+    ]
+    cloud_agents = [
+        {
+            "id": "bc-demo-active",
+            "name": "Demo README agent",
+            "status": "ACTIVE",
+            "url": "https://cursor.com/agents/bc-demo-active",
+            "env_type": "cloud",
+            "env_name": "",
+            "created_at": "2026-09-28T15:00:00Z",
+            "updated_at": "2026-09-29T18:04:00Z",
+            "repos": [{"url": "https://github.com/example/demo-repo", "starting_ref": "main", "pr_url": ""}],
+            "work_on_current_branch": True,
+            "auto_create_pr": True,
+            "branches": [{
+                "repo_url": "github.com/example/demo-repo",
+                "branch": "cursor/demo-readme",
+                "pr_url": "https://github.com/example/demo-repo/pull/14",
+            }],
+            "latest_run": {"id": "run-demo-active", "status": "RUNNING", "duration_ms": None},
+            "tokens": {
+                "input_tokens": 8000,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "total_tokens": 8000,
+            },
+            "usage_unavailable": False,
+        },
+        {
+            "id": "bc-demo-idle",
+            "name": "Demo legacy agent",
+            "status": "IDLE",
+            "url": "https://cursor.com/agents/bc-demo-idle",
+            "env_type": "cloud",
+            "env_name": "",
+            "created_at": "2026-06-01T12:00:00Z",
+            "updated_at": "2026-06-02T12:00:00Z",
+            "repos": [{"url": "https://github.com/example/legacy", "starting_ref": "main", "pr_url": ""}],
+            "work_on_current_branch": False,
+            "auto_create_pr": False,
+            "branches": [{"repo_url": "github.com/example/legacy", "branch": "cursor/legacy-note", "pr_url": ""}],
+            "latest_run": {"id": "run-demo-idle", "status": "FINISHED", "duration_ms": 45000},
+            "tokens": {
+                "input_tokens": 4000,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "total_tokens": 4000,
+            },
+            "usage_unavailable": False,
+        },
+        {
+            "id": "bc-demo-archived",
+            "name": "Demo archived agent",
+            "status": "ARCHIVED",
+            "url": "https://cursor.com/agents/bc-demo-archived",
+            "env_type": "cloud",
+            "env_name": "",
+            "created_at": "2026-05-01T12:00:00Z",
+            "updated_at": "2026-07-01T12:00:00Z",
+            "repos": [{"url": "https://github.com/example/demo-repo", "starting_ref": "main", "pr_url": ""}],
+            "work_on_current_branch": False,
+            "auto_create_pr": False,
+            "branches": [],
+            "latest_run": {"id": "run-demo-archived", "status": "FINISHED", "duration_ms": 8000},
+            "tokens": {
+                "input_tokens": 450,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "total_tokens": 450,
+            },
+            "usage_unavailable": False,
+        },
+    ]
+    cloud_findings = [
+        {
+            "id": "cloud_agents.active_current_branch",
+            "severity": "high",
+            "category": "Source Code Egress",
+            "title": "Active cloud agent can push to the repository's current branch",
+            "evidence_count": 1,
+            "first_seen": "2026-09-28T15:00:00Z",
+            "last_seen": "2026-09-29T18:04:00Z",
+            "sample_redacted": "Demo README agent [ACTIVE run=RUNNING repo=https://github.com/example/demo-repo]",
+            "secret_redacted": False,
+            "tags": ["cloud_agent", "repo_write", "current_branch"],
+        },
+        {
+            "id": "cloud_agents.long_lived_unarchived",
+            "severity": "medium",
+            "category": "General Tooling",
+            "title": "Cloud agent has stayed unarchived for more than 30 days",
+            "evidence_count": 1,
+            "first_seen": "2026-06-01T12:00:00Z",
+            "last_seen": "2026-06-02T12:00:00Z",
+            "sample_redacted": "Demo legacy agent [IDLE run=FINISHED repo=https://github.com/example/legacy]",
+            "secret_redacted": False,
+            "tags": ["cloud_agent", "unarchived", "long_lived"],
+        },
+        {
+            "id": "cloud_agents.coverage",
+            "severity": "low",
+            "category": "General Tooling",
+            "title": "Cloud agent inventory omits cost, conversations, and key scope",
+            "evidence_count": 1,
+            "first_seen": "",
+            "last_seen": "",
+            "sample_redacted": " ".join(cloud_limits),
+            "secret_redacted": False,
+            "tags": ["coverage_gap", "cloud_agent"],
+        },
+    ]
+    cloud = envelope(
+        "cloud-agents",
+        {
+            "key_configured": True,
+            "api": "https://api.cursor.com",
+            "total_agents": 3,
+            "agents_active": 1,
+            "agents_running": 1,
+            "agents_with_prs": 1,
+            "total_tokens": 12450,
+            "by_status": {"ACTIVE": 1, "ARCHIVED": 1, "IDLE": 1},
+            "agent_errors": 0,
+            "usage_unavailable": 0,
+            "include_run_result": False,
+        },
+        cloud_findings,
+        [],
+    )
+    cloud["agents"] = cloud_agents
+    cloud["limits"] = cloud_limits
+    write("cloud-agents", cloud)
+
     # Write a tiny README for the bundle
     readme = HERE / "synthetic-demo" / "README.md"
     readme.write_text(
@@ -167,7 +311,8 @@ def main() -> None:
         "User = Test User, Host = DEMO-ENDPOINT.\n"
         "Use with:\n\n"
         "    python report\\build-briefing.py --evidence-root samples\\synthetic-demo --out demo-briefing.html\n\n"
-        "Contains no real paths, identities, or credentials.\n",
+        "Contains no real paths, identities, or credentials.\n"
+        "cloud-agents.json is synthetic opt-in evidence for the Cloud Agents API inventory.\n",
         encoding="utf-8",
     )
     print(f"Wrote {readme}")

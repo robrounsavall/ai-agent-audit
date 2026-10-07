@@ -34,6 +34,7 @@ HTML_SHELL = """<!doctype html>
       <a href="#permissions">Permissions</a>
       <a href="#chat">Chat</a>
       <a href="#secrets-git">Secrets &amp; Git</a>
+      %%CLOUD_AGENTS_NAV%%
       <a href="#methodology">Methodology</a>
       <a href="#appendix">Appendix</a>
     </div>
@@ -215,6 +216,8 @@ HTML_SHELL = """<!doctype html>
     </div>
   </div>
 </section>
+
+%%CLOUD_AGENTS_SECTION%%
 
 <!-- ============ METHODOLOGY ============ -->
 <section id="methodology" class="section section--alt">

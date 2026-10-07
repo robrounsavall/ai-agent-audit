@@ -23,6 +23,7 @@ jobs:
           - git-posture
           - secrets-scan
           - pii-scan
+          - cloud-agents
           - integration
     steps:
       - uses: actions/checkout@v4

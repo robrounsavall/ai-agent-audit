@@ -30,8 +30,11 @@ today?**
 ## Trust statement
 
 - **Read-only.** Collectors never modify tool configuration, sessions, or
-  credential stores.
-- **Offline.** No network calls. Nothing leaves your machine.
+  credential stores. `cloud-agents` sends HTTPS GET only; it cannot create
+  or delete a cloud agent even though a personal API key is allowed to.
+- **Offline by default.** `aiscan all` makes no network calls. Nothing leaves
+  your machine. `cloud-agents` is the opt-in exception: it calls
+  `https://api.cursor.com` with a key you supply, and it is not part of `all`.
 - **Credential stores are detected, never opened for values.** `auth.json`
   and equivalents contribute presence and auth-method only.
 - **Transcripts stay local.** Raw chat content only ever lands in the local
@@ -55,6 +58,7 @@ today?**
 | `git-posture` | repos under `~/repos`, `~/code`, `~/src`, `~/projects`, `~/source` | `.env` in history, hooks, ignore posture, large blobs |
 | `secrets-scan` | chat corpus + repo roots | gitleaks findings with redacted samples |
 | `pii-scan` | chat corpus | regulated-data indicators: cards (Luhn), SSNs, IBANs, emails, phones, public IPs |
+| `cloud-agents` (not in `all`) | Cursor Cloud Agents API (`GET https://api.cursor.com` only) | agent status, repos, branches, PR URLs, latest run, token totals. No dollar cost, no conversation text by default |
 | `tools/mcp-visibility` | MCP configs across all tools | server inventory, definition drift, auth posture (tokens always masked) |
 
 ## Prerequisites
@@ -97,7 +101,24 @@ portable; path resolution is Windows-first. Contributions welcome.
 
 # What would be scanned, reading nothing
 .\aiscan.ps1 discover
+
+# Opt-in Cursor cloud agents (network, not part of `all`)
+$env:CURSOR_API_KEY = "crsr_..."   # user API key from Cursor Dashboard -> API Keys
+.\aiscan.ps1 cloud-agents -OutDir C:\scans\today
 ```
+
+`cloud-agents` uses a user API key you create on the Cursor Dashboard API Keys
+page. It does not read the Cursor IDE session token and it does not call
+`cursor.com/api/dashboard`. The key is sent as `Authorization: Bearer` to
+`https://api.cursor.com` and is never printed or written to evidence. Personal
+keys cannot be limited to read-only; this command still refuses every method
+except GET, refuses every host except `api.cursor.com`, and does not call
+`GET /v1/repositories` or the enterprise Admin API (so there is no dollar
+cost). Without `CURSOR_API_KEY` it exits 0 and prints how to set the variable.
+
+`-IncludeRunResult` stores the latest run's result text. Leave it off unless
+you need that text: it can contain source code or secrets. `-Redact` applies
+to it the same way it applies to other collectors.
 
 MCP server inventory across all five tools:
 
@@ -132,6 +153,7 @@ components/
   git-posture/
   secrets-scan/
   pii-scan/
+  cloud-agents/       # opt-in Cursor Cloud Agents API inventory (not in `all`)
 report/               # HTML briefing builder
 tools/mcp-visibility/ # cross-tool MCP inventory utility
 scripts/test-component.ps1
@@ -145,6 +167,7 @@ SCHEMA.md             # evidence contract (all collectors)
 # One component
 .\scripts\test-component.ps1 -Name claude
 .\scripts\test-component.ps1 -Name codex
+.\scripts\test-component.ps1 -Name cloud-agents
 
 # Everything (all components + integration + mcp-visibility)
 .\scripts\test-component.ps1 -Name all

@@ -5,18 +5,22 @@
 
 .DESCRIPTION
     Runs the collectors against a throwaway temp directory and prints results to
-    the console. Read-only against tool data, offline, no network calls. Use this
-    to see what the collectors find on your own machine.
+    the console. Read-only against tool data. The collectors in 'all' are offline
+    and make no network calls. 'cloud-agents' is opt-in, is not part of 'all',
+    and sends HTTPS GET requests only to the Cursor Cloud Agents API.
 
     Every collector runs on stock Python with no install. secrets-scan needs
     gitleaks.exe on PATH.
 
 .PARAMETER Collector
     One of: claude cowork cursor codex copilot chat-history git-posture
-    secrets-scan pii-scan grok grok-bot discover all. Defaults to 'all' when omitted.
+    secrets-scan pii-scan grok grok-bot cloud-agents discover all. Defaults
+    to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
-    'all' runs all 11 collectors and prints a combined summary.
+    'all' runs the 11 offline collectors and prints a combined summary.
+    'cloud-agents' is not included in 'all'. It reads CURSOR_API_KEY and never
+    prints that key.
 
 .PARAMETER Json
     Dump raw collector JSON instead of pretty-printed PowerShell formatting.
@@ -57,6 +61,12 @@
     Operator name shown on the briefing hero and attestation. Passed to
     build-briefing.py as --operator.
 
+.PARAMETER IncludeRunResult
+    cloud-agents only. Store the latest run's result text in evidence. Off by
+    default because that text can contain source code or secrets. When set,
+    the text follows the same -Redact behavior as other collectors. The API
+    key is never written either way.
+
 .EXAMPLE
     .\aiscan.ps1
     Runs every stdlib collector, unredacted, and prints a combined summary.
@@ -77,12 +87,18 @@
 
 .EXAMPLE
     .\aiscan.ps1 all -Here -Briefing -Customer "Acme Corp" -Operator "Jane Doe"
+
+.EXAMPLE
+    $env:CURSOR_API_KEY = "crsr_..."
+    .\aiscan.ps1 cloud-agents -OutDir C:\scans\today
+    Opt-in inventory of Cursor cloud agents. Not part of 'all'.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false, Position = 0)]
     [ValidateSet("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
-        "git-posture", "secrets-scan", "pii-scan", "grok", "grok-bot", "discover", "all")]
+        "git-posture", "secrets-scan", "pii-scan", "grok", "grok-bot",
+        "cloud-agents", "discover", "all")]
     [string]$Collector = "all",
 
     [switch]$Json,
@@ -101,7 +117,9 @@ param(
 
     [string]$Customer,
 
-    [string]$Operator
+    [string]$Operator,
+
+    [switch]$IncludeRunResult
 )
 
 Set-StrictMode -Version Latest
@@ -141,6 +159,7 @@ $ScriptFor = @{
     "pii-scan"     = "pii-scan\pii-scan.py"
     "grok"         = "grok\grok.py"
     "grok-bot"     = "grok-bot\grok-bot.py"
+    "cloud-agents" = "cloud-agents\cloud-agents.py"
 }
 
 # Collectors run by 'all', in order. pii-scan runs last so it can pick up the
@@ -209,6 +228,9 @@ function Get-CollectorExtras {
             # Path overrides only; pii-scan resolves its own default targets
             # (raw\chat-history export + native chat locations) from these.
             $extra += $script:PathArgs
+        }
+        "cloud-agents" {
+            if ($IncludeRunResult) { $extra += "--include-run-result" }
         }
     }
     return $extra
