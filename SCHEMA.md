@@ -198,6 +198,8 @@ before sharing it.
 | `git-posture` | Repos under user-specified roots | `.env` in history, hook presence, branch protection (opt-in `gh`), large blobs. |
 | `secrets-scan` | `raw/chat-history/` + repo roots | gitleaks wrapper. Findings only, redacted samples. |
 | `cloud-agents` | Official Cloud Agents API, `GET https://api.cursor.com` only, with a user-supplied `CURSOR_API_KEY` | Opt-in. Not part of `aiscan all`. Does not read the Cursor IDE session token or call `cursor.com/api/dashboard`. Does not call `GET /v1/repositories` or the enterprise Admin API. |
+| `telemetry` | Local files only: OTLP JSON / JSON-lines (`--otel-file`) and Splunk JSON or CSV exports (`--splunk-export`) | Opt-in `aiscan telemetry`. Not part of `aiscan all`. Counts tool decisions and usage. Does not store prompts, commands, or secret values. `cost_cents` is copied from a Cursor dashboard usage export and is never estimated from tokens. |
+| `changes` | Derived. Not a collector. `python core/scan_diff.py` compares two evidence roots and writes `evidence/changes.json` | The briefing loader skips this file when it walks collector envelopes and passes it only to the changes section. |
 
 ## Cloud agent inventory (`cloud-agents`)
 
@@ -242,6 +244,33 @@ Each `agents[]` object:
 Run `result` text can contain source code or secrets. It is not stored by default. With the flag, it is passed through `sanitize_text`, so `-Redact` / `AISCAN_REDACT` masks paths and secrets. The API key is removed either way. `/v1/me` is called only to authenticate; the response's email and name are not written.
 
 The API key never appears in this file. Personal keys cannot be scoped to read-only; the collector still refuses every method except GET and every host except `api.cursor.com`.
+
+## Telemetry import (`telemetry`)
+
+`evidence/telemetry.json` is the opt-in telemetry envelope (`collector` = `telemetry`). It is not produced by `aiscan all`. Exit codes for the collector: 0 when at least one export was read, 2 when no file could be read (an envelope is still written, `platform_detected` false), 1 when `--evidence-root` does not exist.
+
+`summary` when an export was read:
+
+| Field | Notes |
+|---|---|
+| `approval_events`, `approvals`, `denials` | Counts of tool decisions. Approvals are `accept`; denials are `reject`. |
+| `config_approvals`, `config_approval_percent` | Accepts whose source is `config` (no prompt). |
+| `approvals_by_tool`, `approvals_by_source`, `approvals_by_group`, `approvals_by_day` | Rollups. Tool names only, not command text. |
+| `usage_events`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `total_tokens` | Sums of exported token columns. |
+| `cost_cents` | Present only when a row carried `cost_cents` from the Cursor dashboard usage export. |
+| `cost_basis` | `cursor_dashboard` when `cost_cents` was in the export, otherwise `tokens_only` or `none`. |
+| `cost_label` | `from the Cursor dashboard usage export` when dollars are shown. Dollars are not estimated from token counts. |
+| `usage_by_tool`, `usage_by_model` | Same rule per row: a dollar figure only when that row had `cost_cents`. |
+
+Prompt text, tool parameters, and secret-shaped attributes are dropped before anything is written.
+
+## Scan-to-scan changes (`changes`)
+
+`evidence/changes.json` is a normal major-version-1 envelope (`collector` = `changes`) plus a `changes` object. `aiscan` writes it when `-Briefing` is set, by running `core/scan_diff.py` against the previous evidence root. The briefing does not iterate this file with the other collectors.
+
+`summary.comparison` is `first_scan` when no earlier scan was found, and `diff` otherwise. Count fields include `findings_added`, `findings_resolved`, `new_high_or_critical`, `drift_warnings`, `mcp_servers_added`, `allow_rules_added`, and `counters_moved`. Per-collector before/after counters live under `changes.collectors`. The file does not contain filesystem paths or transcript text.
+
+A collector that previously had data and now reports none is a drift warning, not a clean result. Long-term trends (token lines over months, and so on) belong in Splunk, not in a pile of HTML files. See [docs/scan-history.md](docs/scan-history.md) and [docs/report-v2.md](docs/report-v2.md).
 
 ## Versioning
 

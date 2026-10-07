@@ -69,12 +69,7 @@ Bookkeeping such as "keys scanned" can stay non-zero and the drift flag still ap
 
 ## Briefing
 
-The HTML piece is not wired into the briefing yet. When it is, the report should load `evidence/changes.json` on its own and skip collector `changes` in the generic collector loop. The briefing loader currently accepts every `evidence/*.json` file whose major version is 1, so leaving `changes` in that loop would show it as just another tool. Call:
-
-- `render_changes_section(env)` in `report/sections/changes.py`
-- `render_changes_nav(env)` in the same file
-
-Both return an empty string if there is no changes evidence. A first scan gets a short note instead of a diff.
+The report v2 briefing loads `evidence/changes.json` on its own. The loader skips collector `changes` while it walks the other `evidence/*.json` files, then passes `load_changes_envelope(...)` to `render_changes_section` and `render_changes_nav`. Both return an empty string if there is no changes evidence; the page then says changes were not collected. A first scan gets a short note instead of a diff. The summary at the top of the page uses one sentence from the same envelope. See [report-v2.md](report-v2.md).
 
 ## Splunk, later
 

@@ -31,12 +31,25 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-LIB_DIR = Path(__file__).resolve().parent.parent / "lib"
-TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+REPORT_DIR = Path(__file__).resolve().parent
+LIB_DIR = REPORT_DIR.parent / "lib"
+CORE_DIR = REPORT_DIR.parent / "core"
+TEMPLATES_DIR = REPORT_DIR / "templates"
 sys.path.insert(0, str(LIB_DIR))
+sys.path.insert(0, str(CORE_DIR))
+sys.path.insert(0, str(REPORT_DIR))
 sys.path.insert(0, str(TEMPLATES_DIR))
 
-from briefing_template import HTML_SHELL  # noqa: E402
+from access_map import build_access_map  # noqa: E402
+from briefing_template import REPORT_V2_CSS, REPORT_V2_JS  # noqa: E402
+from scan_diff import load_changes_envelope  # noqa: E402
+from sections.access_map import render_access_map_section  # noqa: E402
+from sections.changes import render_changes_nav, render_changes_section  # noqa: E402
+from sections.telemetry import (  # noqa: E402
+    has_approval_evidence,
+    render_approvals_section,
+    render_usage_section,
+)
 
 
 def read_frontmatter(evidence_root: Path) -> dict[str, str]:
@@ -63,6 +76,10 @@ def read_frontmatter(evidence_root: Path) -> dict[str, str]:
 
 
 SUPPORTED_MAJOR = 1
+
+# changes.json is a derived envelope, not a collector. The briefing reads it
+# with load_changes_envelope and must not treat it as another tool.
+_NON_COLLECTOR_ENVELOPES = {"changes"}
 
 PLATFORM_COLLECTORS = ("claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot")
 
@@ -209,17 +226,23 @@ def load_evidence(evidence_root: Path) -> dict[str, dict[str, Any]]:
 
     envelopes: dict[str, dict[str, Any]] = {}
     for path in files:
+        if path.name == "changes.json" or path.stem in _NON_COLLECTOR_ENVELOPES:
+            continue
         data = _load_json(path)
         if data is None:
             raise ValueError(f"Invalid JSON: {path}")
+        name = str(data.get("collector") or path.stem)
+        if name in _NON_COLLECTOR_ENVELOPES:
+            continue
         major = _parse_major(str(data.get("version", "")))
         if major is None or major != SUPPORTED_MAJOR:
             raise ValueError(
                 f"Schema version mismatch in {path.name}: "
                 f"got {data.get('version')}, supported major {SUPPORTED_MAJOR}"
             )
-        name = data.get("collector") or path.stem
         envelopes[name] = data
+    if not envelopes:
+        raise FileNotFoundError(f"No evidence JSON files in {evidence_dir}")
     return envelopes
 
 
@@ -2707,8 +2730,198 @@ def render_appendix_grouped(findings: list[dict[str, Any]]) -> tuple[str, str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Assemble & write
+# Report v2: summary, then tabs
 # ─────────────────────────────────────────────────────────────────────────────
+
+_PAGE_TABS = (
+    ("findings", "Findings"),
+    ("access-map", "Access map"),
+    ("changes", "Changes"),
+    ("agents", "Agents / collectors"),
+    ("approvals", "Approvals"),
+    ("usage", "Usage"),
+    ("coverage", "Coverage gaps"),
+)
+
+
+def _as_int(value: Any) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _not_collected(command: str) -> str:
+    return (
+        f'<p class="empty-note">Not collected — run {_esc(command)} to enable.</p>'
+    )
+
+
+def _changes_headline(env: dict[str, Any] | None) -> str:
+    """One sentence for the summary card. Detail stays on the Changes tab."""
+    if not isinstance(env, dict):
+        return "Not collected — run a scan that can see the previous evidence folder to enable."
+    summary = env.get("summary") if isinstance(env.get("summary"), dict) else {}
+    if summary.get("comparison") == "first_scan":
+        label = str(summary.get("current_label") or "This scan")
+        return f"{label} is the baseline. The next scan will show what changed."
+    if _as_int(summary.get("drift_warnings")):
+        return "A collector that used to find data now looks empty."
+    if _as_int(summary.get("new_high_or_critical")):
+        return "New high-severity findings since the last scan."
+    if _as_int(summary.get("collectors_changed")):
+        added = _as_int(summary.get("findings_added"))
+        resolved = _as_int(summary.get("findings_resolved"))
+        return (
+            f"What changed since the last scan: {added} findings added, "
+            f"{resolved} resolved."
+        )
+    return "No material changes since the last scan."
+
+
+def _cloud_headline(env: dict[str, Any] | None) -> str | None:
+    if not isinstance(env, dict) or not env.get("platform_detected", True):
+        return None
+    summary = env.get("summary") if isinstance(env.get("summary"), dict) else {}
+    total = _as_int(summary.get("total_agents"))
+    active = _as_int(summary.get("agents_active"))
+    tokens = _as_int(summary.get("total_tokens"))
+    return (
+        f"{total} cloud agents ({active} active), {tokens:,} tokens. "
+        "Token totals are not dollars."
+    )
+
+
+def _approvals_headline(env: dict[str, Any] | None) -> str | None:
+    if not has_approval_evidence(env):
+        return None
+    summary = env.get("summary") if isinstance(env, dict) and isinstance(env.get("summary"), dict) else {}
+    approvals = _as_int(summary.get("approvals"))
+    denials = _as_int(summary.get("denials"))
+    percent = _as_int(summary.get("config_approval_percent"))
+    approval_word = "approval" if approvals == 1 else "approvals"
+    denial_word = "denial" if denials == 1 else "denials"
+    return (
+        f"{approvals} {approval_word} and {denials} {denial_word} in the imported export. "
+        f"{percent}% of approvals came from config rules, which apply without a prompt."
+    )
+
+
+def _summary_card(title: str, body_html: str) -> str:
+    return (
+        '<article class="summary-card">'
+        f"<h3>{_esc(title)}</h3>"
+        f"{body_html}"
+        "</article>"
+    )
+
+
+def _agent_status_list(envelopes: dict[str, dict[str, Any]]) -> str:
+    items: list[str] = []
+    for key in PLATFORM_COLLECTORS:
+        env = envelopes.get(key)
+        label = TOOL_LABELS.get(key, key)
+        if not env:
+            status = "not collected"
+        elif not _is_detected(env):
+            status = "not detected"
+        else:
+            status = "detected"
+        items.append(
+            f"<li><span>{_esc(label)}</span> <strong>{_esc(status)}</strong></li>"
+        )
+    return f'<ul class="agent-status">{"".join(items)}</ul>'
+
+
+def render_coverage_gaps(envelopes: dict[str, dict[str, Any]]) -> str:
+    """UNCAPTURED schema gaps plus cells this scan cannot decide."""
+    grid = build_access_map(envelopes or {})
+    uncaptured = {
+        (str(item.get("agent_id")), str(item.get("column_id"))): str(item.get("reason") or "")
+        for item in grid.get("uncaptured") or []
+        if isinstance(item, dict)
+    }
+    columns = {str(column["id"]): str(column.get("label") or column["id"]) for column in grid["columns"]}
+    rows: list[str] = []
+    for row in grid["rows"]:
+        agent_id = str(row["id"])
+        for column in grid["columns"]:
+            column_id = str(column["id"])
+            cell = grid["cells"][agent_id][column_id]
+            value = str(cell.get("value") or "unknown")
+            key = (agent_id, column_id)
+            if key in uncaptured:
+                kind = "UNCAPTURED"
+                reason = uncaptured[key]
+            elif value == "unknown":
+                kind = "not determinable"
+                reason = str(cell.get("reason") or "")
+            else:
+                continue
+            rows.append(
+                "<tr>"
+                f"<td>{_esc(row.get('label') or agent_id)}</td>"
+                f"<td>{_esc(columns.get(column_id, column_id))}</td>"
+                f"<td class='mono'>{_esc(kind)}</td>"
+                f"<td>{_esc(reason)}</td>"
+                "</tr>"
+            )
+    if not rows:
+        body = "<p>No coverage gaps in this evidence.</p>"
+    else:
+        body = (
+            '<div class="table-wrap" style="max-height:none"><table>'
+            "<thead><tr><th>Agent</th><th>Question</th><th>Gap</th><th>Why</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table></div>"
+        )
+    return f"""<section id="coverage-gaps" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker"><span class="num">/07</span><span class="kicker-label">COVERAGE GAPS</span></div>
+      <h2 class="h2">What this evidence cannot tell you.</h2>
+      <p class="sub">UNCAPTURED means that collector has no field for the question, so the cell stays unknown on purpose. Not determinable means this scan's evidence does not settle it. Presence and counts only — no prompts, file contents, or secrets.</p>
+    </header>
+    {body}
+  </div>
+</section>"""
+
+
+def _page_tabs(active: str = "findings") -> str:
+    buttons = []
+    for tab_id, label in _PAGE_TABS:
+        selected = "true" if tab_id == active else "false"
+        buttons.append(
+            f'<button type="button" class="page-tab" role="tab" id="tab-{tab_id}" '
+            f'aria-controls="panel-{tab_id}" aria-selected="{selected}" data-page-tab="{tab_id}">'
+            f"{_esc(label)}</button>"
+        )
+    return (
+        '<div class="page-tablist" role="tablist" aria-label="Briefing sections">'
+        + "".join(buttons)
+        + "</div>"
+    )
+
+
+def _page_panel(tab_id: str, inner: str, *, active: bool) -> str:
+    hidden = "" if active else " hidden"
+    active_cls = " is-active" if active else ""
+    return (
+        f'<section class="page-panel{active_cls}" role="tabpanel" id="panel-{tab_id}" '
+        f'aria-labelledby="tab-{tab_id}" data-page-panel="{tab_id}"{hidden}>'
+        f"{inner}</section>"
+    )
+
+
+def _telemetry_or_note(fragment: str, env: dict[str, Any] | None, empty_sentence: str) -> str:
+    if fragment and fragment.strip():
+        return fragment
+    if isinstance(env, dict) and env.get("platform_detected", True):
+        return f'<p class="empty-note">{_esc(empty_sentence)}</p>'
+    return _not_collected("aiscan telemetry -OtelFile <file> -SplunkExport <file>")
 
 
 def build_html(
@@ -2748,64 +2961,190 @@ def build_html(
     # manifest.json itself.
     manifest_short = manifest_full[:16] if len(manifest_full) >= 16 else manifest_full
 
-    css = (TEMPLATES_DIR / "briefing.css").read_text(encoding="utf-8")
+    css = (TEMPLATES_DIR / "briefing.css").read_text(encoding="utf-8") + "\n" + REPORT_V2_CSS
 
-    replacements = {
-        "%%TITLE%%": f"{customer_name} · AI Coding Tool Exposure Review",
-        "%%CSS%%": css,
-        "%%CUSTOMER%%": _esc(customer_name),
-        "%%ENGAGEMENT_DATE%%": _esc(engagement_date),
-        "%%OPERATOR%%": _esc(operator_name),
-        "%%GENERATED_AT%%": _esc(generated_at),
-        "%%MANIFEST_HASH_SHORT%%": _esc(manifest_short),
+    # The changes envelope is loaded on its own. It is not in `envelopes`.
+    changes_env = load_changes_envelope(evidence_root)
+    changes_section = render_changes_section(changes_env)
+    changes_nav = render_changes_nav(changes_env)
+    if changes_section:
+        changes_panel = (changes_nav or "") + changes_section
+    else:
+        changes_panel = _not_collected(
+            "python core/scan_diff.py --current <evidence root>"
+        )
 
-        # Hero
-        "%%HERO_LEDE%%": _esc(render_hero_lede(tool_names, counts)),
-        "%%COVER_STATUS%%": render_cover_status(envelopes, runs_map, counts),
+    telemetry_env = envelopes.get("telemetry")
+    approvals_panel = _telemetry_or_note(
+        render_approvals_section(telemetry_env),
+        telemetry_env,
+        "This telemetry export has no approval events.",
+    )
+    usage_panel = _telemetry_or_note(
+        render_usage_section(telemetry_env),
+        telemetry_env,
+        "This telemetry export has no usage rows.",
+    )
 
-        # Executive
-        "%%EXECUTIVE_HEADLINE%%": _esc(render_executive_headline(counts)),
-        "%%EXECUTIVE_SUB%%": _esc(render_executive_sub(envelopes, counts)),
-        "%%COUNT_CRITICAL%%": str(counts.get("critical", 0)),
-        "%%COUNT_HIGH%%": str(counts.get("high", 0)),
-        "%%COUNT_MEDIUM%%": str(counts.get("medium", 0)),
-        "%%COUNT_LOW%%": str(counts.get("low", 0)),
-        "%%FINDINGS_TOTAL%%": str(sum(counts.values())),
-        "%%SEVERITY_BAR_SEGMENTS%%": render_severity_bar_segments(counts),
-        "%%SEVERITY_BAR_NOTE%%": _esc(render_severity_bar_note(counts, envelopes)),
-        "%%POSTURE_GRID%%": posture_grid,
-        "%%RISK_REGISTER%%": render_risk_register(findings),
+    cloud_env = envelopes.get("cloud-agents")
+    cloud_section = render_cloud_agents_section(cloud_env)
+    if not cloud_section:
+        cloud_section = _not_collected("aiscan cloud-agents")
+    grok_bot_note = "" if envelopes.get("grok-bot") else _not_collected("aiscan grok-bot")
 
-        # Collection scope
-        "%%COLLECTION_SCOPE%%": render_collection_scope(tools_rows),
+    cloud_line = _cloud_headline(cloud_env)
+    approvals_line = _approvals_headline(telemetry_env)
+    summary_cards = [
+        _summary_card("Agents and harnesses", _agent_status_list(envelopes)),
+        _summary_card(
+            "What changed since last scan",
+            f"<p>{_esc(_changes_headline(changes_env))}</p>",
+        ),
+    ]
+    if cloud_line:
+        summary_cards.append(_summary_card("Cloud agents", f"<p>{_esc(cloud_line)}</p>"))
+    if approvals_line:
+        summary_cards.append(
+            _summary_card("Telemetry approvals", f"<p>{_esc(approvals_line)}</p>")
+        )
 
-        # Findings
-        "%%FINDINGS_CATEGORIES%%": str(len({f.get("category") for f in findings if f.get("category")})),
-        "%%FINDINGS_TABS%%": findings_tabs,
-        "%%FINDINGS_PANELS%%": findings_panels,
+    category_count = len({f.get("category") for f in findings if f.get("category")})
+    findings_inner = f"""<section id="findings" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker"><span class="num">/03</span><span class="kicker-label">FINDINGS</span></div>
+      <h2 class="h2">{sum(counts.values())} findings across {category_count} categories.</h2>
+      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags. Samples stay redacted. Per-hit secrets are grouped.</p>
+    </header>
+    <div class="sev-bar">
+      <div class="hdr">
+        <span>severity distribution · n = {sum(counts.values())}</span>
+        <span>{_esc(render_severity_bar_note(counts, envelopes))}</span>
+      </div>
+      <div class="sev-bar-track">{render_severity_bar_segments(counts)}</div>
+    </div>
+    <div class="cases" style="margin-top: 28px;">{render_risk_register(findings)}</div>
+    <div class="filter"><input id="findings-search" type="search" placeholder="filter by title, sample text, or tag…" /></div>
+    <div class="tab-bar" id="findings-tabs">{findings_tabs}</div>
+    {findings_panels}
+    <header class="sh" style="margin-top: 48px;">
+      <div class="kicker"><span class="num">/08</span><span class="kicker-label">APPENDIX</span></div>
+      <h2 class="h2">Evidence index</h2>
+      <p class="sub">Identical findings collapse into one row with a hit count. Full per-row detail stays in the local CSV, not in this page.</p>
+    </header>
+    {appendix_note}
+    <div class="table-wrap appendix-table" style="max-height: none;">
+      <table>
+        <thead><tr><th>Severity</th><th>Finding</th><th>Hits</th><th>Evidence reference</th></tr></thead>
+        <tbody>{appendix_rows}</tbody>
+      </table>
+    </div>
+  </div>
+</section>"""
 
-        # Permissions / chat / secrets / git
-        "%%PERMISSIONS_SECTION%%": render_permissions_section(envelopes),
-        "%%CHAT_SECTION%%": render_chat_section(envelopes.get("chat-history")),
-        "%%SECRETS_SECTION%%": render_secrets_section(secrets_env),
-        "%%GIT_SECTION%%": render_git_section(git_env),
-        "%%CLOUD_AGENTS_NAV%%": render_cloud_agents_nav(envelopes.get("cloud-agents")),
-        "%%CLOUD_AGENTS_SECTION%%": render_cloud_agents_section(envelopes.get("cloud-agents")),
-        "%%SECRETS_TOTAL_HITS%%": str(total_secret_hits),
-        "%%GIT_REPOS%%": str(git_repos),
+    agents_inner = f"""<section id="agents" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker"><span class="num">/04</span><span class="kicker-label">AGENTS AND COLLECTORS</span></div>
+      <h2 class="h2">What each collector recorded.</h2>
+      <p class="sub">Presence, counts, and posture only. Prompts, transcript text, and secret values stay out of this page. Grok Bot is the desktop app, separate from Grok Build. Cloud agents are an opt-in inventory.</p>
+    </header>
+    {render_cover_status(envelopes, runs_map, counts)}
+    {posture_grid}
+    <header class="sh" style="margin-top: 36px;">
+      <div class="kicker"><span class="num">/04b</span><span class="kicker-label">PERMISSIONS</span></div>
+      <h2 class="h2">Configured permission surface.</h2>
+    </header>
+    {grok_bot_note}
+    {render_permissions_section(envelopes)}
+    {cloud_section}
+    <header class="sh" style="margin-top: 36px;">
+      <div class="kicker"><span class="num">/05</span><span class="kicker-label">CHAT, SECRETS, GIT</span></div>
+      <h2 class="h2">Counts from chat, secrets, and git collectors.</h2>
+      <p class="sub">Transcript text stays in local raw/. This page shows file counts and redacted hit totals.</p>
+    </header>
+    {render_chat_section(envelopes.get("chat-history"))}
+    <div class="two-col">
+      <div class="panel"><h3>Secrets scan · {total_secret_hits} hits</h3>{render_secrets_section(secrets_env)}</div>
+      <div class="panel"><h3>Git posture · {git_repos} repos</h3>{render_git_section(git_env)}</div>
+    </div>
+    <header class="sh" style="margin-top: 36px;">
+      <div class="kicker"><span class="num">/07</span><span class="kicker-label">COLLECTION SCOPE</span></div>
+      <h2 class="h2">How this evidence was produced.</h2>
+    </header>
+    {render_collection_scope(tools_rows)}
+    <div class="table-wrap" style="max-height: none;"><table>
+      <thead><tr><th>Collector</th><th>Work performed</th><th>Completed at</th><th>Duration</th><th>Version</th><th>Status</th></tr></thead>
+      <tbody>{render_collectors_table(envelopes, runs_list)}</tbody>
+    </table></div>
+    <div class="attestation">
+      <p><strong style="color: var(--green); font-weight: 500;">Manifest SHA-256</strong> (first 16 chars): <code>{_esc(manifest_short)}</code></p>
+      <p>Raw evidence stays in the local output directory.</p>
+      <div class="sig-line">{_esc(operator_name)} · {_esc(generated_at)}</div>
+    </div>
+  </div>
+</section>"""
 
-        # Methodology
-        "%%COLLECTORS_TABLE%%": render_collectors_table(envelopes, runs_list),
-
-        # Appendix
-        "%%APPENDIX_NOTE%%": appendix_note,
-        "%%APPENDIX_GROUPED_ROWS%%": appendix_rows,
-    }
-
-    html_out = HTML_SHELL
-    for token, value in replacements.items():
-        html_out = html_out.replace(token, value)
-    return html_out
+    title = _esc(f"{customer_name} · AI Coding Tool Exposure Review")
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>{title}</title>
+  <style>
+{css}
+  </style>
+</head>
+<body>
+  <header class="report-summary" id="top">
+    <div class="wrap">
+      <div class="mono-eyebrow"><span>ENDPOINT POSTURE BRIEFING</span></div>
+      <h1 class="display">AI coding tool exposure<span class="display-period">.</span></h1>
+      <p class="lede">{_esc(render_hero_lede(tool_names, counts))}</p>
+      <ul class="meta-list">
+        <li><span class="meta-dash">—</span>Customer · <strong>{_esc(customer_name)}</strong></li>
+        <li><span class="meta-dash">—</span>Engagement · {_esc(engagement_date)}</li>
+        <li><span class="meta-dash">—</span>Operator · {_esc(operator_name)}</li>
+        <li><span class="meta-dash">—</span>Manifest SHA-256 · {_esc(manifest_short)}…</li>
+      </ul>
+      <header class="sh">
+        <div class="kicker"><span class="num">/01</span><span class="kicker-label">EXECUTIVE SUMMARY</span></div>
+        <h2 class="h2">{_esc(render_executive_headline(counts))}</h2>
+        <p class="sub">{_esc(render_executive_sub(envelopes, counts))}</p>
+      </header>
+      <div class="sev-strip">
+        <div><div class="lbl">Critical</div><div class="v red">{counts.get("critical", 0)}</div><div class="note">action this week</div></div>
+        <div><div class="lbl">High</div><div class="v amber">{counts.get("high", 0)}</div><div class="note">30-day window</div></div>
+        <div><div class="lbl">Medium</div><div class="v yellow">{counts.get("medium", 0)}</div><div class="note">policy / backlog</div></div>
+        <div><div class="lbl">Low</div><div class="v green">{counts.get("low", 0)}</div><div class="note">informational</div></div>
+      </div>
+      <div class="summary-cards">{''.join(summary_cards)}</div>
+      <p class="surface-note">Presence and counts only. This page does not include prompts, transcript text, or secret values.</p>
+    </div>
+  </header>
+  {_page_tabs()}
+  <main>
+    {_page_panel("findings", findings_inner, active=True)}
+    {_page_panel("access-map", render_access_map_section(envelopes), active=False)}
+    {_page_panel("changes", changes_panel, active=False)}
+    {_page_panel("agents", agents_inner, active=False)}
+    {_page_panel("approvals", approvals_panel, active=False)}
+    {_page_panel("usage", usage_panel, active=False)}
+    {_page_panel("coverage", render_coverage_gaps(envelopes), active=False)}
+  </main>
+  <footer class="footer">
+    <div class="foot-inner">
+      <span>aiscan briefing · {_esc(customer_name)}</span>
+      <span class="foot-meta"><span>{_esc(engagement_date)}</span></span>
+    </div>
+  </footer>
+  <script>
+{REPORT_V2_JS}
+  </script>
+</body>
+</html>
+"""
 
 
 def build_parser() -> argparse.ArgumentParser:

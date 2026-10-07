@@ -5,8 +5,8 @@
 
 .PARAMETER Name
     Component name: claude, cowork, cursor, codex, copilot, grok, grok-bot,
-    chat-history, git-posture, secrets-scan, pii-scan, cloud-agents, core,
-    integration, all.
+    chat-history, git-posture, secrets-scan, pii-scan, cloud-agents,
+    telemetry-import, core, integration, all.
 
 .EXAMPLE
     .\scripts\test-component.ps1 -Name codex
@@ -18,7 +18,7 @@ param(
     [ValidateSet(
         "claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot",
         "chat-history", "git-posture", "secrets-scan", "pii-scan",
-        "cloud-agents", "core", "integration", "all"
+        "cloud-agents", "telemetry-import", "core", "integration", "all"
     )]
     [string]$Name
 )
@@ -69,7 +69,7 @@ if ($Name -eq "all") {
     $order = @(
         "core", "claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot",
         "chat-history", "git-posture", "secrets-scan", "pii-scan",
-        "cloud-agents", "integration"
+        "cloud-agents", "telemetry-import", "integration"
     )
     foreach ($n in $order) {
         & $PSCommandPath -Name $n

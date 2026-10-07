@@ -132,8 +132,10 @@ class AccessMapSyntheticTests(unittest.TestCase):
                 self.assertTrue(cell["sources"])
 
     def test_headline_counts_yes_only(self) -> None:
-        self.assertEqual(self.grid["counts"], {"shell_yes": 2, "git_yes": 0})
-        self.assertEqual(self.grid["headline"], "2 agents can run shell commands; 0 can push to GitHub.")
+        # Claude and Codex can run shell. The synthetic cloud-agents envelope
+        # records a pull request, so one agent can push. Grok Bot does not.
+        self.assertEqual(self.grid["counts"], {"shell_yes": 2, "git_yes": 1})
+        self.assertEqual(self.grid["headline"], "2 agents can run shell commands; 1 can push to GitHub.")
 
     def test_claude_synthetic(self) -> None:
         cells = self.grid["cells"]["claude"]
@@ -183,15 +185,25 @@ class AccessMapSyntheticTests(unittest.TestCase):
         self.assertIsNone(self.grid["cells"]["copilot"]["network"]["mcp_count"])
         self.assertEqual(self.grid["cells"]["copilot"]["network"]["value"], "unknown")
 
-    def test_optional_collectors_missing_are_unknown(self) -> None:
-        self.assertNotIn("grok-bot", self.envelopes)
-        self.assertNotIn("cloud-agents", self.envelopes)
-        for agent in ("grok-bot", "cloud-agents", "cowork"):
-            row = next(item for item in self.grid["rows"] if item["id"] == agent)
-            self.assertFalse(row["present"])
-            for cell in self.grid["cells"][agent].values():
-                self.assertEqual(cell["value"], "unknown")
-                self.assertIn("Not collected", cell["reason"])
+    def test_optional_collectors_in_the_integrated_demo(self) -> None:
+        # grok-bot and cloud-agents ship in the synthetic demo after those
+        # collectors were merged. Cowork still has no demo envelope.
+        self.assertIn("grok-bot", self.envelopes)
+        self.assertIn("cloud-agents", self.envelopes)
+        self.assertNotIn("cowork", self.envelopes)
+        grok = self.grid["cells"]["grok-bot"]
+        self.assertEqual(grok["shell"]["value"], "unknown")
+        self.assertIn("not_determinable_offline", grok["shell"]["reason"])
+        self.assertEqual(grok["secrets"]["value"], "yes")
+        cloud = self.grid["cells"]["cloud-agents"]
+        self.assertEqual(cloud["git"]["value"], "yes")
+        self.assertEqual(cloud["shell"]["value"], "unknown")
+        self.assertIn("does not record shell", cloud["shell"]["reason"])
+        row = next(item for item in self.grid["rows"] if item["id"] == "cowork")
+        self.assertFalse(row["present"])
+        for cell in self.grid["cells"]["cowork"].values():
+            self.assertEqual(cell["value"], "unknown")
+            self.assertIn("Not collected", cell["reason"])
 
     def test_secrets_scan_does_not_bleed_into_agents(self) -> None:
         self.assertGreaterEqual(self.envelopes["secrets-scan"]["summary"]["hits"], 1)
@@ -524,7 +536,7 @@ class AccessMapRenderTests(unittest.TestCase):
         envelopes["claude"]["rules"][0]["rule"] = "mcp__<b>"
         html = render_access_map_section(envelopes)
         self.assertIn('id="access-map"', html)
-        self.assertIn("2 agents can run shell commands; 0 can push to GitHub.", html)
+        self.assertIn("2 agents can run shell commands; 1 can push to GitHub.", html)
         self.assertIn("access-legend", html)
         self.assertIn("access-cell--yes", html)
         self.assertIn("access-cell--unknown", html)

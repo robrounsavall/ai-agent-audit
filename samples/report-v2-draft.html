@@ -1,0 +1,2155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Test User · AI Coding Tool Exposure Review</title>
+  <style>
+:root{
+    /* Dark editorial skin — the briefing always renders dark.
+       (@media print below still flattens to white for paper.) */
+    color-scheme: dark;
+    --bg:       #121315;
+    --bg-alt:   #17191b;
+    --bg-card:  #17191b;
+    --fg:       #f4f5f6;
+    --fg-2:     #d0d6e0;
+    --fg-3:     #9aa0a8;
+    --fg-4:     #6b7078;
+    --line:     rgba(255,255,255,.12);
+    --line-2:   rgba(255,255,255,.16);
+    --accent:   #78a9ff;
+    --accent-2: rgba(120,169,255,.15);
+    --green:    #10b981;
+    --red:      #f07f7f;
+    --red-bg:   rgba(240,127,127,.12);
+    --amber:    #fb923c;
+    --amber-bg: rgba(251,146,60,.10);
+    --yellow:   #fbbf24;
+
+    --nav-bg:   rgba(18,19,21,.72);
+    --fill:     rgba(255,255,255,.03);
+    --code-bg:  #212429;
+    --radius:   .55rem;
+    --ring:     0 0 0 1px rgba(255,255,255,.08);
+    --shadow:   0 2px 8px rgba(0,0,0,.3);
+
+    --f-sans:    "Inter", ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+    --f-mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --f-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --f-serif:   "Inter", ui-sans-serif, system-ui, sans-serif;
+
+    --pad-x: clamp(20px, 5vw, 56px);
+    --section-y: clamp(64px, 9vw, 128px);
+    --max-w: 1200px;
+  }
+
+  *{ box-sizing: border-box; }
+  html{ scroll-behavior: smooth; scroll-padding-top: 64px; }
+  body{
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--f-sans);
+    font-size: 16px;
+    line-height: 1.55;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection{ background: color-mix(in oklch, var(--accent), transparent 70%); color: var(--fg); }
+
+  a{ color: inherit; text-decoration: none; }
+
+  /* ───── NAV ───── */
+  .nav{
+    position: sticky; top: 0; z-index: 50;
+    background: var(--nav-bg);
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner{
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 var(--pad-x);
+    height: 60px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 24px;
+  }
+  .brand{
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 13px; color: var(--fg);
+    font-weight: 500;
+  }
+  .brand-mark{
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 1px;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+  }
+  .nav-links{
+    display: none;
+    gap: 28px;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+  }
+  .nav-links a:hover{ color: var(--fg); }
+  .nav-cta{
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    color: var(--fg-2);
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--line-2);
+  }
+  .nav-cta .dot{ width:6px; height:6px; border-radius:50%; background: var(--accent); }
+  @media (min-width: 800px){ .nav-links{ display: flex; } }
+
+  /* ───── WRAP / SECTIONS ───── */
+  .wrap{
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 var(--pad-x);
+    position: relative;
+    z-index: 2;
+  }
+  .section{
+    padding: var(--section-y) 0;
+    border-top: 1px solid var(--line);
+    position: relative;
+  }
+  .section--alt{ background: var(--bg-alt); }
+
+  /* ───── SECTION HEADER ───── */
+  .sh{
+    margin-bottom: clamp(32px, 5vw, 56px);
+    display: grid;
+    gap: 14px;
+  }
+  .kicker{
+    display: inline-flex; align-items: center; gap: 12px;
+    font-family: var(--f-mono);
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--fg-3);
+  }
+  .num{ color: var(--accent); font-variant-numeric: tabular-nums; }
+  .kicker-label::before{ content: "— "; color: var(--fg-4); }
+  .h2{
+    font-family: var(--f-display);
+    font-size: clamp(28px, 4.6vw, 52px);
+    line-height: 1.05;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .sub{
+    margin: 0; max-width: 64ch;
+    color: var(--fg-3); font-size: 16px; line-height: 1.55;
+  }
+
+  /* 12 col grid */
+  .grid12{
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 24px 32px;
+  }
+  .col-7{ grid-column: span 12; }
+  .col-4{ grid-column: span 12; }
+  @media (min-width: 900px){
+    .col-7{ grid-column: span 7; }
+    .col-4{ grid-column: span 4; }
+    .col-offset-1{ grid-column-start: 9; }
+  }
+
+  /* ───── HERO / COVER ───── */
+  .hero{
+    padding: clamp(48px, 8vw, 96px) 0 clamp(56px, 9vw, 112px);
+    border-bottom: 1px solid var(--line);
+  }
+  .hero-inner{
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 var(--pad-x);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 40px;
+    align-items: stretch;
+  }
+  @media (min-width: 900px){
+    .hero-inner{
+      grid-template-columns: 1.05fr 1fr;
+      gap: 48px;
+      min-height: 70vh;
+    }
+  }
+  .hero-text{ display: flex; flex-direction: column; justify-content: center; padding-top: 24px; }
+  .mono-eyebrow{
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--f-mono); font-size: 11px;
+    letter-spacing: .14em; text-transform: uppercase;
+    color: var(--fg-3);
+    margin-bottom: 28px;
+  }
+  .mono-eyebrow > :first-child{ color: var(--accent); }
+  .display{
+    font-family: var(--f-display);
+    font-size: clamp(48px, 8.4vw, 108px);
+    line-height: .94;
+    font-weight: 500;
+    letter-spacing: -0.04em;
+    margin: 0 0 24px;
+    text-wrap: balance;
+  }
+  .display-period{ color: var(--accent); }
+  .lede{
+    font-size: clamp(18px, 2vw, 22px);
+    color: var(--fg-2);
+    line-height: 1.4;
+    max-width: 40ch;
+    margin: 0 0 28px;
+    text-wrap: pretty;
+  }
+  .lede-emph{
+    font-family: var(--f-serif);
+    font-style: italic;
+    font-size: clamp(18px, 1.6vw, 22px);
+    line-height: 1.35;
+    color: var(--fg);
+    margin: 0 0 28px;
+    letter-spacing: -0.01em;
+    max-width: 40ch;
+  }
+  .lede-emph em{ color: var(--accent); font-style: italic; }
+  .meta-list{
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 8px;
+    font-family: var(--f-mono); font-size: 12.5px;
+    color: var(--fg-3);
+  }
+  .meta-dash{ color: var(--accent); margin-right: 10px; }
+
+  /* Hero aside — evidence status */
+  .hero-aside{
+    position: relative;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    overflow: hidden;
+    min-height: 420px;
+    display: flex; flex-direction: column;
+  }
+  .evidence-panel-head{
+    padding: 20px 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .evidence-panel-head span{
+    display: block;
+    margin-bottom: 8px;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .14em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .evidence-panel-head strong{
+    font-family: var(--f-display);
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .evidence-panel-body{
+    padding: 22px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .evidence-metrics{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .evidence-metrics div{
+    padding: 16px 14px;
+    border-right: 1px solid var(--line);
+  }
+  .evidence-metrics div:last-child{ border-right: 0; }
+  .evidence-metrics span{
+    display: block;
+    margin-bottom: 8px;
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    color: var(--fg-3);
+    text-transform: uppercase;
+  }
+  .evidence-metrics strong{
+    font-family: var(--f-display);
+    font-size: 30px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .severity-inline{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .severity-inline span{
+    border: 1px solid var(--line);
+    padding: 5px 8px;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .severity-inline .critical{
+    color: var(--red);
+    border-color: color-mix(in oklab, var(--red) 50%, var(--line));
+  }
+  .evidence-status-table th,
+  .evidence-status-table td{
+    padding: 10px 8px;
+    font-size: 12.5px;
+  }
+  .evidence-status-table th{
+    position: static;
+    font-size: 9.5px;
+  }
+  .evidence-status-table td{
+    color: var(--fg-2);
+  }
+  .status-dot{
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 8px;
+    border-radius: 50%;
+    background: var(--fg-4);
+  }
+  .status-dot.ok{ background: var(--green); }
+  .status-dot.muted{ background: var(--fg-4); }
+
+  /* ───── PROSE ───── */
+  .prose p{
+    margin: 0 0 1em;
+    font-size: 16.5px; line-height: 1.7;
+    color: var(--fg-2);
+    text-wrap: pretty;
+    max-width: 62ch;
+  }
+  .prose p:last-child{ margin-bottom: 0; }
+  .lead-p{ font-size: 19px !important; color: var(--fg) !important; }
+  .aside{
+    display: flex; gap: 12px;
+    margin: 24px 0;
+    padding: 14px 18px;
+    border-left: 2px solid var(--accent);
+    background: linear-gradient(90deg, var(--accent-2), transparent 70%);
+    font-family: var(--f-mono);
+    font-size: 13.5px;
+    color: var(--fg);
+    line-height: 1.55;
+    max-width: 62ch;
+  }
+  .aside-mark{ color: var(--accent); font-family: var(--f-sans); }
+  .aside.red{
+    border-left-color: var(--red);
+    background: linear-gradient(90deg, var(--red-bg), transparent 70%);
+  }
+  .aside.red .aside-mark{ color: var(--red); }
+
+  /* ───── SIDE STATS ───── */
+  .side{ display: flex; flex-direction: column; gap: 16px; }
+  .stat{
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+  .stat-num{
+    font-family: var(--f-display);
+    font-size: 36px; font-weight: 500;
+    letter-spacing: -0.03em; line-height: 1;
+    color: var(--fg);
+  }
+  .stat-num.red{ color: var(--red); }
+  .stat-num.accent{ color: var(--accent); }
+  .stat-num span{
+    font-family: var(--f-mono);
+    font-size: 14px; color: var(--fg-4); margin-left: 4px;
+    font-weight: 400;
+  }
+  .stat-lbl{
+    font-family: var(--f-mono); font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--fg-3); margin-top: 6px;
+  }
+
+  /* Severity hero strip */
+  .sev-strip{
+    margin-top: clamp(24px, 4vw, 36px);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .sev-strip > div{
+    padding: 22px 24px;
+    border-right: 1px solid var(--line);
+  }
+  .sev-strip > div:last-child{ border-right: 0; }
+  .sev-strip .lbl{
+    font-family: var(--f-mono); font-size: 11px;
+    letter-spacing: .14em; color: var(--fg-3);
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .sev-strip .v{
+    font-family: var(--f-display);
+    font-size: 48px; font-weight: 500;
+    letter-spacing: -0.03em; line-height: 1;
+    color: var(--fg);
+  }
+  .sev-strip .v.red{ color: var(--red); }
+  .sev-strip .v.amber{ color: var(--amber); }
+  .sev-strip .v.yellow{ color: var(--yellow); }
+  .sev-strip .v.green{ color: var(--green); }
+  .sev-strip .note{
+    margin-top: 12px;
+    font-family: var(--f-mono); font-size: 12px;
+    color: var(--fg-4);
+  }
+  @media (max-width: 700px){ .sev-strip{ grid-template-columns: 1fr 1fr; } }
+
+  /* Severity proportion bar */
+  .sev-bar{
+    margin-top: 28px;
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 22px;
+  }
+  .sev-bar .hdr{
+    display:flex; justify-content:space-between; align-items: baseline;
+    padding-bottom: 14px; border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    font-family: var(--f-mono);
+    font-size: 11px; color: var(--fg-3);
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  .sev-bar-track{
+    height: 38px;
+    display: flex;
+    overflow: hidden;
+  }
+  .sev-bar-track > div{
+    display: flex; align-items: center;
+    padding: 0 12px;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    gap: 8px;
+  }
+  .sev-bar-track > div .n{ font-family: var(--f-display); font-size: 16px; font-weight: 500; }
+  .sev-bar-track .crit{ background: var(--red); color: var(--bg); }
+  .sev-bar-track .high{ background: var(--accent); color: var(--bg); }
+  .sev-bar-track .med { background: var(--yellow); color: var(--bg); }
+  .sev-bar-track .low { background: var(--green); color: var(--bg); }
+
+  /* ───── CASES (risk register / findings) ───── */
+  .cases{ display:flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .case{
+    padding: clamp(28px, 4vw, 44px) 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .case-head{
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: start;
+    gap: 16px 20px;
+    margin-bottom: 18px;
+  }
+  .case-num{
+    font-family: var(--f-mono);
+    color: var(--accent);
+    font-size: 12px;
+    padding-top: 8px;
+    min-width: 40px;
+  }
+  .case-title{
+    font-family: var(--f-display);
+    font-size: clamp(22px, 3vw, 30px);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+    line-height: 1.15;
+  }
+  .case-meta{
+    font-family: var(--f-mono); font-size: 12px;
+    color: var(--fg-3);
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .dot-sep{ color: var(--fg-4); }
+  .status{
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--f-mono); font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--fg-2);
+    white-space: nowrap;
+    padding-top: 8px;
+  }
+  .status-dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--fg-4); }
+  .status.is-crit .status-dot{ background: var(--red); }
+  .status.is-active .status-dot{ background: var(--accent); }
+  .status.is-done .status-dot{ background: var(--green); }
+  .case-summary{
+    font-family: var(--f-display);
+    font-size: clamp(17px, 2vw, 21px);
+    line-height: 1.4;
+    margin: 0 0 24px;
+    max-width: 62ch;
+    letter-spacing: -0.01em;
+    color: var(--fg);
+  }
+  .case-grid{
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+  }
+  @media (min-width: 800px){
+    .case-grid{ grid-template-columns: repeat(3, 1fr); gap: 32px; }
+  }
+  .case-lbl{
+    font-family: var(--f-mono); font-size: 10.5px;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--fg-3); margin-bottom: 10px;
+  }
+  .case-grid p{
+    margin: 0; font-size: 14.5px; line-height: 1.6;
+    color: var(--fg-2);
+  }
+  .case-foot{
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 16px;
+    margin-top: 8px;
+  }
+  .tags{ display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag{
+    display: inline-flex; align-items: center;
+    font-family: var(--f-mono); font-size: 10.5px;
+    letter-spacing: .06em; text-transform: uppercase;
+    color: var(--fg-3);
+    border: 1px solid var(--line-2);
+    padding: 4px 8px;
+  }
+  .tag.crit{ color: var(--red); border-color: color-mix(in oklch, var(--red), transparent 50%); }
+  .tag.high{ color: var(--accent); border-color: color-mix(in oklch, var(--accent), transparent 50%); }
+  .tag.green{ color: var(--green); border-color: color-mix(in oklch, var(--green), transparent 50%); }
+
+  /* ───── PILLS (for tables) ───── */
+  .pill{
+    display:inline-flex; align-items:center;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    padding: 3px 8px;
+    font-weight: 500;
+    border: 1px solid var(--line-2);
+    color: var(--fg-2);
+  }
+  .pill.critical{ color: var(--red); border-color: color-mix(in oklch, var(--red), transparent 50%); }
+  .pill.high   { color: var(--accent); border-color: color-mix(in oklch, var(--accent), transparent 50%); }
+  .pill.medium { color: var(--yellow); border-color: color-mix(in oklch, var(--yellow), transparent 50%); }
+  .pill.low    { color: var(--green); border-color: color-mix(in oklch, var(--green), transparent 50%); }
+  .pill.ok     { color: var(--green); border-color: color-mix(in oklch, var(--green), transparent 50%); }
+  .pill.skipped{ color: var(--fg-3); }
+
+  /* ───── CODE ───── */
+  code{
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    background: rgba(255,255,255,.03);
+    border: 1px solid var(--line);
+    padding: 2px 6px;
+    color: var(--fg-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  code.block{
+    display: block;
+    padding: 10px 12px;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .mono{ font-family: var(--f-mono); }
+
+  /* ───── TABLES ───── */
+  .table-wrap{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    overflow: auto;
+    max-height: 580px;
+  }
+  table{ width:100%; border-collapse: collapse; }
+  th, td{
+    padding: 14px 16px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--line);
+    font-size: 14.5px;
+    color: var(--fg-2);
+  }
+  th{
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    background: var(--bg-card);
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    font-weight: 500;
+    border-bottom: 1px solid var(--line-2);
+    position: sticky;
+    top: 0;
+  }
+  tbody tr:last-child td{ border-bottom: 0; }
+  tbody tr:hover{ background: rgba(255,255,255,.02); }
+  td.mono{ font-family: var(--f-mono); font-size: 12.5px; color: var(--fg-3); }
+  td.num{
+    font-variant-numeric: tabular-nums;
+    font-family: var(--f-mono);
+    color: var(--fg-2);
+  }
+  td.num.hot{ color: var(--red); font-weight: 500; }
+  .posture-grid-caption{
+    margin: 14px 0 0;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--fg-3);
+  }
+
+  /* ───── TOOLS COVERAGE ───── */
+  .coverage{
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0;
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+  }
+  .coverage .cell{
+    padding: 22px 18px;
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    gap: 8px;
+  }
+  .coverage .cell:last-child{ border-right: 0; }
+  .coverage .cell.skipped{ background: rgba(255,255,255,.015); }
+  .coverage .name{
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    color: var(--fg-3);
+    text-transform: uppercase;
+  }
+  .coverage .det{
+    font-family: var(--f-display);
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .coverage .det.no{ color: var(--fg-4); }
+  .coverage .ver,
+  .coverage .evidence-label{
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .coverage .ct{
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--fg-4);
+  }
+  @media (max-width: 900px){ .coverage{ grid-template-columns: repeat(2, 1fr); } }
+
+  .collection-scope{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    margin-bottom: clamp(32px, 5vw, 52px);
+  }
+  .collection-scope-head{
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .collection-scope-head h3{
+    margin: 0;
+    font-family: var(--f-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .collection-scope-head p{
+    margin: 0;
+    max-width: 680px;
+    font-size: 13px;
+    color: var(--fg-3);
+    line-height: 1.5;
+  }
+  .collection-scope table th,
+  .collection-scope table td{
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+  .collection-scope table th{
+    position: static;
+  }
+
+  /* ───── TABS ───── */
+  .tab-bar{
+    display: flex; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line);
+    margin-top: 28px;
+    gap: 0;
+  }
+  .tab-btn{
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .06em;
+    color: var(--fg-3);
+    padding: 14px 18px;
+    cursor: pointer;
+    font-weight: 500;
+    margin-bottom: -1px;
+    text-transform: uppercase;
+  }
+  .tab-btn .ct{ color: var(--fg-4); font-weight: 400; margin-left: 8px; }
+  .tab-btn:hover{ color: var(--fg); }
+  .tab-btn.active{
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+  }
+  .tab-btn.active .ct{ color: var(--accent); }
+  .tab-panel{ display:none; padding-top: 20px; }
+  .tab-panel.active{ display:block; }
+
+  /* ───── FILTER ───── */
+  .filter{
+    margin: 16px 0;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .filter input{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 12px 14px;
+    font-family: var(--f-mono);
+    font-size: 13px;
+    color: var(--fg);
+    flex: 1;
+    border-radius: 0;
+  }
+  .filter input::placeholder{ color: var(--fg-4); }
+  .filter input:focus{ outline: none; border-color: var(--accent); }
+
+  /* ───── PERMISSIONS ───── */
+  .platform{
+    margin-top: clamp(36px, 5vw, 56px);
+  }
+  .platform-head{
+    display:flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 16px;
+    margin-bottom: 22px;
+    flex-wrap: wrap; gap: 16px;
+  }
+  .platform-head h3{
+    margin: 0;
+    font-family: var(--f-display);
+    font-size: clamp(22px, 3vw, 28px);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+  .platform-head .stats{
+    display:flex; gap: 22px;
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    color: var(--fg-3);
+    letter-spacing: .04em;
+  }
+  .platform-head .stats b{ color: var(--fg); font-weight: 500; }
+  .platform-head .stats b.warn{ color: var(--accent); }
+  .perm-summary{
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 22px;
+  }
+  .perm-summary .ps{
+    padding: 18px 22px;
+    border-right: 1px solid var(--line);
+  }
+  .perm-summary .ps:last-child{ border-right: 0; }
+  .perm-summary .label{
+    font-family: var(--f-mono); font-size: 10.5px;
+    color: var(--fg-3); letter-spacing: .12em;
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .perm-summary .n{
+    font-family: var(--f-display);
+    font-size: 28px; font-weight: 500;
+    letter-spacing: -0.02em; line-height: 1;
+    color: var(--fg);
+  }
+  .perm-summary .n.risk-word{
+    font-size: 24px;
+    letter-spacing: 0;
+  }
+  .perm-summary .note{ font-family: var(--f-mono); font-size: 11px; color: var(--fg-4); margin-top: 6px; }
+  @media (max-width: 900px){ .perm-summary{ grid-template-columns: 1fr 1fr; } .perm-summary .ps:nth-child(2){ border-right: 0; } }
+
+  .rule-group{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+  }
+  .mcp-summary{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+    margin-bottom: 18px;
+  }
+  .mode-summary{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+    margin-bottom: 18px;
+  }
+  .telemetry-summary{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+    margin-bottom: 18px;
+  }
+  .mcp-summary .rule-group-head{
+    margin-bottom: 10px;
+  }
+  .mode-summary .rule-group-head{
+    margin-bottom: 10px;
+  }
+  .telemetry-summary .rule-group-head{
+    margin-bottom: 10px;
+  }
+  .mode-grid{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+  }
+  .mode-chip{
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,.025);
+    padding: 12px;
+    min-height: 74px;
+  }
+  .mode-chip span{
+    display: block;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    line-height: 1.35;
+  }
+  .mode-chip strong{
+    display: block;
+    margin-top: 10px;
+    font-family: var(--f-mono);
+    font-size: 24px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .mode-chip strong.small-value{
+    font-size: 13px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  /* Logging-route chips are text labels, not big numeric stats — one size. */
+  .route-chip{
+    min-height: 88px;
+  }
+  .route-chip strong{
+    font-family: var(--f-mono);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .mcp-table th,
+  .mcp-table td{
+    padding: 10px 12px;
+  }
+  .mcp-table th{
+    position: static;
+  }
+  .mcp-table code{
+    background: transparent;
+  }
+  .allow-summary{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 18px 22px;
+  }
+  .allow-source-grid{
+    display: grid;
+    gap: 16px;
+  }
+  .allow-source{
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+  .allow-source:first-child{
+    border-top: 0;
+    padding-top: 0;
+  }
+  .codex-surface-grid{
+    display: grid;
+    grid-template-columns: minmax(260px, .9fr) minmax(360px, 1.4fr);
+    gap: 18px;
+  }
+  .codex-surface-card{
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+  .codex-surface-card:first-child{
+    border-top: 0;
+    padding-top: 0;
+  }
+  .surface-note{
+    margin: 0 0 12px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--fg-3);
+  }
+  .surface-note code{
+    background: transparent;
+    color: var(--fg-2);
+    padding: 0;
+  }
+  .allow-source-head{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .allow-source-head h5{
+    margin: 0;
+    font-family: var(--f-display);
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: 0;
+  }
+  .allow-source-head span{
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+  }
+  .allow-cats{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .allow-cats span{
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    border: 1px solid var(--line);
+    padding: 4px 8px;
+  }
+  .allow-cats b{
+    color: var(--fg);
+    font-weight: 500;
+  }
+  .rule-group-head{
+    display:flex; justify-content:space-between; align-items: baseline;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap; gap: 8px;
+  }
+  .rule-group-head h4{
+    margin: 0;
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: .02em;
+  }
+  .rule-group-head .meta{
+    font-family: var(--f-mono); font-size: 10.5px;
+    color: var(--fg-3); letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .settings-source{
+    margin: -2px 0 12px;
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--fg-3);
+    letter-spacing: .04em;
+  }
+  .rule-list{
+    list-style: none; margin: 0; padding: 0;
+    display:flex; flex-direction: column; gap: 4px;
+  }
+  .rule-list li code{ display: block; padding: 8px 10px; }
+  .rule-list.compact li code{ padding: 7px 10px; }
+  .more{
+    margin-top: 12px;
+    font-family: var(--f-mono); font-size: 11.5px;
+    color: var(--fg-3); letter-spacing: .04em;
+  }
+  .other-rule-groups{
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .other-rule-groups > h5,
+  .rule-subgroup-head h5{
+    margin: 0;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .other-rule-groups > h5{
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    margin-bottom: 12px;
+  }
+  .rule-subgroup{
+    margin-top: 14px;
+  }
+  .rule-subgroup-head{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .rule-subgroup-head span{
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+  }
+  .posture-list{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .posture-list li{
+    display: grid;
+    grid-template-columns: 90px minmax(180px, 1fr) minmax(180px, 1fr);
+    gap: 12px;
+    align-items: center;
+    padding: 10px;
+    background: rgba(255,255,255,.025);
+    border: 1px solid var(--line);
+  }
+  .posture-list strong{
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .posture-list code{ display: block; }
+  @media (max-width: 900px){
+    .codex-surface-grid{ grid-template-columns: 1fr; }
+    .posture-list li{ grid-template-columns: 1fr; }
+  }
+
+  /* ───── CHAT EXPOSURE ───── */
+  .chat-grid{
+    display:grid;
+    grid-template-columns: 320px 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 900px){ .chat-grid{ grid-template-columns: 1fr; } }
+
+  .retention{
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    padding: 26px 28px;
+  }
+  .retention h3{
+    margin: 0 0 20px;
+    font-family: var(--f-display);
+    font-size: 19px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .retention-row{
+    display:grid;
+    grid-template-columns: 140px 1fr 120px;
+    gap: 18px;
+    align-items: center;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .retention-row:last-of-type{ border-bottom: 0; }
+  .retention-row .name{
+    font-family: var(--f-mono); font-size: 12.5px;
+    color: var(--fg); letter-spacing: .04em;
+  }
+  .retention-row .track{
+    height: 22px; background: rgba(255,255,255,.04);
+    position: relative; border: 1px solid var(--line);
+  }
+  .retention-row .bar{
+    position: absolute; top: 0; left: 0; bottom: 0;
+    background: var(--accent);
+    display:flex; align-items: center;
+    padding-left: 10px;
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--bg);
+    font-weight: 500;
+  }
+  .retention-row .bar.over{ background: var(--red); color: var(--fg); }
+  .retention-row .ninety{
+    position: absolute; top: -4px; bottom: -4px; width: 2px;
+    background: var(--red);
+  }
+  .retention-row .right{
+    font-family: var(--f-mono); font-size: 11.5px;
+    color: var(--fg-3); text-align: right;
+  }
+  .ninety-cap{
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--red);
+    letter-spacing: .12em;
+    margin-top: 16px;
+    text-align: right;
+    border-top: 1px dashed var(--line);
+    padding-top: 12px;
+  }
+
+  /* ───── SECRETS BARS ───── */
+  .two-col{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 900px){ .two-col{ grid-template-columns: 1fr; } }
+  .panel{
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    padding: 26px 28px;
+  }
+  .panel h3{
+    margin: 0 0 20px;
+    font-family: var(--f-display);
+    font-size: 19px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .secret-rules{
+    display:grid;
+    grid-template-columns: 170px 1fr 60px;
+    gap: 16px;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .secret-rules:last-child{ border-bottom: 0; }
+  .secret-rules .name{ font-family: var(--f-mono); font-size: 12.5px; color: var(--fg-2);}
+  .secret-rules .track{
+    height: 4px;
+    background: rgba(255,255,255,.06);
+    position: relative;
+  }
+  .secret-rules .track .b{
+    position: absolute; top: 0; left: 0; bottom: 0;
+    background: var(--accent);
+  }
+  .secret-rules .v{
+    font-family: var(--f-mono); font-size: 13px;
+    color: var(--fg); text-align: right;
+  }
+  .git-grid{
+    display:grid; grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-top: 1px solid var(--line);
+    margin-top: 8px;
+  }
+  .git-grid > div{
+    padding: 18px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .git-grid > div:nth-child(odd){ padding-right: 18px; }
+  .git-grid > div:nth-child(even){ padding-left: 18px; border-left: 1px solid var(--line); }
+  .git-grid .label{
+    font-family: var(--f-mono); font-size: 10.5px;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--fg-3); margin-bottom: 10px;
+  }
+  .git-grid .v{
+    font-family: var(--f-display); font-size: 36px;
+    letter-spacing: -0.03em; line-height: 1;
+    color: var(--fg); font-weight: 500;
+  }
+  .git-grid .v small{
+    font-family: var(--f-mono); font-size: 13px;
+    color: var(--fg-4); margin-left: 6px; font-weight: 400;
+  }
+  .git-grid .v.red{ color: var(--red); }
+  .git-grid .v.amber{ color: var(--accent); }
+
+  /* ───── METHODOLOGY ───── */
+  .attestation{
+    margin-top: 28px;
+    padding: 24px 28px;
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--green);
+    background: linear-gradient(90deg, color-mix(in oklch, var(--green), transparent 90%), transparent 30%), var(--bg-card);
+  }
+  .attestation p{ margin: 0 0 10px; font-size: 14.5px; color: var(--fg-2); }
+  .sig-line{
+    margin-top: 56px;
+    border-top: 1px solid var(--fg);
+    width: 340px;
+    padding-top: 10px;
+    color: var(--fg-3);
+    font-family: var(--f-mono); font-size: 12px;
+    letter-spacing: .04em;
+  }
+
+  /* ───── APPENDIX ───── */
+  .appendix-note{
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--green);
+    padding: 16px 20px;
+    margin-bottom: 22px;
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    color: var(--fg-2);
+    line-height: 1.6;
+  }
+  .appendix-note strong{ color: var(--green); font-weight: 500; }
+
+  .appendix-table td .count{
+    display:inline-block;
+    font-family: var(--f-mono);
+    font-size: 13px;
+    background: var(--accent);
+    color: var(--bg);
+    padding: 3px 10px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+  .appendix-table td .count.one{
+    background: transparent;
+    color: var(--fg-4);
+    padding: 3px 0;
+  }
+
+  /* ───── FOOTER ───── */
+  .footer{
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+    padding: 28px 0 40px;
+    margin-top: 64px;
+  }
+  .foot-inner{
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 var(--pad-x);
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 16px; flex-wrap: wrap;
+    font-family: var(--f-mono); font-size: 11.5px;
+    color: var(--fg-3); letter-spacing: .04em;
+  }
+  .foot-meta{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  /* Print */
+  @media print{
+    body{ background: white; color: #111; }
+    body::before{ display: none; }
+    .nav, .tab-btn, .filter{ display: none !important; }
+    .tab-panel{ display: block !important; padding-top: 8px; }
+    .table-wrap{ max-height: none; overflow: visible; }
+    .panel, .case, .perm-summary, .coverage, .retention, .sev-bar, .stat, .stack-card, .rule-group, .attestation{
+      background: white !important;
+      color: #111 !important;
+      border-color: #ccc !important;
+    }
+    code{ background: #f4f4f4 !important; color: #111 !important; border-color: #ddd !important; }
+  }
+
+  @media (max-width: 540px){
+    .display{ font-size: 56px; }
+    .case-head{ grid-template-columns: auto 1fr; }
+    .status{ grid-column: 1 / -1; padding-top: 0; }
+    .git-grid{ grid-template-columns: 1fr; }
+    .git-grid > div:nth-child(even){ border-left: 0; padding-left: 0; }
+  }
+
+  /* ═════ Dark skin — surface treatment & fixes ═════ */
+
+  /* Signature surface: keep the hairline border, add ring + soft shadow + radius */
+  .table-wrap, .hero-aside, .panel, .coverage, .collection-scope,
+  .rule-group, .mcp-summary, .mode-summary, .telemetry-summary, .allow-summary,
+  .retention, .attestation, .appendix-note{
+    border-radius: var(--radius);
+    box-shadow: var(--ring), var(--shadow);
+  }
+  .pill, .tag{ border-radius: calc(var(--radius) - 2px); }
+  .nav-cta, .filter input{ border-radius: calc(var(--radius) - 1px); }
+  code, code.block{ border-radius: calc(var(--radius) - 3px); background: var(--code-bg); }
+
+  /* Semibold headings */
+  .display, .h2, .h3, .stat-num, .case-title, .sev-strip .v{ font-weight: 600; }
+
+  /* Severity decouple: brand = --accent (blue); "high" = --amber (orange) */
+  .tag.high{ color: var(--amber); border-color: color-mix(in oklch, var(--amber), transparent 50%); }
+  .pill.high{ color: var(--amber); border-color: color-mix(in oklch, var(--amber), transparent 50%); }
+  .sev-bar-track .high{ background: var(--amber); }
+  .git-grid .v.amber{ color: var(--amber); }
+
+  /* Theme-aware fills (originals used white-alpha, invisible on light) */
+  tbody tr:hover{ background: var(--fill); }
+  .coverage .cell.skipped{ background: var(--fill); }
+
+  /* Per-occurrence table inside a grouped risk-register card */
+  .case-rows{ margin: 4px 0 2px; border: 1px solid var(--line); border-radius: calc(var(--radius) - 3px); overflow: hidden; }
+  .case-rows th, .case-rows td{ padding: 8px 12px; font-size: 12.5px; }
+  .case-rows th{ position: static; }
+  .case-rows td:last-child, .case-rows th:last-child{ width: 45%; }
+
+  /* Risk-register reconciliation caption (grouped findings) */
+  .cases-caption{
+    margin: 0 0 4px;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    color: var(--fg-3);
+  }
+
+
+:root {
+  --f-sans: ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+  --f-mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  --f-display: ui-sans-serif, "Segoe UI", sans-serif;
+  --f-serif: ui-sans-serif, "Segoe UI", sans-serif;
+  --section-y: 36px;
+}
+.report-summary { padding: 48px 0 28px; }
+.report-summary .display { margin: 12px 0 8px; }
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin: 22px 0 8px;
+}
+.summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+}
+.summary-card h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  font-weight: 600;
+}
+.summary-card p { margin: 0; color: var(--fg-2); }
+.agent-status { list-style: none; margin: 0; padding: 0; }
+.agent-status li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.agent-status li:last-child { border-bottom: 0; }
+.page-tablist {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px var(--pad-x);
+  background: var(--nav-bg);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: saturate(180%) blur(14px);
+}
+.page-tab {
+  appearance: none;
+  background: transparent;
+  color: var(--fg-3);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: 500 13px/1.2 var(--f-sans);
+  cursor: pointer;
+}
+.page-tab:hover { color: var(--fg); }
+.page-tab[aria-selected="true"] {
+  color: var(--fg);
+  background: var(--accent-2);
+  border-color: var(--line-2);
+}
+.page-panel[hidden] { display: none !important; }
+.empty-note {
+  margin: 28px var(--pad-x);
+  padding: 16px 18px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius);
+  color: var(--fg-2);
+}
+.page-panel .section { padding-top: 28px; padding-bottom: 40px; }
+@media print {
+  .page-tablist { display: none !important; }
+  .page-panel[hidden] { display: block !important; }
+}
+
+  </style>
+</head>
+<body>
+  <header class="report-summary" id="top">
+    <div class="wrap">
+      <div class="mono-eyebrow"><span>ENDPOINT POSTURE BRIEFING</span></div>
+      <h1 class="display">AI coding tool exposure<span class="display-period">.</span></h1>
+      <p class="lede">6 coding agents are in use on the endpoint. 3 critical findings need action this week.</p>
+      <ul class="meta-list">
+        <li><span class="meta-dash">—</span>Customer · <strong>Test User</strong></li>
+        <li><span class="meta-dash">—</span>Engagement · 2026-07-11 to 2026-10-07</li>
+        <li><span class="meta-dash">—</span>Operator · Demo operator</li>
+        <li><span class="meta-dash">—</span>Manifest SHA-256 · manifest not pre…</li>
+      </ul>
+      <header class="sh">
+        <div class="kicker"><span class="num">/01</span><span class="kicker-label">EXECUTIVE SUMMARY</span></div>
+        <h2 class="h2">19 findings. 3 require action this week.</h2>
+        <p class="sub">Claude Code, Cursor, Codex Desktop, GitHub Copilot, Grok Build and Grok Bot are in active use. The items below represent durable secret exposure, persistent permission state with no prompt, and runtime configuration that bypasses sandboxing.</p>
+      </header>
+      <div class="sev-strip">
+        <div><div class="lbl">Critical</div><div class="v red">3</div><div class="note">action this week</div></div>
+        <div><div class="lbl">High</div><div class="v amber">8</div><div class="note">30-day window</div></div>
+        <div><div class="lbl">Medium</div><div class="v yellow">3</div><div class="note">policy / backlog</div></div>
+        <div><div class="lbl">Low</div><div class="v green">5</div><div class="note">informational</div></div>
+      </div>
+      <div class="summary-cards"><article class="summary-card"><h3>Agents and harnesses</h3><ul class="agent-status"><li><span>Claude Code</span> <strong>detected</strong></li><li><span>Claude Cowork</span> <strong>not collected</strong></li><li><span>Cursor</span> <strong>detected</strong></li><li><span>Codex Desktop</span> <strong>detected</strong></li><li><span>GitHub Copilot</span> <strong>detected</strong></li><li><span>Grok Build</span> <strong>detected</strong></li><li><span>Grok Bot</span> <strong>detected</strong></li></ul></article><article class="summary-card"><h3>What changed since last scan</h3><p>A collector that used to find data now looks empty.</p></article><article class="summary-card"><h3>Cloud agents</h3><p>3 cloud agents (1 active), 12,450 tokens. Token totals are not dollars.</p></article><article class="summary-card"><h3>Telemetry approvals</h3><p>4 approvals and 1 denial in the imported export. 75% of approvals came from config rules, which apply without a prompt.</p></article></div>
+      <p class="surface-note">Presence and counts only. This page does not include prompts, transcript text, or secret values.</p>
+    </div>
+  </header>
+  <div class="page-tablist" role="tablist" aria-label="Briefing sections"><button type="button" class="page-tab" role="tab" id="tab-findings" aria-controls="panel-findings" aria-selected="true" data-page-tab="findings">Findings</button><button type="button" class="page-tab" role="tab" id="tab-access-map" aria-controls="panel-access-map" aria-selected="false" data-page-tab="access-map">Access map</button><button type="button" class="page-tab" role="tab" id="tab-changes" aria-controls="panel-changes" aria-selected="false" data-page-tab="changes">Changes</button><button type="button" class="page-tab" role="tab" id="tab-agents" aria-controls="panel-agents" aria-selected="false" data-page-tab="agents">Agents / collectors</button><button type="button" class="page-tab" role="tab" id="tab-approvals" aria-controls="panel-approvals" aria-selected="false" data-page-tab="approvals">Approvals</button><button type="button" class="page-tab" role="tab" id="tab-usage" aria-controls="panel-usage" aria-selected="false" data-page-tab="usage">Usage</button><button type="button" class="page-tab" role="tab" id="tab-coverage" aria-controls="panel-coverage" aria-selected="false" data-page-tab="coverage">Coverage gaps</button></div>
+  <main>
+    <section class="page-panel is-active" role="tabpanel" id="panel-findings" aria-labelledby="tab-findings" data-page-panel="findings"><section id="findings" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker"><span class="num">/03</span><span class="kicker-label">FINDINGS</span></div>
+      <h2 class="h2">19 findings across 10 categories.</h2>
+      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags. Samples stay redacted. Per-hit secrets are grouped.</p>
+    </header>
+    <div class="sev-bar">
+      <div class="hdr">
+        <span>severity distribution · n = 19</span>
+        <span>1 / 8 high are gitleaks hits · grouped in appendix</span>
+      </div>
+      <div class="sev-bar-track">        <div class="crit" style="flex: 3;"><span class="n">3</span><span>CRIT</span></div>
+        <div class="high" style="flex: 8;"><span class="n">8</span><span>HIGH</span></div>
+        <div class="med" style="flex: 3;"><span class="n">3</span><span>MED</span></div>
+        <div class="low" style="flex: 5;"><span class="n">5</span><span>LOW</span></div></div>
+    </div>
+    <div class="cases" style="margin-top: 28px;"><article class="case">
+  <div class="case-head">
+    <div class="case-num">/01</div>
+    <div>
+      <h3 class="case-title">.env file found in git commit history</h3>
+      <div class="case-meta"><span>Git Posture</span><span class='dot-sep'>·</span><span>collector: git-posture</span></div>
+    </div>
+    <div class="status is-crit"><span class="status-dot"></span>critical</div>
+  </div>
+  <p class="case-summary">project#demo</p>
+  <div class="case-grid">
+    <div>
+      <div class="case-lbl">Category</div>
+      <p>Git Posture</p>
+    </div>
+    <div>
+      <div class="case-lbl">Evidence count</div>
+      <p>1 row</p>
+    </div>
+    <div>
+      <div class="case-lbl">Reference</div>
+      <p class="mono">evidence/git-posture.json</p>
+    </div>
+  </div>
+  <div class="case-foot">
+    <div class="tags">
+      <span class="tag crit">CRIT-01</span>
+      <span class="tag">git posture</span>
+    </div>
+  </div>
+</article>
+<article class="case">
+  <div class="case-head">
+    <div class="case-num">/02</div>
+    <div>
+      <h3 class="case-title">Codex sandbox bypass observed</h3>
+      <div class="case-meta"><span>Shell Execution</span><span class='dot-sep'>·</span><span>collector: codex</span></div>
+    </div>
+    <div class="status is-crit"><span class="status-dot"></span>critical</div>
+  </div>
+  <p class="case-summary">sandbox=disabled</p>
+  <div class="case-grid">
+    <div>
+      <div class="case-lbl">Category</div>
+      <p>Shell Execution</p>
+    </div>
+    <div>
+      <div class="case-lbl">Evidence count</div>
+      <p>1 row</p>
+    </div>
+    <div>
+      <div class="case-lbl">Reference</div>
+      <p class="mono">evidence/codex.json</p>
+    </div>
+  </div>
+  <div class="case-foot">
+    <div class="tags">
+      <span class="tag crit">CRIT-02</span>
+      <span class="tag">shell execution</span>
+    </div>
+  </div>
+</article>
+<article class="case">
+  <div class="case-head">
+    <div class="case-num">/03</div>
+    <div>
+      <h3 class="case-title">Grok Build permission_mode is always-approve</h3>
+      <div class="case-meta"><span>Shell Execution</span><span class='dot-sep'>·</span><span>collector: grok</span></div>
+    </div>
+    <div class="status is-crit"><span class="status-dot"></span>critical</div>
+  </div>
+  <p class="case-summary">permission_mode=always-approve yolo=true</p>
+  <div class="case-grid">
+    <div>
+      <div class="case-lbl">Category</div>
+      <p>Shell Execution</p>
+    </div>
+    <div>
+      <div class="case-lbl">Evidence count</div>
+      <p>1 row</p>
+    </div>
+    <div>
+      <div class="case-lbl">Reference</div>
+      <p class="mono">evidence/grok.json</p>
+    </div>
+  </div>
+  <div class="case-foot">
+    <div class="tags">
+      <span class="tag crit">CRIT-03</span>
+      <span class="tag">shell execution</span>
+    </div>
+  </div>
+</article></div>
+    <div class="filter"><input id="findings-search" type="search" placeholder="filter by title, sample text, or tag…" /></div>
+    <div class="tab-bar" id="findings-tabs"><button type="button" class="tab-btn active" data-tab="shell-execution">Shell Execution<span class="ct">4</span></button>
+<button type="button" class="tab-btn" data-tab="network-egress">Network Egress<span class="ct">1</span></button>
+<button type="button" class="tab-btn" data-tab="data-access">Data Access<span class="ct">1</span></button>
+<button type="button" class="tab-btn" data-tab="telemetry-configuration">Telemetry Configuration<span class="ct">1</span></button>
+<button type="button" class="tab-btn" data-tab="cross-agent-visibility">Cross-Agent Visibility<span class="ct">3</span></button>
+<button type="button" class="tab-btn" data-tab="mcp-tooling">MCP Tooling<span class="ct">1</span></button>
+<button type="button" class="tab-btn" data-tab="secrets-exposure">Secrets Exposure<span class="ct">3</span></button>
+<button type="button" class="tab-btn" data-tab="source-code-egress">Source Code Egress<span class="ct">1</span></button>
+<button type="button" class="tab-btn" data-tab="git-posture">Git Posture<span class="ct">1</span></button>
+<button type="button" class="tab-btn" data-tab="general-tooling">General Tooling<span class="ct">3</span></button></div>
+    <div class="tab-panel active" data-tab="shell-execution"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="codex sandbox bypass observed sandbox=disabled  shell execution"><td><span class="pill critical">critical</span></td><td>Codex sandbox bypass observed</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>sandbox=disabled</code></td></tr><tr class="frow" data-search="grok build permission_mode is always-approve permission_mode=always-approve yolo=true auto_approve shell execution"><td><span class="pill critical">critical</span></td><td>Grok Build permission_mode is always-approve</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>permission_mode=always-approve yolo=true</code></td></tr><tr class="frow" data-search="bash or powershell approved without a prompt bash unprompted_approval otel_tool_decision shell execution"><td><span class="pill high">high</span></td><td>Bash or PowerShell approved without a prompt</td><td class='num'>1</td><td class='mono'>2026-04-02</td><td><code>Bash</code></td></tr><tr class="frow" data-search="claude dangerous-mode confirmation prompt is disabled skipdangerousmodepermissionprompt=true unbounded_glob shell execution"><td><span class="pill high">high</span></td><td>Claude dangerous-mode confirmation prompt is disabled</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>skipDangerousModePermissionPrompt=true</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="network-egress"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="webfetch approved without a prompt webfetch unprompted_approval otel_tool_decision network egress"><td><span class="pill high">high</span></td><td>WebFetch approved without a prompt</td><td class='num'>1</td><td class='mono'>2026-04-02</td><td><code>WebFetch</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="data-access"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="write approved without a prompt write unprompted_approval otel_tool_decision data access"><td><span class="pill high">high</span></td><td>Write approved without a prompt</td><td class='num'>1</td><td class='mono'>2026-04-02</td><td><code>Write</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="telemetry-configuration"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="approve clicks are not in claude code transcripts. counts come from imported tool_decision events.  otel_tool_decision coverage telemetry configuration"><td><span class="pill low">low</span></td><td>Approve clicks are not in Claude Code transcripts. Counts come from imported tool_decision events.</td><td class='num'>5</td><td class='mono'>2026-04-03</td><td><span class='mono' style='color:var(--fg-4)'>n/a</span></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="cross-agent-visibility"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="grok bot keeps browser and client state on disk (contents excluded) local storage present; session storage present; network present; sand-client-persistence present chat_history cross-agent visibility"><td><span class="pill low">low</span></td><td>Grok Bot keeps browser and client state on disk (contents excluded)</td><td class='num'>4</td><td class='mono'>n/a</td><td><code>Local Storage present; Session Storage present; Network present; sand-client-persistence present</code></td></tr><tr class="frow" data-search="grok bot desktop app data is present on this endpoint files=40; newest=2026-07-07 desktop_app cross-agent visibility"><td><span class="pill low">low</span></td><td>Grok Bot desktop app data is present on this endpoint</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>files=40; newest=2026-07-07</code></td></tr><tr class="frow" data-search="grok bot lockfile is present (app is running or ran recently) lockfile present desktop_app cross-agent visibility"><td><span class="pill low">low</span></td><td>Grok Bot lockfile is present (app is running or ran recently)</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>lockfile present</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="mcp-tooling"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="mcp approved without a prompt mcp:demo_tool unprompted_approval otel_tool_decision mcp tooling"><td><span class="pill high">high</span></td><td>MCP approved without a prompt</td><td class='num'>1</td><td class='mono'>2026-04-02</td><td><code>mcp:demo_tool</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="secrets-exposure"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="potential secret in chat export ghp_****  secrets exposure"><td><span class="pill high">high</span></td><td>Potential secret in chat export</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>ghp_****</code></td></tr><tr class="frow" data-search="grok bot secrets store is present on this endpoint (contents excluded) sand-secrets.json present; box-secrets-push-state.v1.json present auth_excluded secrets exposure"><td><span class="pill medium">medium</span></td><td>Grok Bot secrets store is present on this endpoint (contents excluded)</td><td class='num'>2</td><td class='mono'>n/a</td><td><code>sand-secrets.json present; box-secrets-push-state.v1.json present</code></td></tr><tr class="frow" data-search="secret-like value observed in chat export ghp_****redacted****  secrets exposure"><td><span class="pill medium">medium</span></td><td>Secret-like value observed in chat export</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>ghp_****REDACTED****</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="source-code-egress"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="active cloud agent can push to the repository&#x27;s current branch demo readme agent [active run=running repo=https://github.com/example/demo-repo] cloud_agent repo_write current_branch source code egress"><td><span class="pill high">high</span></td><td>Active cloud agent can push to the repository&#x27;s current branch</td><td class='num'>1</td><td class='mono'>2026-09-29</td><td><code>Demo README agent [ACTIVE run=RUNNING repo=https://github.com/example/demo-repo]</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="git-posture"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search=".env file found in git commit history project#demo  git posture"><td><span class="pill critical">critical</span></td><td>.env file found in git commit history</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>project#demo</code></td></tr></tbody></table></div></div>
+<div class="tab-panel" data-tab="general-tooling"><div class="table-wrap"><table><thead><tr><th style="width:90px">Severity</th><th>Title</th><th style="width:90px">Evidence</th><th style="width:110px">Last seen</th><th>Sample</th></tr></thead><tbody><tr class="frow" data-search="75% of approvals came from config rules, which apply without a prompt source=config blanket_allow otel_tool_decision general tooling"><td><span class="pill high">high</span></td><td>75% of approvals came from config rules, which apply without a prompt</td><td class='num'>3</td><td class='mono'>2026-04-02</td><td><code>source=config</code></td></tr><tr class="frow" data-search="cloud agent has stayed unarchived for more than 30 days demo legacy agent [idle run=finished repo=https://github.com/example/legacy] cloud_agent unarchived long_lived general tooling"><td><span class="pill medium">medium</span></td><td>Cloud agent has stayed unarchived for more than 30 days</td><td class='num'>1</td><td class='mono'>2026-06-02</td><td><code>Demo legacy agent [IDLE run=FINISHED repo=https://github.com/example/legacy]</code></td></tr><tr class="frow" data-search="cloud agent inventory omits cost, conversations, and key scope dollar cost is not in the cloud agents api. per-agent cost exists only on the enterprise admin api, which this command does not call. full conversations are not collected. run result text is omitted unless --include-run-result (aiscan -includerunresult), and then it follows aiscan_redact. personal user api keys cannot be scoped to read-only. the same key can create or delete agents. this command only sends https get requests to api.cursor.com. pull request open, merged, or closed state is not in the api response. this command records prurl values and does not call github. get /v1/repositories is not called. repository urls come only from each agent&#x27;s repos and run git branches. the cursor ide session token and cursor.com/api/dashboard endpoints are not read or called. auth is the user-supplied cursor_api_key only. coverage_gap cloud_agent general tooling"><td><span class="pill low">low</span></td><td>Cloud agent inventory omits cost, conversations, and key scope</td><td class='num'>1</td><td class='mono'>n/a</td><td><code>Dollar cost is not in the Cloud Agents API. Per-agent cost exists only on the enterprise Admin API, which this command does not call. Full conversations are not collected. Run result text is omitted unless --include-run-result (aiscan -IncludeRunResult), and then it follows AISCAN_REDACT. Personal user API keys cannot be scoped to read-only. The same key can create or delete agents. This command only sends HTTPS GET requests to api.cursor.com. Pull request open, merged, or closed state is not in the API response. This command records prUrl values and does not call GitHub. GET /v1/repositories is not called. Repository URLs come only from each agent&#x27;s repos and run git branches. The Cursor IDE session token and cursor.com/api/dashboard endpoints are not read or called. Auth is the user-supplied CURSOR_API_KEY only.</code></td></tr></tbody></table></div></div>
+    <header class="sh" style="margin-top: 48px;">
+      <div class="kicker"><span class="num">/08</span><span class="kicker-label">APPENDIX</span></div>
+      <h2 class="h2">Evidence index</h2>
+      <p class="sub">Identical findings collapse into one row with a hit count. Full per-row detail stays in the local CSV, not in this page.</p>
+    </header>
+    
+    <div class="table-wrap appendix-table" style="max-height: none;">
+      <table>
+        <thead><tr><th>Severity</th><th>Finding</th><th>Hits</th><th>Evidence reference</th></tr></thead>
+        <tbody>          <tr><td><span class='pill critical'>critical</span></td><td>.env file found in git commit history</td><td><span class='count one'>1</span></td><td class='mono'>evidence/git-posture.json</td></tr>
+          <tr><td><span class='pill critical'>critical</span></td><td>Codex sandbox bypass observed</td><td><span class='count one'>1</span></td><td class='mono'>evidence/codex.json</td></tr>
+          <tr><td><span class='pill critical'>critical</span></td><td>Grok Build permission_mode is always-approve</td><td><span class='count one'>1</span></td><td class='mono'>evidence/grok.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>75% of approvals came from config rules, which apply without a prompt</td><td><span class='count'>3</span></td><td class='mono'>evidence/telemetry.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>Active cloud agent can push to the repository&#x27;s current branch</td><td><span class='count one'>1</span></td><td class='mono'>evidence/cloud-agents.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>Bash or PowerShell approved without a prompt</td><td><span class='count one'>1</span></td><td class='mono'>evidence/telemetry.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>Claude dangerous-mode confirmation prompt is disabled</td><td><span class='count one'>1</span></td><td class='mono'>evidence/claude.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>MCP approved without a prompt</td><td><span class='count one'>1</span></td><td class='mono'>evidence/telemetry.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>Potential secret in chat export</td><td><span class='count one'>1</span></td><td class='mono'>evidence/secrets-scan.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>WebFetch approved without a prompt</td><td><span class='count one'>1</span></td><td class='mono'>evidence/telemetry.json</td></tr>
+          <tr><td><span class='pill high'>high</span></td><td>Write approved without a prompt</td><td><span class='count one'>1</span></td><td class='mono'>evidence/telemetry.json</td></tr>
+          <tr><td><span class='pill medium'>medium</span></td><td>Grok Bot secrets store is present on this endpoint (contents excluded)</td><td><span class='count'>2</span></td><td class='mono'>evidence/grok-bot.json</td></tr>
+          <tr><td><span class='pill medium'>medium</span></td><td>Cloud agent has stayed unarchived for more than 30 days</td><td><span class='count one'>1</span></td><td class='mono'>evidence/cloud-agents.json</td></tr>
+          <tr><td><span class='pill medium'>medium</span></td><td>Secret-like value observed in chat export</td><td><span class='count one'>1</span></td><td class='mono'>evidence/chat-history.json</td></tr>
+          <tr><td><span class='pill low'>low</span></td><td>Approve clicks are not in Claude Code transcripts. Counts come from imported tool_decision events.</td><td><span class='count'>5</span></td><td class='mono'>evidence/telemetry.json</td></tr>
+          <tr><td><span class='pill low'>low</span></td><td>Grok Bot keeps browser and client state on disk (contents excluded)</td><td><span class='count'>4</span></td><td class='mono'>evidence/grok-bot.json</td></tr>
+          <tr><td><span class='pill low'>low</span></td><td>Cloud agent inventory omits cost, conversations, and key scope</td><td><span class='count one'>1</span></td><td class='mono'>evidence/cloud-agents.json</td></tr>
+          <tr><td><span class='pill low'>low</span></td><td>Grok Bot desktop app data is present on this endpoint</td><td><span class='count one'>1</span></td><td class='mono'>evidence/grok-bot.json</td></tr>
+          <tr><td><span class='pill low'>low</span></td><td>Grok Bot lockfile is present (app is running or ran recently)</td><td><span class='count one'>1</span></td><td class='mono'>evidence/grok-bot.json</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</section></section>
+    <section class="page-panel" role="tabpanel" id="panel-access-map" aria-labelledby="tab-access-map" data-page-panel="access-map" hidden><style>
+.access-map { min-width: 920px; }
+.access-map th, .access-map td { min-width: 108px; }
+.access-map td.access-agent { min-width: 160px; }
+.access-cell--yes { background: var(--red-bg); }
+.access-cell--partial { background: var(--amber-bg); }
+.access-cell--no { background: rgba(16,185,129,.10); }
+.access-cell--unknown { background: transparent; }
+.access-map a.pill { text-decoration: none; }
+.access-reason {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--fg-3);
+}
+.access-meta {
+  margin-top: 6px;
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.access-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  color: var(--fg-3);
+  font-size: 13px;
+}
+.access-legend li { display: inline-flex; align-items: center; gap: 8px; }
+.access-map-evidence { margin-top: 28px; }
+.access-map-evidence h3 {
+  font-family: var(--f-display);
+  font-weight: 500;
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+</style>
+<section id="access-map" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/09</span>
+        <span class="kicker-label">CROSS-AGENT ACCESS</span>
+      </div>
+      <h2 class="h2">2 agents can run shell commands; 1 can push to GitHub.</h2>
+      <p class="sub">What each agent on this machine or account can actually do, read only from the evidence envelopes. Unknown means that evidence cannot tell.</p>
+    </header>
+    <ul class="access-legend">
+      <li><span class="pill critical">yes</span> recorded capability (approval: auto-approve or bypass)</li>
+      <li><span class="pill medium">partial</span> limited grant, mix, or indirect signal</li>
+      <li><span class="pill ok">no</span> recorded restriction, or nothing in an inventory that ran</li>
+      <li><span class="pill skipped">unknown</span> evidence cannot tell</li>
+    </ul>
+    <p class="posture-grid-caption">Color tracks access risk. The headline counts yes only, not partial or unknown. Each cell links to the evidence row below. Network cells show the MCP server count when that collector records one.</p>
+    <div class="table-wrap" style="max-height: none;">
+      <table class="posture-grid access-map">
+        <thead><tr><th>Agent</th><th title='Runs shell commands'>Shell</th><th title='Writes files'>Files</th><th title='Network or MCP access'>Network / MCP</th><th title='Can read secrets'>Secrets</th><th title='Pushes to git/GitHub'>Git push</th><th title='Runs remotely'>Remote</th><th title='Approval mode'>Approval</th></tr></thead>
+        <tbody><tr><td class='access-agent'><strong>Claude Code</strong><div class='access-meta'><span class='pill ok'>collected</span></div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-claude-shell'>yes</a><div class='access-reason'>Allow rule Bash(*) grants unrestricted shell.</div><div class='access-meta'>evidence high</div></td><td class='access-cell access-cell--partial'><a class='pill medium' href='#access-evidence-claude-files'>partial</a><div class='access-reason'>Unrestricted command execution could write files; no edit grant was recorded.</div><div class='access-meta'>evidence low</div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-claude-network'>yes</a><div class='access-reason'>1 MCP server (playwright).</div><div class='access-meta'>evidence high · 1 MCP</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-claude-secrets'>unknown</a><div class='access-reason'>No secret store or env-exposure grant is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--partial'><a class='pill medium' href='#access-evidence-claude-git'>partial</a><div class='access-reason'>Unrestricted command execution could run git push; no git or GitHub grant was recorded.</div><div class='access-meta'>evidence low</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-claude-remote'>unknown</a><div class='access-reason'>Claude Code evidence is local settings; remote execution is not recorded.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--partial'><a class='pill medium' href='#access-evidence-claude-approval'>partial</a><div class='access-reason'>Dangerous-mode confirmation is disabled; the default permission mode is not recorded.</div><div class='access-meta'>evidence moderate</div></td></tr><tr><td class='access-agent'><strong>Claude Cowork</strong><div class='access-meta'><span class='pill skipped'>not collected</span></div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cowork-shell'>unknown</a><div class='access-reason'>Not collected (no cowork.json).</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cowork-files'>unknown</a><div class='access-reason'>Not collected (no cowork.json).</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cowork-network'>unknown</a><div class='access-reason'>Not collected (no cowork.json).</div><div class='access-meta'>evidence none · MCP not recorded</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cowork-secrets'>unknown</a><div class='access-reason'>Not collected (no cowork.json).</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cowork-git'>unknown</a><div class='access-reason'>Not collected (no cowork.json).</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cowork-remote'>unknown</a><div class='access-reason'>Not collected (no cowork.json).</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cowork-approval'>unknown</a><div class='access-reason'>Not collected (no cowork.json).</div><div class='access-meta'>evidence none</div></td></tr><tr><td class='access-agent'><strong>Cursor</strong><div class='access-meta'><span class='pill ok'>collected</span></div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cursor-shell'>unknown</a><div class='access-reason'>No shell allow rule or shell finding is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cursor-files'>unknown</a><div class='access-reason'>No edit grant, file snapshot, or write-tool record is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cursor-network'>unknown</a><div class='access-reason'>0 MCP servers recorded; other network use is not recorded.</div><div class='access-meta'>evidence low · 0 MCP</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cursor-secrets'>unknown</a><div class='access-reason'>No secret store or env-exposure grant is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cursor-git'>unknown</a><div class='access-reason'>No git or GitHub push grant is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cursor-remote'>unknown</a><div class='access-reason'>Cursor IDE evidence is local; remote agents are a separate inventory.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cursor-approval'>unknown</a><div class='access-reason'>Approval mode is not recorded in Cursor local state.</div><div class='access-meta'>evidence none</div></td></tr><tr><td class='access-agent'><strong>Codex</strong><div class='access-meta'><span class='pill ok'>collected</span></div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-codex-shell'>yes</a><div class='access-reason'>Sandbox is disabled, so shell commands are not contained.</div><div class='access-meta'>evidence high</div></td><td class='access-cell access-cell--partial'><a class='pill medium' href='#access-evidence-codex-files'>partial</a><div class='access-reason'>Unrestricted command execution could write files; no edit grant was recorded.</div><div class='access-meta'>evidence low</div></td><td class='access-cell access-cell--partial'><a class='pill medium' href='#access-evidence-codex-network'>partial</a><div class='access-reason'>Unrestricted command execution could reach the network; 0 MCP servers recorded.</div><div class='access-meta'>evidence low · 0 MCP</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-codex-secrets'>unknown</a><div class='access-reason'>No secret store or env-exposure grant is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--partial'><a class='pill medium' href='#access-evidence-codex-git'>partial</a><div class='access-reason'>Unrestricted command execution could run git push; no git or GitHub grant was recorded.</div><div class='access-meta'>evidence low</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-codex-remote'>unknown</a><div class='access-reason'>Codex evidence is local config and sessions; remote execution is not recorded.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-codex-approval'>yes</a><div class='access-reason'>Auto-approve: sandbox is disabled.</div><div class='access-meta'>evidence high</div></td></tr><tr><td class='access-agent'><strong>Copilot/VS Code</strong><div class='access-meta'><span class='pill ok'>collected</span></div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-copilot-shell'>unknown</a><div class='access-reason'>Copilot settings evidence does not record shell or terminal access.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-copilot-files'>unknown</a><div class='access-reason'>Copilot settings evidence does not record file writes.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-copilot-network'>unknown</a><div class='access-reason'>Copilot evidence does not record MCP servers or network grants.</div><div class='access-meta'>evidence none · MCP not recorded</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-copilot-secrets'>unknown</a><div class='access-reason'>Copilot settings evidence does not record secret stores or env grants.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-copilot-git'>unknown</a><div class='access-reason'>Copilot settings evidence does not record git or GitHub pushes.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-copilot-remote'>unknown</a><div class='access-reason'>Remote execution is not recorded for this agent.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-copilot-approval'>unknown</a><div class='access-reason'>Copilot settings evidence does not record an approval mode.</div><div class='access-meta'>evidence none</div></td></tr><tr><td class='access-agent'><strong>Grok Build</strong><div class='access-meta'><span class='pill ok'>collected</span></div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-shell'>unknown</a><div class='access-reason'>No shell allow rule or shell finding is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-files'>unknown</a><div class='access-reason'>No edit grant, file snapshot, or write-tool record is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-grok-network'>yes</a><div class='access-reason'>1 MCP server (demo).</div><div class='access-meta'>evidence high · 1 MCP</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-secrets'>unknown</a><div class='access-reason'>No secret store or env-exposure grant is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-git'>unknown</a><div class='access-reason'>No git or GitHub push grant is in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-remote'>unknown</a><div class='access-reason'>Grok Build evidence is local config and sessions; remote execution is not recorded.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-grok-approval'>yes</a><div class='access-reason'>Auto-approve: permission_mode is always-approve and yolo is on.</div><div class='access-meta'>evidence high</div></td></tr><tr><td class='access-agent'><strong>Grok Bot</strong><div class='access-meta'><span class='pill ok'>collected</span></div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-bot-shell'>unknown</a><div class='access-reason'>local_execution is unknown (not_determinable_offline).</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-bot-files'>unknown</a><div class='access-reason'>Grok Bot evidence is presence and size only; file writes are not recorded.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-bot-network'>unknown</a><div class='access-reason'>Grok Bot evidence does not record network grants or MCP servers.</div><div class='access-meta'>evidence none · MCP not recorded</div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-grok-bot-secrets'>yes</a><div class='access-reason'>Secrets store is present (sand-secrets.json and box-secrets-push-state). Contents were not read.</div><div class='access-meta'>evidence high</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-bot-git'>unknown</a><div class='access-reason'>Grok Bot evidence has no git or GitHub grant. box-secrets push state is a secrets file, not a git push.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-bot-remote'>unknown</a><div class='access-reason'>Whether Grok Bot work runs on a hosted computer is not in this evidence.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-grok-bot-approval'>unknown</a><div class='access-reason'>Grok Bot approval mode is not on disk (local_execution_reason is not an approval mode).</div><div class='access-meta'>evidence none</div></td></tr><tr><td class='access-agent'><strong>Cursor cloud agents</strong><div class='access-meta'><span class='pill ok'>collected</span></div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cloud-agents-shell'>unknown</a><div class='access-reason'>The Cloud Agents API inventory does not record shell or tool use.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-cloud-agents-files'>yes</a><div class='access-reason'>A branch or pull request is recorded, so the agent writes repository files.</div><div class='access-meta'>evidence moderate</div></td><td class='access-cell access-cell--partial'><a class='pill medium' href='#access-evidence-cloud-agents-network'>partial</a><div class='access-reason'>Repository hosts are in the inventory; MCP server count is not in the Cloud Agents API.</div><div class='access-meta'>evidence moderate · MCP not recorded</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cloud-agents-secrets'>unknown</a><div class='access-reason'>The Cloud Agents API inventory does not record secret stores or env grants.</div><div class='access-meta'>evidence none</div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-cloud-agents-git'>yes</a><div class='access-reason'>An agent can push to the repository current branch or has opened a pull request.</div><div class='access-meta'>evidence high</div></td><td class='access-cell access-cell--yes'><a class='pill critical' href='#access-evidence-cloud-agents-remote'>yes</a><div class='access-reason'>Agents run on Cursor infrastructure (env_type cloud).</div><div class='access-meta'>evidence high</div></td><td class='access-cell access-cell--unknown'><a class='pill skipped' href='#access-evidence-cloud-agents-approval'>unknown</a><div class='access-reason'>The Cloud Agents API inventory does not record an approval mode.</div><div class='access-meta'>evidence none</div></td></tr></tbody>
+      </table>
+    </div>
+    <div class="access-map-evidence" id="access-map-evidence">
+      <h3>Evidence behind each cell</h3>
+      <p class="sub">Anchors match the grid. Sources are evidence files and the field or finding that decided the cell.</p>
+      <div class="table-wrap" style="max-height: none;">
+        <table>
+          <thead><tr><th>Agent</th><th>Capability</th><th>Value</th><th>Evidence</th><th>Why</th><th>Source</th></tr></thead>
+          <tbody><tr id='access-evidence-claude-shell'><td><strong>Claude Code</strong></td><td>Runs shell commands</td><td><span class='pill critical'>yes</span></td><td class='mono'>high</td><td>Allow rule Bash(*) grants unrestricted shell.</td><td class='mono'>evidence/claude.json, rule Bash(*)</td></tr><tr id='access-evidence-claude-files'><td><strong>Claude Code</strong></td><td>Writes files</td><td><span class='pill medium'>partial</span></td><td class='mono'>low</td><td>Unrestricted command execution could write files; no edit grant was recorded.</td><td class='mono'>evidence/claude.json, unrestricted execution</td></tr><tr id='access-evidence-claude-network'><td><strong>Claude Code</strong></td><td>Network or MCP access</td><td><span class='pill critical'>yes</span></td><td class='mono'>high</td><td>1 MCP server (playwright).</td><td class='mono'>evidence/claude.json, network grant</td></tr><tr id='access-evidence-claude-secrets'><td><strong>Claude Code</strong></td><td>Can read secrets</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No secret store or env-exposure grant is in this evidence.</td><td class='mono'>evidence/claude.json</td></tr><tr id='access-evidence-claude-git'><td><strong>Claude Code</strong></td><td>Pushes to git/GitHub</td><td><span class='pill medium'>partial</span></td><td class='mono'>low</td><td>Unrestricted command execution could run git push; no git or GitHub grant was recorded.</td><td class='mono'>evidence/claude.json, unrestricted execution</td></tr><tr id='access-evidence-claude-remote'><td><strong>Claude Code</strong></td><td>Runs remotely</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Claude Code evidence is local settings; remote execution is not recorded.</td><td class='mono'>evidence/claude.json</td></tr><tr id='access-evidence-claude-approval'><td><strong>Claude Code</strong></td><td>Approval mode</td><td><span class='pill medium'>partial</span></td><td class='mono'>moderate</td><td>Dangerous-mode confirmation is disabled; the default permission mode is not recorded.</td><td class='mono'>evidence/claude.json, finding claude.permission.skip_dangerous_prompt</td></tr><tr id='access-evidence-cowork-shell'><td><strong>Claude Cowork</strong></td><td>Runs shell commands</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Not collected (no cowork.json).</td><td class='mono'>not collected</td></tr><tr id='access-evidence-cowork-files'><td><strong>Claude Cowork</strong></td><td>Writes files</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Not collected (no cowork.json).</td><td class='mono'>not collected</td></tr><tr id='access-evidence-cowork-network'><td><strong>Claude Cowork</strong></td><td>Network or MCP access</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Not collected (no cowork.json).</td><td class='mono'>not collected</td></tr><tr id='access-evidence-cowork-secrets'><td><strong>Claude Cowork</strong></td><td>Can read secrets</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Not collected (no cowork.json).</td><td class='mono'>not collected</td></tr><tr id='access-evidence-cowork-git'><td><strong>Claude Cowork</strong></td><td>Pushes to git/GitHub</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Not collected (no cowork.json).</td><td class='mono'>not collected</td></tr><tr id='access-evidence-cowork-remote'><td><strong>Claude Cowork</strong></td><td>Runs remotely</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Not collected (no cowork.json).</td><td class='mono'>not collected</td></tr><tr id='access-evidence-cowork-approval'><td><strong>Claude Cowork</strong></td><td>Approval mode</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Not collected (no cowork.json).</td><td class='mono'>not collected</td></tr><tr id='access-evidence-cursor-shell'><td><strong>Cursor</strong></td><td>Runs shell commands</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No shell allow rule or shell finding is in this evidence.</td><td class='mono'>evidence/cursor.json</td></tr><tr id='access-evidence-cursor-files'><td><strong>Cursor</strong></td><td>Writes files</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No edit grant, file snapshot, or write-tool record is in this evidence.</td><td class='mono'>evidence/cursor.json</td></tr><tr id='access-evidence-cursor-network'><td><strong>Cursor</strong></td><td>Network or MCP access</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>low</td><td>0 MCP servers recorded; other network use is not recorded.</td><td class='mono'>evidence/cursor.json</td></tr><tr id='access-evidence-cursor-secrets'><td><strong>Cursor</strong></td><td>Can read secrets</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No secret store or env-exposure grant is in this evidence.</td><td class='mono'>evidence/cursor.json</td></tr><tr id='access-evidence-cursor-git'><td><strong>Cursor</strong></td><td>Pushes to git/GitHub</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No git or GitHub push grant is in this evidence.</td><td class='mono'>evidence/cursor.json</td></tr><tr id='access-evidence-cursor-remote'><td><strong>Cursor</strong></td><td>Runs remotely</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Cursor IDE evidence is local; remote agents are a separate inventory.</td><td class='mono'>evidence/cursor.json</td></tr><tr id='access-evidence-cursor-approval'><td><strong>Cursor</strong></td><td>Approval mode</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Approval mode is not recorded in Cursor local state.</td><td class='mono'>evidence/cursor.json</td></tr><tr id='access-evidence-codex-shell'><td><strong>Codex</strong></td><td>Runs shell commands</td><td><span class='pill critical'>yes</span></td><td class='mono'>high</td><td>Sandbox is disabled, so shell commands are not contained.</td><td class='mono'>evidence/codex.json, sandbox off</td></tr><tr id='access-evidence-codex-files'><td><strong>Codex</strong></td><td>Writes files</td><td><span class='pill medium'>partial</span></td><td class='mono'>low</td><td>Unrestricted command execution could write files; no edit grant was recorded.</td><td class='mono'>evidence/codex.json, unrestricted execution</td></tr><tr id='access-evidence-codex-network'><td><strong>Codex</strong></td><td>Network or MCP access</td><td><span class='pill medium'>partial</span></td><td class='mono'>low</td><td>Unrestricted command execution could reach the network; 0 MCP servers recorded.</td><td class='mono'>evidence/codex.json, unrestricted execution</td></tr><tr id='access-evidence-codex-secrets'><td><strong>Codex</strong></td><td>Can read secrets</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No secret store or env-exposure grant is in this evidence.</td><td class='mono'>evidence/codex.json</td></tr><tr id='access-evidence-codex-git'><td><strong>Codex</strong></td><td>Pushes to git/GitHub</td><td><span class='pill medium'>partial</span></td><td class='mono'>low</td><td>Unrestricted command execution could run git push; no git or GitHub grant was recorded.</td><td class='mono'>evidence/codex.json, unrestricted execution</td></tr><tr id='access-evidence-codex-remote'><td><strong>Codex</strong></td><td>Runs remotely</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Codex evidence is local config and sessions; remote execution is not recorded.</td><td class='mono'>evidence/codex.json</td></tr><tr id='access-evidence-codex-approval'><td><strong>Codex</strong></td><td>Approval mode</td><td><span class='pill critical'>yes</span></td><td class='mono'>high</td><td>Auto-approve: sandbox is disabled.</td><td class='mono'>evidence/codex.json, codex approval</td></tr><tr id='access-evidence-copilot-shell'><td><strong>Copilot/VS Code</strong></td><td>Runs shell commands</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Copilot settings evidence does not record shell or terminal access.</td><td class='mono'>evidence/copilot.json</td></tr><tr id='access-evidence-copilot-files'><td><strong>Copilot/VS Code</strong></td><td>Writes files</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Copilot settings evidence does not record file writes.</td><td class='mono'>evidence/copilot.json</td></tr><tr id='access-evidence-copilot-network'><td><strong>Copilot/VS Code</strong></td><td>Network or MCP access</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Copilot evidence does not record MCP servers or network grants.</td><td class='mono'>evidence/copilot.json</td></tr><tr id='access-evidence-copilot-secrets'><td><strong>Copilot/VS Code</strong></td><td>Can read secrets</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Copilot settings evidence does not record secret stores or env grants.</td><td class='mono'>evidence/copilot.json</td></tr><tr id='access-evidence-copilot-git'><td><strong>Copilot/VS Code</strong></td><td>Pushes to git/GitHub</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Copilot settings evidence does not record git or GitHub pushes.</td><td class='mono'>evidence/copilot.json</td></tr><tr id='access-evidence-copilot-remote'><td><strong>Copilot/VS Code</strong></td><td>Runs remotely</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Remote execution is not recorded for this agent.</td><td class='mono'>evidence/copilot.json</td></tr><tr id='access-evidence-copilot-approval'><td><strong>Copilot/VS Code</strong></td><td>Approval mode</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Copilot settings evidence does not record an approval mode.</td><td class='mono'>evidence/copilot.json</td></tr><tr id='access-evidence-grok-shell'><td><strong>Grok Build</strong></td><td>Runs shell commands</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No shell allow rule or shell finding is in this evidence.</td><td class='mono'>evidence/grok.json</td></tr><tr id='access-evidence-grok-files'><td><strong>Grok Build</strong></td><td>Writes files</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No edit grant, file snapshot, or write-tool record is in this evidence.</td><td class='mono'>evidence/grok.json</td></tr><tr id='access-evidence-grok-network'><td><strong>Grok Build</strong></td><td>Network or MCP access</td><td><span class='pill critical'>yes</span></td><td class='mono'>high</td><td>1 MCP server (demo).</td><td class='mono'>evidence/grok.json, network grant</td></tr><tr id='access-evidence-grok-secrets'><td><strong>Grok Build</strong></td><td>Can read secrets</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No secret store or env-exposure grant is in this evidence.</td><td class='mono'>evidence/grok.json</td></tr><tr id='access-evidence-grok-git'><td><strong>Grok Build</strong></td><td>Pushes to git/GitHub</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>No git or GitHub push grant is in this evidence.</td><td class='mono'>evidence/grok.json</td></tr><tr id='access-evidence-grok-remote'><td><strong>Grok Build</strong></td><td>Runs remotely</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Grok Build evidence is local config and sessions; remote execution is not recorded.</td><td class='mono'>evidence/grok.json</td></tr><tr id='access-evidence-grok-approval'><td><strong>Grok Build</strong></td><td>Approval mode</td><td><span class='pill critical'>yes</span></td><td class='mono'>high</td><td>Auto-approve: permission_mode is always-approve and yolo is on.</td><td class='mono'>evidence/grok.json, summary.permission_mode</td></tr><tr id='access-evidence-grok-bot-shell'><td><strong>Grok Bot</strong></td><td>Runs shell commands</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>local_execution is unknown (not_determinable_offline).</td><td class='mono'>evidence/grok-bot.json, summary.local_execution</td></tr><tr id='access-evidence-grok-bot-files'><td><strong>Grok Bot</strong></td><td>Writes files</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Grok Bot evidence is presence and size only; file writes are not recorded.</td><td class='mono'>evidence/grok-bot.json</td></tr><tr id='access-evidence-grok-bot-network'><td><strong>Grok Bot</strong></td><td>Network or MCP access</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Grok Bot evidence does not record network grants or MCP servers.</td><td class='mono'>evidence/grok-bot.json</td></tr><tr id='access-evidence-grok-bot-secrets'><td><strong>Grok Bot</strong></td><td>Can read secrets</td><td><span class='pill critical'>yes</span></td><td class='mono'>high</td><td>Secrets store is present (sand-secrets.json and box-secrets-push-state). Contents were not read.</td><td class='mono'>evidence/grok-bot.json, summary secrets store</td></tr><tr id='access-evidence-grok-bot-git'><td><strong>Grok Bot</strong></td><td>Pushes to git/GitHub</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Grok Bot evidence has no git or GitHub grant. box-secrets push state is a secrets file, not a git push.</td><td class='mono'>evidence/grok-bot.json</td></tr><tr id='access-evidence-grok-bot-remote'><td><strong>Grok Bot</strong></td><td>Runs remotely</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Whether Grok Bot work runs on a hosted computer is not in this evidence.</td><td class='mono'>evidence/grok-bot.json</td></tr><tr id='access-evidence-grok-bot-approval'><td><strong>Grok Bot</strong></td><td>Approval mode</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>Grok Bot approval mode is not on disk (local_execution_reason is not an approval mode).</td><td class='mono'>evidence/grok-bot.json</td></tr><tr id='access-evidence-cloud-agents-shell'><td><strong>Cursor cloud agents</strong></td><td>Runs shell commands</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>The Cloud Agents API inventory does not record shell or tool use.</td><td class='mono'>evidence/cloud-agents.json</td></tr><tr id='access-evidence-cloud-agents-files'><td><strong>Cursor cloud agents</strong></td><td>Writes files</td><td><span class='pill critical'>yes</span></td><td class='mono'>moderate</td><td>A branch or pull request is recorded, so the agent writes repository files.</td><td class='mono'>evidence/cloud-agents.json, agent branch or pr</td></tr><tr id='access-evidence-cloud-agents-network'><td><strong>Cursor cloud agents</strong></td><td>Network or MCP access</td><td><span class='pill medium'>partial</span></td><td class='mono'>moderate</td><td>Repository hosts are in the inventory; MCP server count is not in the Cloud Agents API.</td><td class='mono'>evidence/cloud-agents.json, agent repos</td></tr><tr id='access-evidence-cloud-agents-secrets'><td><strong>Cursor cloud agents</strong></td><td>Can read secrets</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>The Cloud Agents API inventory does not record secret stores or env grants.</td><td class='mono'>evidence/cloud-agents.json</td></tr><tr id='access-evidence-cloud-agents-git'><td><strong>Cursor cloud agents</strong></td><td>Pushes to git/GitHub</td><td><span class='pill critical'>yes</span></td><td class='mono'>high</td><td>An agent can push to the repository current branch or has opened a pull request.</td><td class='mono'>evidence/cloud-agents.json, cloud agent git</td></tr><tr id='access-evidence-cloud-agents-remote'><td><strong>Cursor cloud agents</strong></td><td>Runs remotely</td><td><span class='pill critical'>yes</span></td><td class='mono'>high</td><td>Agents run on Cursor infrastructure (env_type cloud).</td><td class='mono'>evidence/cloud-agents.json, env_type</td></tr><tr id='access-evidence-cloud-agents-approval'><td><strong>Cursor cloud agents</strong></td><td>Approval mode</td><td><span class='pill skipped'>unknown</span></td><td class='mono'>none</td><td>The Cloud Agents API inventory does not record an approval mode.</td><td class='mono'>evidence/cloud-agents.json</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section></section>
+    <section class="page-panel" role="tabpanel" id="panel-changes" aria-labelledby="tab-changes" data-page-panel="changes" hidden><a href="#changes">Changes</a><section id="changes" class="section"><div class="wrap"><header class="sh"><div class="kicker"><span class="num">CHG</span><span class="kicker-label">SCAN CHANGES</span></div><h2 class="h2">A collector that used to find data now looks empty.</h2><p class="sub">That is possible data-location drift, not a clean result. Providers sometimes move tokens or transcripts off the machine. Resolved findings on a quiet collector are not evidence the issue is fixed.</p></header><p class="sub">Compared synthetic-demo (2026-10-07 23:38) with synthetic-previous (2026-07-01 15:00).</p><div class="sev-strip"><div><div class="lbl">New high / critical</div><div class="v red">8</div></div><div><div class="lbl">Drift warnings</div><div class="v amber">3</div></div><div><div class="lbl">New MCP servers</div><div class="v yellow">1</div></div><div><div class="lbl">New allow rules</div><div class="v">1</div></div></div><div class="panel" style="margin-top:28px"><p><span class="pill high">drift</span> Possible data-location drift. A collector that used to find data now reports nothing, or the platform is no longer detected. Do not read that as a clean scan.</p></div><div class="mcp-summary" style="margin-top:36px"><div class="rule-group-head"><h4>Flagged since the last scan</h4><span class="meta">13 change findings</span></div><div class="table-wrap"><table class="mcp-table"><thead><tr><th>Severity</th><th>What changed</th><th>Detail</th></tr></thead><tbody><tr><td><span class="pill medium">medium</span></td><td>Collector version changed for grok</td><td><code>grok collector version 0.9.0 -&gt; 1.0.0</code></td></tr><tr><td><span class="pill medium">medium</span></td><td>New MCP server on claude: playwright</td><td><code>playwright</code></td></tr><tr><td><span class="pill high">high</span></td><td>New allow rule on claude</td><td><code>Bash(*)</code></td></tr><tr><td><span class="pill high">high</span></td><td>Possible data-location drift in cowork</td><td><code>cowork evidence was present last scan and is missing now</code></td></tr><tr><td><span class="pill high">high</span></td><td>Possible data-location drift in cursor</td><td><code>cursor previously reported data (composer_messages, findings, mcp_registered, mcp_rules, permission_events, rules, state_tokens) and now reports none</code></td></tr><tr><td><span class="pill high">high</span></td><td>Finding in secrets-scan rose from medium to high: Potential secret in chat export</td><td><code>id=secrets-scan.hit; medium -&gt; high</code></td></tr><tr><td><span class="pill high">high</span></td><td>New high finding in cloud-agents: Active cloud agent can push to the repository&#x27;s current branch</td><td><code>id=cloud_agents.active_current_branch</code></td></tr><tr><td><span class="pill high">high</span></td><td>New high finding in telemetry: 75% of approvals came from config rules, which apply without a prompt</td><td><code>id=telemetry.approval.blanket_allow_share</code></td></tr><tr><td><span class="pill high">high</span></td><td>New high finding in telemetry: MCP approved without a prompt</td><td><code>id=telemetry.approval.unprompted_mcp</code></td></tr><tr><td><span class="pill high">high</span></td><td>New high finding in telemetry: Bash or PowerShell approved without a prompt</td><td><code>id=telemetry.approval.unprompted_shell</code></td></tr><tr><td><span class="pill high">high</span></td><td>New high finding in telemetry: WebFetch approved without a prompt</td><td><code>id=telemetry.approval.unprompted_webfetch</code></td></tr><tr><td><span class="pill high">high</span></td><td>New high finding in telemetry: Write approved without a prompt</td><td><code>id=telemetry.approval.unprompted_write</code></td></tr><tr><td><span class="pill critical">critical</span></td><td>New critical finding in claude: Claude skips dangerous-mode permission prompt</td><td><code>id=claude.permission.skip_dangerous_prompt</code></td></tr></tbody></table></div></div><div class="mcp-summary" style="margin-top:36px"><div class="rule-group-head"><h4>Drift warnings</h4><span class="meta">3 warnings</span></div><div class="table-wrap"><table class="mcp-table"><thead><tr><th>Collector</th><th>Kind</th><th>Detail</th></tr></thead><tbody><tr><td>cowork</td><td>Not detected</td><td>cowork evidence was present last scan and is missing now</td></tr><tr><td>cursor</td><td>Data gone</td><td>cursor previously reported data (composer_messages, findings, mcp_registered, mcp_rules, permission_events, rules, state_tokens) and now reports none</td></tr><tr><td>grok</td><td>Version changed</td><td>grok collector version 0.9.0 -&gt; 1.0.0</td></tr></tbody></table></div></div><div class="mcp-summary" style="margin-top:36px"><div class="rule-group-head"><h4>Platform detection</h4><span class="meta">newly detected or no longer detected</span></div><div class="table-wrap"><table class="mcp-table"><thead><tr><th>Collector</th><th>Change</th></tr></thead><tbody><tr><td>cloud-agents</td><td>Newly detected</td></tr><tr><td>copilot</td><td>Newly detected</td></tr><tr><td>cowork</td><td>No longer detected</td></tr><tr><td>grok-bot</td><td>Newly detected</td></tr><tr><td>telemetry</td><td>Newly detected</td></tr></tbody></table></div></div><div class="mcp-summary" style="margin-top:36px"><div class="rule-group-head"><h4>Findings</h4><span class="meta">14 added · 3 resolved · 1 severity changed</span></div><div class="table-wrap"><table class="mcp-table"><thead><tr><th>Change</th><th>Severity</th><th>Collector</th><th>Finding</th></tr></thead><tbody><tr><td>Added</td><td><span class="pill critical">critical</span></td><td>claude</td><td>Claude skips dangerous-mode permission prompt</td></tr><tr><td>Resolved</td><td><span class="pill high">high</span></td><td>claude</td><td>Claude has unrestricted curl approval</td></tr><tr><td>Added</td><td><span class="pill high">high</span></td><td>cloud-agents</td><td>Active cloud agent can push to the repository&#x27;s current branch</td></tr><tr><td>Added</td><td><span class="pill low">low</span></td><td>cloud-agents</td><td>Cloud agent inventory omits cost, conversations, and key scope</td></tr><tr><td>Added</td><td><span class="pill medium">medium</span></td><td>cloud-agents</td><td>Cloud agent has stayed unarchived for more than 30 days</td></tr><tr><td>Resolved</td><td><span class="pill low">low</span></td><td>cowork</td><td>Cowork session workspaces present locally</td></tr><tr><td>Resolved</td><td><span class="pill low">low</span></td><td>cursor</td><td>Cursor local state still holds token counts</td></tr><tr><td>Added</td><td><span class="pill low">low</span></td><td>grok-bot</td><td>Grok Bot desktop app data is present on this endpoint</td></tr><tr><td>Added</td><td><span class="pill low">low</span></td><td>grok-bot</td><td>Grok Bot lockfile is present (app is running or ran recently)</td></tr><tr><td>Added</td><td><span class="pill medium">medium</span></td><td>grok-bot</td><td>Grok Bot secrets store is present on this endpoint (contents excluded)</td></tr><tr><td>Added</td><td><span class="pill low">low</span></td><td>grok-bot</td><td>Grok Bot keeps browser and client state on disk (contents excluded)</td></tr><tr><td>Severity</td><td><span class="pill medium">medium</span> <span class="mono">→</span> <span class="pill high">high</span></td><td>secrets-scan</td><td>Potential secret in chat export</td></tr><tr><td>Added</td><td><span class="pill high">high</span></td><td>telemetry</td><td>75% of approvals came from config rules, which apply without a prompt</td></tr><tr><td>Added</td><td><span class="pill high">high</span></td><td>telemetry</td><td>MCP approved without a prompt</td></tr><tr><td>Added</td><td><span class="pill high">high</span></td><td>telemetry</td><td>Bash or PowerShell approved without a prompt</td></tr><tr><td>Added</td><td><span class="pill high">high</span></td><td>telemetry</td><td>WebFetch approved without a prompt</td></tr><tr><td>Added</td><td><span class="pill high">high</span></td><td>telemetry</td><td>Write approved without a prompt</td></tr><tr><td>Added</td><td><span class="pill low">low</span></td><td>telemetry</td><td>Approve clicks are not in Claude Code transcripts. Counts come from imported tool_decision events.</td></tr></tbody></table></div></div><div class="mcp-summary" style="margin-top:36px"><div class="rule-group-head"><h4>MCP servers</h4><span class="meta">1 added · 2 removed</span></div><div class="table-wrap"><table class="mcp-table"><thead><tr><th>Change</th><th>Collector</th><th>Server</th></tr></thead><tbody><tr><td>Added</td><td>claude</td><td><code>playwright</code></td></tr><tr><td>Removed</td><td>claude</td><td><code>slack</code></td></tr><tr><td>Removed</td><td>cursor</td><td><code>filesystem</code></td></tr></tbody></table></div></div><div class="mcp-summary" style="margin-top:36px"><div class="rule-group-head"><h4>Allow rules</h4><span class="meta">1 added · 1 removed</span></div><div class="table-wrap"><table class="mcp-table"><thead><tr><th>Change</th><th>Collector</th><th>Risk</th><th>Rule</th></tr></thead><tbody><tr><td>Added</td><td>claude</td><td><span class="pill high">high</span></td><td><code>Bash(*)</code></td></tr><tr><td>Removed</td><td>codex</td><td><span class="pill high">high</span></td><td><code>Bash(curl:*)</code></td></tr></tbody></table></div></div><div class="mcp-summary" style="margin-top:36px"><div class="rule-group-head"><h4>Summary counters</h4><span class="meta">63 moved</span></div><div class="table-wrap"><table class="mcp-table"><thead><tr><th>Collector</th><th>Counter</th><th>Before</th><th>After</th></tr></thead><tbody><tr><td>chat-history</td><td><code>claude_files</code></td><td><span class="mono">2</span></td><td><span class="mono">3</span></td></tr><tr><td>chat-history</td><td><code>cursor-composer_files</code></td><td><span class="mono">—</span></td><td><span class="mono">2</span></td></tr><tr><td>chat-history</td><td><code>cursor_files</code></td><td><span class="mono">3</span></td><td><span class="mono">4</span></td></tr><tr><td>chat-history</td><td><code>retention_days</code></td><td><span class="mono">30</span></td><td><span class="mono">45</span></td></tr><tr><td>chat-history</td><td><code>total_bytes</code></td><td><span class="mono">40000</span></td><td><span class="mono">128000</span></td></tr><tr><td>chat-history</td><td><code>total_files</code></td><td><span class="mono">8</span></td><td><span class="mono">12</span></td></tr><tr><td>chat-history</td><td><code>total_messages</code></td><td><span class="mono">100</span></td><td><span class="mono">340</span></td></tr><tr><td>claude</td><td><code>allow_rules</code></td><td><span class="mono">1</span></td><td><span class="mono">2</span></td></tr><tr><td>claude</td><td><code>desktop_mcp_servers</code></td><td><span class="mono">1</span></td><td><span class="mono">—</span></td></tr><tr><td>claude</td><td><code>rules</code></td><td><span class="mono">1</span></td><td><span class="mono">2</span></td></tr><tr><td>cloud-agents</td><td><code>agents_active</code></td><td><span class="mono">—</span></td><td><span class="mono">1</span></td></tr><tr><td>cloud-agents</td><td><code>agents_running</code></td><td><span class="mono">—</span></td><td><span class="mono">1</span></td></tr><tr><td>cloud-agents</td><td><code>agents_with_prs</code></td><td><span class="mono">—</span></td><td><span class="mono">1</span></td></tr><tr><td>cloud-agents</td><td><code>by_status.ACTIVE</code></td><td><span class="mono">—</span></td><td><span class="mono">1</span></td></tr><tr><td>cloud-agents</td><td><code>by_status.ARCHIVED</code></td><td><span class="mono">—</span></td><td><span class="mono">1</span></td></tr><tr><td>cloud-agents</td><td><code>by_status.IDLE</code></td><td><span class="mono">—</span></td><td><span class="mono">1</span></td></tr><tr><td>cloud-agents</td><td><code>total_agents</code></td><td><span class="mono">—</span></td><td><span class="mono">3</span></td></tr><tr><td>cloud-agents</td><td><code>total_tokens</code></td><td><span class="mono">—</span></td><td><span class="mono">12450</span></td></tr><tr><td>codex</td><td><code>rules</code></td><td><span class="mono">2</span></td><td><span class="mono">1</span></td></tr><tr><td>codex</td><td><code>sessions</code></td><td><span class="mono">2</span></td><td><span class="mono">4</span></td></tr><tr><td>cowork</td><td><code>findings</code></td><td><span class="mono">1</span></td><td><span class="mono">—</span></td></tr><tr><td>cowork</td><td><code>sessions</code></td><td><span class="mono">3</span></td><td><span class="mono">—</span></td></tr><tr><td>cowork</td><td><code>transcript_files</code></td><td><span class="mono">3</span></td><td><span class="mono">—</span></td></tr><tr><td>cursor</td><td><code>composer_messages</code></td><td><span class="mono">80</span></td><td><span class="mono">—</span></td></tr><tr><td>cursor</td><td><code>findings</code></td><td><span class="mono">1</span></td><td><span class="mono">0</span></td></tr><tr><td>cursor</td><td><code>mcp_registered</code></td><td><span class="mono">1</span></td><td><span class="mono">—</span></td></tr><tr><td>cursor</td><td><code>mcp_rules</code></td><td><span class="mono">1</span></td><td><span class="mono">—</span></td></tr><tr><td>cursor</td><td><code>permission_events</code></td><td><span class="mono">4</span></td><td><span class="mono">—</span></td></tr><tr><td>cursor</td><td><code>rules</code></td><td><span class="mono">1</span></td><td><span class="mono">0</span></td></tr><tr><td>cursor</td><td><code>state_tokens</code></td><td><span class="mono">1200</span></td><td><span class="mono">—</span></td></tr><tr><td>discovery</td><td><code>tools_detected</code></td><td><span class="mono">4</span></td><td><span class="mono">5</span></td></tr><tr><td>git-posture</td><td><code>no_branch_protection</code></td><td><span class="mono">2</span></td><td><span class="mono">3</span></td></tr><tr><td>git-posture</td><td><code>no_pre_commit</code></td><td><span class="mono">3</span></td><td><span class="mono">5</span></td></tr><tr><td>git-posture</td><td><code>repos_scanned</code></td><td><span class="mono">3</span></td><td><span class="mono">5</span></td></tr><tr><td>grok</td><td><code>session_count</code></td><td><span class="mono">2</span></td><td><span class="mono">—</span></td></tr><tr><td>grok</td><td><code>total_context_tokens_used</code></td><td><span class="mono">800</span></td><td><span class="mono">—</span></td></tr><tr><td>grok</td><td><code>total_messages</code></td><td><span class="mono">40</span></td><td><span class="mono">—</span></td></tr><tr><td>grok-bot</td><td><code>box_secrets_push_state_bytes</code></td><td><span class="mono">—</span></td><td><span class="mono">128</span></td></tr><tr><td>grok-bot</td><td><code>dir_count</code></td><td><span class="mono">—</span></td><td><span class="mono">19</span></td></tr><tr><td>grok-bot</td><td><code>file_count</code></td><td><span class="mono">—</span></td><td><span class="mono">40</span></td></tr><tr><td>grok-bot</td><td><code>findings</code></td><td><span class="mono">—</span></td><td><span class="mono">4</span></td></tr><tr><td>grok-bot</td><td><code>known_dirs_present</code></td><td><span class="mono">—</span></td><td><span class="mono">19</span></td></tr><tr><td>grok-bot</td><td><code>known_files_present</code></td><td><span class="mono">—</span></td><td><span class="mono">14</span></td></tr><tr><td>grok-bot</td><td><code>sand_secrets_bytes</code></td><td><span class="mono">—</span></td><td><span class="mono">256</span></td></tr><tr><td>grok-bot</td><td><code>total_bytes</code></td><td><span class="mono">—</span></td><td><span class="mono">120000</span></td></tr><tr><td>secrets-scan</td><td><code>hits</code></td><td><span class="mono">3</span></td><td><span class="mono">1</span></td></tr><tr><td>telemetry</td><td><code>approval_events</code></td><td><span class="mono">—</span></td><td><span class="mono">5</span></td></tr><tr><td>telemetry</td><td><code>approvals</code></td><td><span class="mono">—</span></td><td><span class="mono">4</span></td></tr><tr><td>telemetry</td><td><code>cache_read_tokens</code></td><td><span class="mono">—</span></td><td><span class="mono">10</span></td></tr><tr><td>telemetry</td><td><code>cache_write_tokens</code></td><td><span class="mono">—</span></td><td><span class="mono">5</span></td></tr><tr><td>telemetry</td><td><code>config_approval_percent</code></td><td><span class="mono">—</span></td><td><span class="mono">75</span></td></tr><tr><td>telemetry</td><td><code>config_approvals</code></td><td><span class="mono">—</span></td><td><span class="mono">3</span></td></tr><tr><td>telemetry</td><td><code>cost_cents</code></td><td><span class="mono">—</span></td><td><span class="mono">20</span></td></tr><tr><td>telemetry</td><td><code>denials</code></td><td><span class="mono">—</span></td><td><span class="mono">1</span></td></tr><tr><td>telemetry</td><td><code>hook_approvals</code></td><td><span class="mono">—</span></td><td><span class="mono">1</span></td></tr><tr><td>telemetry</td><td><code>input_tokens</code></td><td><span class="mono">—</span></td><td><span class="mono">170</span></td></tr><tr><td>telemetry</td><td><code>inputs_read</code></td><td><span class="mono">—</span></td><td><span class="mono">2</span></td></tr><tr><td>telemetry</td><td><code>output_tokens</code></td><td><span class="mono">—</span></td><td><span class="mono">75</span></td></tr><tr><td>telemetry</td><td><code>sensitive_attributes_dropped</code></td><td><span class="mono">—</span></td><td><span class="mono">6</span></td></tr><tr><td>telemetry</td><td><code>total_tokens</code></td><td><span class="mono">—</span></td><td><span class="mono">260</span></td></tr><tr><td>telemetry</td><td><code>usage_events</code></td><td><span class="mono">—</span></td><td><span class="mono">3</span></td></tr><tr><td>telemetry</td><td><code>usage_rows_tokens_only</code></td><td><span class="mono">—</span></td><td><span class="mono">1</span></td></tr><tr><td>telemetry</td><td><code>usage_rows_with_cost</code></td><td><span class="mono">—</span></td><td><span class="mono">2</span></td></tr></tbody></table></div></div></div></section></section>
+    <section class="page-panel" role="tabpanel" id="panel-agents" aria-labelledby="tab-agents" data-page-panel="agents" hidden><section id="agents" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker"><span class="num">/04</span><span class="kicker-label">AGENTS AND COLLECTORS</span></div>
+      <h2 class="h2">What each collector recorded.</h2>
+      <p class="sub">Presence, counts, and posture only. Prompts, transcript text, and secret values stay out of this page. Grok Bot is the desktop app, separate from Grok Build. Cloud agents are an opt-in inventory.</p>
+    </header>
+          <div class="evidence-panel-body">
+        <div class="evidence-metrics">
+          <div><span>Detected tools</span><strong>6</strong></div>
+          <div><span>Not detected</span><strong>1</strong></div>
+          <div><span>Findings</span><strong>19</strong></div>
+        </div>
+        <div class="severity-inline">
+          <span class="critical">critical 3</span>
+          <span>high 8</span>
+          <span>medium 3</span>
+          <span>low 5</span>
+        </div>
+        <table class="evidence-status-table">
+          <thead><tr><th>Tool</th><th>Status</th><th>Duration</th><th>Last used</th></tr></thead>
+          <tbody><tr><td><span class='status-dot ok'></span>Claude Code</td><td>detected</td><td>-</td><td>unknown</td></tr><tr><td><span class='status-dot muted'></span>Claude Cowork</td><td>not detected</td><td>-</td><td>-</td></tr><tr><td><span class='status-dot ok'></span>Cursor</td><td>detected</td><td>-</td><td>unknown</td></tr><tr><td><span class='status-dot ok'></span>Codex Desktop</td><td>detected</td><td>-</td><td>unknown</td></tr><tr><td><span class='status-dot ok'></span>GitHub Copilot</td><td>detected</td><td>-</td><td>unknown</td></tr><tr><td><span class='status-dot ok'></span>Grok Build</td><td>detected</td><td>-</td><td>unknown</td></tr><tr><td><span class='status-dot ok'></span>Grok Bot</td><td>detected</td><td>-</td><td>2026-07-07</td></tr></tbody>
+        </table>
+      </div>
+    <table class='posture-grid'><thead><tr><th>Platform</th><th>Detected</th><th>Highest-risk</th><th>MCP rules</th><th>Stored allow rules</th><th>Approval evidence</th><th>Chat msgs</th><th>Active est.</th></tr></thead><tbody><tr><td><strong>Claude Code</strong></td><td>yes</td><td>critical</td><td class='num'>1</td><td class='num'>1</td><td class='num'>available via OTEL</td><td class='num'>3 files</td><td class='num'>-</td></tr><tr><td><strong>Codex Desktop</strong></td><td>yes</td><td>critical</td><td class='num'>0</td><td class='num'>1</td><td class='num'>-</td><td class='num'>2 files</td><td class='num'>-</td></tr><tr><td><strong>Grok Build</strong></td><td>yes</td><td>critical</td><td class='num'>1</td><td class='num'>0</td><td class='num'>bypassed</td><td class='num'>1 files</td><td class='num'>-</td></tr><tr><td><strong>Grok Bot</strong></td><td>yes</td><td>medium</td><td class='num'>0</td><td class='num'>0</td><td class='num'>-</td><td class='num'>-</td><td class='num'>-</td></tr><tr><td><strong>Claude Cowork</strong></td><td>not collected</td><td>none</td><td class='num'>0</td><td class='num'>0</td><td class='num'>-</td><td class='num'>-</td><td class='num'>-</td></tr><tr><td><strong>Cursor</strong></td><td>yes</td><td>none</td><td class='num'>0</td><td class='num'>0</td><td class='num'>-</td><td class='num'>6 files</td><td class='num'>-</td></tr><tr><td><strong>GitHub Copilot</strong></td><td>yes</td><td>none</td><td class='num'>0</td><td class='num'>0</td><td class='num'>-</td><td class='num'>-</td><td class='num'>-</td></tr></tbody></table><p class='posture-grid-caption'>Stored allow rules are durable non-MCP permission entries. Approval evidence shows recorded prompt decisions when available. For Claude Code, local transcripts do not reliably distinguish a user-click accept from config, mode, or always-allow behavior; use OTEL tool_decision telemetry for click/source attribution. Secrets scan total: 1 hits across 3 targets; reported under Findings / Secrets Exposure.</p>
+    <header class="sh" style="margin-top: 36px;">
+      <div class="kicker"><span class="num">/04b</span><span class="kicker-label">PERMISSIONS</span></div>
+      <h2 class="h2">Configured permission surface.</h2>
+    </header>
+    
+        <div class="platform">
+      <div class="platform-head">
+        <h3>Claude Code</h3>
+        <div class="stats"><span><b>2</b> rules</span><span><b class="warn">1</b> high</span><span><b>1</b> critical</span></div>
+      </div>
+      <div class="perm-summary"><div class="ps"><div class="label">MCP Tooling</div><div class="n">1</div><div class="note">rule</div></div><div class="ps"><div class="label">Shell Execution</div><div class="n">1</div><div class="note">rule</div></div><div class="ps"><div class="label">Stored allow rules</div><div class="n">1</div><div class="note">non-MCP rules</div></div><div class="ps"><div class="label">Highest risk</div><div class="n risk-word" style="color: var(--red);">critical</div><div class="note">1 critical - 1 high - 1 medium</div></div></div>
+      
+      
+      
+      <div class="mcp-summary">
+        <div class="rule-group-head">
+          <h4>MCP servers and allowed tools</h4>
+          <span class="meta">1 server - 1 scoped row</span>
+        </div>
+        <table class="mcp-table">
+          <thead><tr><th>Server</th><th>Scope</th><th>Evidence</th><th>Source</th></tr></thead>
+          <tbody><tr><td><code>playwright</code></td><td class='mono'>user#abc123</td><td>server registered</td><td class='mono'>-</td></tr></tbody>
+        </table>
+      </div>
+      <div class="allow-summary">
+        <div class="rule-group-head">
+          <h4>Configured command allow rules</h4>
+          <span class="meta">1 non-MCP allow rule</span>
+        </div>
+        <div class="allow-source-grid">        <div class="allow-source">
+          <div class="allow-source-head">
+            <h5>Recorded source</h5>
+            <span>1 allow rule - user#abc123</span>
+          </div>
+          <div class="allow-cats"><span>Shell Execution <b>1</b></span></div>
+          <ul class="rule-list compact"><li><code>*</code></li></ul>
+          <div class='more'>evidence/claude.json</div>
+        </div></div>
+      </div>
+    </div>
+<div class="platform"><div class="platform-head"><h3>Claude Cowork</h3><div class="stats"><span>collector did not run</span></div></div></div>
+    <div class="platform">
+      <div class="platform-head">
+        <h3>Cursor</h3>
+        <div class="stats"><span>no persistent permission rules recorded</span></div>
+      </div>
+      <div class="telemetry-summary">
+        <div class="rule-group-head">
+          <h4>Cursor local permission state</h4>
+          <span class="meta">mcp.json + state.vscdb + agent transcripts</span>
+        </div>
+        <p class="surface-note">The MCP table lists registrations from mcp.json plus project approvals. Known (runtime) counts servers Cursor has seen in state.vscdb; unmatched known servers have no local mcp.json row. Local state cannot reconstruct every clicked approval as a reusable command allow-list.</p>
+        <div class="mode-grid"><div class='mode-chip'><span>Registered MCP</span><strong>0</strong></div><div class='mode-chip'><span>Approved project MCP</span><strong>0</strong></div><div class='mode-chip'><span>Known MCP (runtime)</span><strong>0</strong></div><div class='mode-chip'><span>Unmatched known</span><strong>0</strong></div><div class='mode-chip'><span>Approval-like events</span><strong>0</strong></div><div class='mode-chip'><span>Auto-accept workspaces</span><strong>0</strong></div></div>
+      </div>
+    </div>
+    <div class="platform">
+      <div class="platform-head">
+        <h3>Codex Desktop</h3>
+        <div class="stats"><span><b>1</b> rules</span><span><b class="">0</b> high</span><span><b>1</b> critical</span></div>
+      </div>
+      <div class="perm-summary"><div class="ps"><div class="label">General Tooling</div><div class="n">1</div><div class="note">rule</div></div><div class="ps"><div class="label">Stored allow rules</div><div class="n">1</div><div class="note">non-MCP rules</div></div><div class="ps"><div class="label">Highest risk</div><div class="n risk-word" style="color: var(--red);">critical</div><div class="note">1 critical - 0 high - 0 medium</div></div></div>
+      
+      
+      
+      
+      <div class="allow-summary">
+        <div class="rule-group-head">
+          <h4>Codex permission surface</h4>
+          <span class="meta">1 non-MCP entries</span>
+        </div>
+        <div class="codex-surface-grid">        <div class="codex-surface-card">
+          <div class="allow-source-head">
+            <h5>Other config grants</h5>
+            <span>1 entries - config.toml</span>
+          </div>
+          <ul class="rule-list compact"><li><code>prefix:demo</code></li></ul>
+          <div class="more">evidence/codex.json</div>
+        </div></div>
+      </div>
+    </div>
+<div class="platform"><div class="platform-head"><h3>GitHub Copilot</h3><div class="stats"><span>no persistent permission rules recorded</span></div></div></div>
+    <div class="platform">
+      <div class="platform-head">
+        <h3>Grok Build</h3>
+        <div class="stats"><span><b>1</b> rules</span><span><b class="">0</b> high</span><span><b>1</b> critical</span></div>
+      </div>
+      <div class="perm-summary"><div class="ps"><div class="label">MCP Tooling</div><div class="n">1</div><div class="note">rule</div></div><div class="ps"><div class="label">Stored allow rules</div><div class="n">0</div><div class="note">non-MCP rules</div></div><div class="ps"><div class="label">Highest risk</div><div class="n risk-word" style="color: var(--red);">critical</div><div class="note">1 critical - 0 high - 1 medium</div></div></div>
+      
+      <div class="telemetry-summary">
+        <div class="rule-group-head">
+          <h4>Grok Build local permission state</h4>
+          <span class="meta">config.toml + sessions + events.jsonl</span>
+        </div>
+        <p class="surface-note">Inventory from config.toml, session summary/signals, and events.jsonl MCP resolution. Chat history and updates.jsonl content stay out of evidence. always-approve / yolo means tool use is not prompted.</p>
+        <div class="mode-grid"><div class='mode-chip'><span>Permission mode</span><strong>always-approve</strong></div><div class='mode-chip'><span>Yolo</span><strong>yes</strong></div><div class='mode-chip'><span>Sessions</span><strong>0</strong></div><div class='mode-chip'><span>Messages</span><strong>0</strong></div><div class='mode-chip'><span>Tool calls</span><strong>0</strong></div><div class='mode-chip'><span>Transcript size</span><strong>0 B</strong></div><div class='mode-chip'><span>Models</span><strong>none</strong></div><div class='mode-chip'><span>Prompt-history cwds</span><strong>0</strong></div><div class='mode-chip'><span>Runtime MCP</span><strong>0</strong></div><div class='mode-chip'><span>Config MCP</span><strong>1</strong></div></div>
+      </div>
+      
+      <div class="mcp-summary">
+        <div class="rule-group-head">
+          <h4>MCP servers and allowed tools</h4>
+          <span class="meta">1 server - 1 scoped row</span>
+        </div>
+        <table class="mcp-table">
+          <thead><tr><th>Server</th><th>Scope</th><th>Evidence</th><th>Source</th></tr></thead>
+          <tbody><tr><td><code>demo</code></td><td class='mono'>user#mcp1</td><td>server registered</td><td class='mono'>-</td></tr></tbody>
+        </table>
+      </div>
+      
+    </div>
+    <div class="platform">
+      <div class="platform-head">
+        <h3>Grok Bot</h3>
+        <div class="stats"><span>no persistent allow-list rules</span><span>3 posture findings</span></div>
+      </div>
+      <div class="telemetry-summary">
+        <div class="rule-group-head">
+          <h4>Grok Bot local desktop state</h4>
+          <span class="meta">AppData presence only</span>
+        </div>
+        <p class="surface-note">Cursor&#x27;s Grok Bot desktop app, separate from Grok Build. Evidence is presence, size, and mtime only. sand-secrets.json, browser storage, and sand-client-persistence are not opened. Local execution is unknown: a real install does not leave a file that shows the ask/always/never policy. Connector grants, Cloud Agent delegation, and outbound messaging stay in Cursor&#x27;s cloud.</p>
+        <div class="mode-grid"><div class='mode-chip'><span>Desktop app data</span><strong>yes</strong></div><div class='mode-chip'><span>Secrets store</span><strong>yes</strong></div><div class='mode-chip'><span>Lockfile</span><strong>yes</strong></div><div class='mode-chip'><span>Browser/client state</span><strong>yes</strong></div><div class='mode-chip'><span>Local execution</span><strong>unknown</strong></div><div class='mode-chip'><span>Files</span><strong>40</strong></div><div class='mode-chip'><span>Newest local activity</span><strong>2026-07-07</strong></div></div>
+      </div>
+      <div class="rule-group posture-findings">
+        <div class="rule-group-head">
+          <h4>Runtime permission posture</h4>
+          <span class="meta">configuration finding</span>
+        </div>
+        <ul class="posture-list"><li><span class='pill low'>low</span><strong>Grok Bot desktop app data is present on this endpoint</strong><code>files=40; newest=2026-07-07</code></li><li><span class='pill low'>low</span><strong>Grok Bot lockfile is present (app is running or ran recently)</strong><code>lockfile present</code></li><li><span class='pill low'>low</span><strong>Grok Bot keeps browser and client state on disk (contents excluded)</strong><code>Local Storage present; Session Storage present; Network present; sand-client-persistence present</code></li></ul>
+        
+      </div>
+    </div>
+    <section id="cloud-agents" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/06b</span>
+        <span class="kicker-label">CURSOR CLOUD AGENTS</span>
+      </div>
+      <h2 class="h2">Cloud agents on this Cursor account.</h2>
+      <p class="sub">Opt-in read-only inventory from the official Cloud Agents API at api.cursor.com. Not part of an offline aiscan all run. The user API key is not stored. Dollar cost, conversation text, and pull-request state are outside this data.</p>
+    </header>
+    <div class="panel">
+        <div class="git-grid">
+          <div>
+            <div class="label">agents</div>
+            <div class="v">3</div>
+          </div>
+          <div>
+            <div class="label">still active</div>
+            <div class="v amber">1</div>
+          </div>
+          <div>
+            <div class="label">with pull requests</div>
+            <div class="v">1</div>
+          </div>
+          <div>
+            <div class="label">total tokens</div>
+            <div class="v">12,450</div>
+          </div>
+        </div>
+<p class="surface-note">By status · ACTIVE 1 · ARCHIVED 1 · IDLE 1</p>
+<div class="table-wrap" style="max-height: none; margin-top: 8px;"><table><thead><tr><th>Agent</th><th>Status</th><th>Env</th><th>Write</th><th>Pull requests</th><th>Latest run</th><th>Tokens</th></tr></thead><tbody><tr><td><strong><a href="https://cursor.com/agents/bc-demo-active">Demo README agent</a></strong><div class='mono'>created 2026-09-28T15:00:00Z · updated 2026-09-29T18:04:00Z</div><div class='mono'>https://github.com/example/demo-repo</div></td><td class='mono'>ACTIVE</td><td class='mono'>cloud</td><td class='mono'>current branch</td><td class='mono'><a href="https://github.com/example/demo-repo/pull/14">https://github.com/example/demo-repo/pull/14</a></td><td class='mono'>RUNNING<div class='mono'>n/a</div></td><td class='mono'>8,000</td></tr>
+<tr><td><strong><a href="https://cursor.com/agents/bc-demo-idle">Demo legacy agent</a></strong><div class='mono'>created 2026-06-01T12:00:00Z · updated 2026-06-02T12:00:00Z</div><div class='mono'>https://github.com/example/legacy</div></td><td class='mono'>IDLE</td><td class='mono'>cloud</td><td class='mono'>new branch</td><td class='mono'>—</td><td class='mono'>FINISHED<div class='mono'>45.0s</div></td><td class='mono'>4,000</td></tr>
+<tr><td><strong><a href="https://cursor.com/agents/bc-demo-archived">Demo archived agent</a></strong><div class='mono'>created 2026-05-01T12:00:00Z · updated 2026-07-01T12:00:00Z</div><div class='mono'>https://github.com/example/demo-repo</div></td><td class='mono'>ARCHIVED</td><td class='mono'>cloud</td><td class='mono'>new branch</td><td class='mono'>—</td><td class='mono'>FINISHED<div class='mono'>8.0s</div></td><td class='mono'>450</td></tr></tbody></table></div>
+<p class="surface-note">Run result text was not stored. Pass -IncludeRunResult to keep it.</p>
+        <ul class="surface-note">
+          <li>Dollar cost is not in the Cloud Agents API. Per-agent cost exists only on the enterprise Admin API, which this command does not call.</li>
+          <li>Full conversations are not collected. Run result text is omitted unless --include-run-result (aiscan -IncludeRunResult), and then it follows AISCAN_REDACT.</li>
+          <li>Personal user API keys cannot be scoped to read-only. The same key can create or delete agents. This command only sends HTTPS GET requests to api.cursor.com.</li>
+          <li>Pull request open, merged, or closed state is not in the API response. This command records prUrl values and does not call GitHub.</li>
+          <li>GET /v1/repositories is not called. Repository URLs come only from each agent&#x27;s repos and run git branches.</li>
+          <li>The Cursor IDE session token and cursor.com/api/dashboard endpoints are not read or called. Auth is the user-supplied CURSOR_API_KEY only.</li>
+        </ul>
+    </div>
+  </div>
+</section>
+
+    <header class="sh" style="margin-top: 36px;">
+      <div class="kicker"><span class="num">/05</span><span class="kicker-label">CHAT, SECRETS, GIT</span></div>
+      <h2 class="h2">Counts from chat, secrets, and git collectors.</h2>
+      <p class="sub">Transcript text stays in local raw/. This page shows file counts and redacted hit totals.</p>
+    </header>
+        <div class="chat-grid">
+      <div class="side">
+        <div class="stat">
+          <div class="stat-num">12</div>
+          <div class="stat-lbl">exported transcript files</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num">0m</div>
+          <div class="stat-lbl">estimated active conversation time</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num accent">1<span>·files</span></div>
+          <div class="stat-lbl">transcript files with secret patterns · ≈ 8.3% of all transcripts</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num accent">45<span>·days</span></div>
+          <div class="stat-lbl">max retention · grok</div>
+        </div>
+      </div>
+      <div class="retention">
+        <h3>Retention by tool · days held on disk</h3>
+        <div class="retention-row">
+          <span class="name">claude</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">3 files - 0m active est.</span>
+        </div>        <div class="retention-row">
+          <span class="name">codex</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">2 files - 0m active est.</span>
+        </div>        <div class="retention-row">
+          <span class="name">cursor</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">4 files - 0m active est.</span>
+        </div>        <div class="retention-row">
+          <span class="name">cursor composer</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">2 files - 0m active est.</span>
+        </div>        <div class="retention-row">
+          <span class="name">grok</span>
+          <div class="track"><div class="bar" style="width: 45%;">45d</div><div class="ninety" style="left: 90%;"></div></div>
+          <span class="right">1 files - 0m active est.</span>
+        </div>
+        <div class="ninety-cap">▮ 90-day policy mark</div>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top: 24px;"><table>
+      <thead><tr><th>Tool</th><th>Oldest</th><th>Newest</th><th>Files</th><th>Active estimate</th><th>Secret-hit files</th><th>Retention</th></tr></thead>
+      <tbody>
+        <tr><td class='mono'>claude</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>3</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+        <tr><td class='mono'>codex</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>2</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+        <tr><td class='mono'>cursor</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>4</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+        <tr><td class='mono'>cursor-composer</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>2</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+        <tr><td class='mono'>grok</td><td class='mono'>n/a</td><td class='mono'>n/a</td><td class='num'>1</td><td class='num'>0m</td><td class='num'>0</td><td class='num'>45d</td></tr>
+      </tbody>
+    </table></div>
+    <p class="posture-grid-caption">Active time is a capped-gap estimate from transcript timestamps: gaps between consecutive messages in the same session count up to 30 minutes. It is directional, not a timesheet, and tools with coarse timestamps may undercount.</p>
+    <div class="two-col">
+      <div class="panel"><h3>Secrets scan · 1 hits</h3><p style='color: var(--fg-3);'>No rule breakdown recorded.</p>
+<p style="margin-top: 20px; font-family: var(--f-mono); font-size: 11.5px; color: var(--fg-3); line-height: 1.6;">// by location · chat: 0 · repos: 1<br/>// scanner: gitleaks</p></div>
+      <div class="panel"><h3>Git posture · 5 repos</h3>        <div class="git-grid">
+          <div>
+            <div class="label">.env in history</div>
+            <div class="v red">1<small>/ 5</small></div>
+          </div>
+          <div>
+            <div class="label">pre-commit coverage</div>
+            <div class="v amber">0%<small>0 / 5</small></div>
+          </div>
+          <div>
+            <div class="label">repos scanned</div>
+            <div class="v">5</div>
+          </div>
+          <div>
+            <div class="label">branch protection</div>
+            <div class="v" style="font-size: 22px; color: var(--fg-3); padding-top: 12px;">not checked</div>
+            <div style="font-family: var(--f-mono); font-size: 11.5px; color: var(--fg-4);">(gh not enabled)</div>
+          </div>
+        </div></div>
+    </div>
+    <header class="sh" style="margin-top: 36px;">
+      <div class="kicker"><span class="num">/07</span><span class="kicker-label">COLLECTION SCOPE</span></div>
+      <h2 class="h2">How this evidence was produced.</h2>
+    </header>
+        <div class="collection-scope">
+      <div class="collection-scope-head">
+        <h3>Collection scope</h3>
+        <p>10 collectors produced local evidence. Completion times are in Methodology.</p>
+      </div>
+      <table>
+        <thead><tr><th>Collector</th><th>Status</th><th>Version</th><th>Evidence volume</th></tr></thead>
+        <tbody><tr><td><strong>Claude Code</strong></td><td>collected</td><td>1.0.0</td><td>2 permission rules</td></tr><tr><td><strong>Cursor</strong></td><td>collected</td><td>1.0.0</td><td>local state found</td></tr><tr><td><strong>Codex Desktop</strong></td><td>collected</td><td>1.0.0</td><td>1 permission rules</td></tr><tr><td><strong>GitHub Copilot</strong></td><td>collected</td><td>1.0.0</td><td>settings found</td></tr><tr><td><strong>Grok Build</strong></td><td>collected</td><td>1.0.0</td><td>1 permission rules</td></tr><tr><td><strong>Grok Bot</strong></td><td>collected</td><td>1.0.0</td><td>4 posture findings</td></tr><tr><td><strong>Chat History</strong></td><td>collected</td><td>1.0.0</td><td>340 chat messages</td></tr><tr><td><strong>Secrets Scan</strong></td><td>collected</td><td>1.0.0</td><td>1 secret hits</td></tr><tr><td><strong>Git Posture</strong></td><td>collected</td><td>1.0.0</td><td>5 git repos</td></tr><tr><td><strong>Cursor Cloud Agents</strong></td><td>collected</td><td>1.0.0</td><td>3 cloud agents</td></tr></tbody>
+      </table>
+    </div>
+    <div class="table-wrap" style="max-height: none;"><table>
+      <thead><tr><th>Collector</th><th>Work performed</th><th>Completed at</th><th>Duration</th><th>Version</th><th>Status</th></tr></thead>
+      <tbody>        <tr><td><strong>Chat transcripts</strong><div class='mono'>chat-history</div></td><td>Transcript export across detected AI tools</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Claude posture</strong><div class='mono'>claude</div></td><td>Claude settings, permissions, and MCP posture</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Cursor cloud agents</strong><div class='mono'>cloud-agents</div></td><td>Opt-in read-only inventory via the official Cloud Agents API (api.cursor.com)</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Codex posture</strong><div class='mono'>codex</div></td><td>Codex config, trusted projects, and MCP posture</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>GitHub Copilot posture</strong><div class='mono'>copilot</div></td><td>Copilot local settings detection</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Cursor posture</strong><div class='mono'>cursor</div></td><td>Cursor local state, durable rules, and approval events</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Discovery</strong><div class='mono'>discovery</div></td><td>Local tool path and capability discovery</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Git posture</strong><div class='mono'>git-posture</div></td><td>Local repository hygiene checks</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Grok Build posture</strong><div class='mono'>grok</div></td><td>Grok Build config and session posture</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Grok Bot posture</strong><div class='mono'>grok-bot</div></td><td>Grok Bot desktop presence, secrets-store and lockfile signals</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>Secrets scan</strong><div class='mono'>secrets-scan</div></td><td>gitleaks scan over chat exports and repo roots</td><td class='mono'>2026-07-11 21:23:58 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr>
+        <tr><td><strong>telemetry</strong><div class='mono'>telemetry</div></td><td>Collector run</td><td class='mono'>2026-10-07 23:38:23 +0000</td><td class='mono'>not recorded</td><td class='mono'>1.0.0</td><td><span class='pill ok'>ok</span></td></tr></tbody>
+    </table></div>
+    <div class="attestation">
+      <p><strong style="color: var(--green); font-weight: 500;">Manifest SHA-256</strong> (first 16 chars): <code>manifest not pre</code></p>
+      <p>Raw evidence stays in the local output directory.</p>
+      <div class="sig-line">Demo operator · 2026-10-07 23:38:23</div>
+    </div>
+  </div>
+</section></section>
+    <section class="page-panel" role="tabpanel" id="panel-approvals" aria-labelledby="tab-approvals" data-page-panel="approvals" hidden><section id="telemetry-approvals" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/09</span>
+        <span class="kicker-label">APPROVAL TELEMETRY</span>
+      </div>
+      <h2 class="h2">Approval decisions from imported telemetry.</h2>
+      <p class="sub">Imported <code>claude_code.tool_decision</code> events. Config-rule approvals were applied without a prompt. User approvals are prompt answers. Hook approvals came from a hook.</p>
+    </header>
+    <div class="perm-summary"><div class="ps"><div class="label">Approvals</div><div class="n">4</div><div class="note">accept</div></div><div class="ps"><div class="label">Denials</div><div class="n">1</div><div class="note">reject</div></div><div class="ps"><div class="label">Config rule</div><div class="n">3</div><div class="note">no prompt</div></div><div class="ps"><div class="label">User</div><div class="n">0</div><div class="note">prompted</div></div><div class="ps"><div class="label">Hook</div><div class="n">1</div><div class="note">hook</div></div></div><p class="surface-note">Claude Code does not persist individual approve clicks. These counts come from imported OpenTelemetry <code>tool_decision</code> events. Without that export, approvals are not on disk. Auto-approved means <code>source=config</code>.</p><p class="surface-note">75% of approvals came from config rules, which apply without a prompt.</p><div class="rule-group"><div class="rule-group-head"><h4>Top auto-approved tools</h4><span class="meta">source=config</span></div><div class="mode-grid"><div class='mode-chip'><span>Bash</span><strong>1</strong></div><div class='mode-chip'><span>Write</span><strong>1</strong></div><div class='mode-chip'><span>mcp:demo_tool</span><strong>1</strong></div></div></div><div class="rule-group"><div class="rule-group-head"><h4>By tool</h4><span class="meta">approvals and denials</span></div><div class="table-wrap"><table><thead><tr><th>Tool</th><th>Harness</th><th>Approvals</th><th>Denials</th><th>Auto-approved</th><th>No prompt</th></tr></thead><tbody><tr><td>Bash</td><td class='mono'>claude</td><td class='num'>1</td><td class='num'>1</td><td class='num'>1</td><td class='num'>1</td></tr><tr><td>Write</td><td class='mono'>claude</td><td class='num'>1</td><td class='num'>0</td><td class='num'>1</td><td class='num'>1</td></tr><tr><td>mcp:demo_tool</td><td class='mono'>claude</td><td class='num'>1</td><td class='num'>0</td><td class='num'>1</td><td class='num'>1</td></tr><tr><td>WebFetch</td><td class='mono'>claude</td><td class='num'>1</td><td class='num'>0</td><td class='num'>0</td><td class='num'>1</td></tr></tbody></table></div></div><div class="rule-group"><div class="rule-group-head"><h4>By source</h4><span class="meta">config rule, user, hook</span></div><div class="table-wrap"><table><thead><tr><th>Source</th><th>Group</th><th>Approvals</th><th>Denials</th></tr></thead><tbody><tr><td class='mono'>config</td><td>config rule</td><td class='num'>3</td><td class='num'>0</td></tr><tr><td class='mono'>hook</td><td>hook</td><td class='num'>1</td><td class='num'>0</td></tr><tr><td class='mono'>user_reject</td><td>user</td><td class='num'>0</td><td class='num'>1</td></tr></tbody></table></div></div><div class="rule-group"><div class="rule-group-head"><h4>By day</h4><span class="meta">calendar date on the event timestamp</span></div><div class="table-wrap"><table><thead><tr><th>Day</th><th>Approvals</th><th>Denials</th></tr></thead><tbody><tr><td class='mono'>2026-04-02</td><td class='num'>4</td><td class='num'>0</td></tr><tr><td class='mono'>2026-04-03</td><td class='num'>0</td><td class='num'>1</td></tr></tbody></table></div></div>
+  </div>
+</section></section>
+    <section class="page-panel" role="tabpanel" id="panel-usage" aria-labelledby="tab-usage" data-page-panel="usage" hidden><section id="telemetry-usage" class="section section--alt">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker">
+        <span class="num">/10</span>
+        <span class="kicker-label">USAGE AND COST</span>
+      </div>
+      <h2 class="h2">Token and cost totals from imported usage exports.</h2>
+      <p class="sub">Cursor rows with <code>cost_cents</code> are labeled from the Cursor dashboard usage export. Other harnesses are tokens only.</p>
+    </header>
+    <div class="perm-summary"><div class="ps"><div class="label">Events</div><div class="n">3</div><div class="note">usage rows</div></div><div class="ps"><div class="label">Total tokens</div><div class="n">260</div><div class="note">exported totals</div></div><div class="ps"><div class="label">Input</div><div class="n">170</div><div class="note">tokens</div></div><div class="ps"><div class="label">Output</div><div class="n">75</div><div class="note">tokens</div></div><div class="ps"><div class="label">Cost</div><div class="n">$0.20</div><div class="note">from the Cursor dashboard usage export</div></div></div><p class="surface-note">Cost is from the Cursor dashboard usage export. The dollar figure is that exported cent total, written as dollars. Dollars are not estimated from token counts. Rows without cost_cents stay tokens only.</p><div class="rule-group"><div class="rule-group-head"><h4>By tool</h4><span class="meta">sum of exported columns</span></div><div class="table-wrap"><table><thead><tr><th>Tool</th><th>Harness</th><th>Events</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Total</th><th>Cost</th></tr></thead><tbody><tr><td>agent</td><td class='mono'>cursor</td><td class='num'>2</td><td class='num'>150</td><td class='num'>65</td><td class='num'>10</td><td class='num'>5</td><td class='num'>230</td><td class='mono'>$0.20 (20 cents)</td></tr><tr><td>chat</td><td class='mono'>cursor</td><td class='num'>1</td><td class='num'>20</td><td class='num'>10</td><td class='num'>0</td><td class='num'>0</td><td class='num'>30</td><td class='mono'>tokens only</td></tr></tbody></table></div></div><div class="rule-group"><div class="rule-group-head"><h4>By model</h4><span class="meta">sum of exported columns</span></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Harness</th><th>Events</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Total</th><th>Cost</th></tr></thead><tbody><tr><td>example-small</td><td class='mono'>cursor</td><td class='num'>2</td><td class='num'>120</td><td class='num'>50</td><td class='num'>10</td><td class='num'>5</td><td class='num'>185</td><td class='mono'>$0.12 (12 cents)</td></tr><tr><td>example-large</td><td class='mono'>cursor</td><td class='num'>1</td><td class='num'>50</td><td class='num'>25</td><td class='num'>0</td><td class='num'>0</td><td class='num'>75</td><td class='mono'>$0.08 (8 cents)</td></tr></tbody></table></div></div>
+  </div>
+</section></section>
+    <section class="page-panel" role="tabpanel" id="panel-coverage" aria-labelledby="tab-coverage" data-page-panel="coverage" hidden><section id="coverage-gaps" class="section">
+  <div class="wrap">
+    <header class="sh">
+      <div class="kicker"><span class="num">/07</span><span class="kicker-label">COVERAGE GAPS</span></div>
+      <h2 class="h2">What this evidence cannot tell you.</h2>
+      <p class="sub">UNCAPTURED means that collector has no field for the question, so the cell stays unknown on purpose. Not determinable means this scan's evidence does not settle it. Presence and counts only — no prompts, file contents, or secrets.</p>
+    </header>
+    <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Agent</th><th>Question</th><th>Gap</th><th>Why</th></tr></thead><tbody><tr><td>Claude Code</td><td>Can read secrets</td><td class='mono'>not determinable</td><td>No secret store or env-exposure grant is in this evidence.</td></tr><tr><td>Claude Code</td><td>Runs remotely</td><td class='mono'>UNCAPTURED</td><td>Claude Code evidence is local settings; remote execution is not recorded.</td></tr><tr><td>Claude Cowork</td><td>Runs shell commands</td><td class='mono'>UNCAPTURED</td><td>Cowork evidence counts sessions and files; shell commands are not recorded.</td></tr><tr><td>Claude Cowork</td><td>Writes files</td><td class='mono'>not determinable</td><td>Not collected (no cowork.json).</td></tr><tr><td>Claude Cowork</td><td>Network or MCP access</td><td class='mono'>not determinable</td><td>Not collected (no cowork.json).</td></tr><tr><td>Claude Cowork</td><td>Can read secrets</td><td class='mono'>UNCAPTURED</td><td>Cowork evidence does not record secret stores or env grants.</td></tr><tr><td>Claude Cowork</td><td>Pushes to git/GitHub</td><td class='mono'>UNCAPTURED</td><td>Cowork evidence does not record git or GitHub pushes.</td></tr><tr><td>Claude Cowork</td><td>Runs remotely</td><td class='mono'>not determinable</td><td>Not collected (no cowork.json).</td></tr><tr><td>Claude Cowork</td><td>Approval mode</td><td class='mono'>UNCAPTURED</td><td>Cowork evidence does not record an approval mode.</td></tr><tr><td>Cursor</td><td>Runs shell commands</td><td class='mono'>not determinable</td><td>No shell allow rule or shell finding is in this evidence.</td></tr><tr><td>Cursor</td><td>Writes files</td><td class='mono'>not determinable</td><td>No edit grant, file snapshot, or write-tool record is in this evidence.</td></tr><tr><td>Cursor</td><td>Network or MCP access</td><td class='mono'>not determinable</td><td>0 MCP servers recorded; other network use is not recorded.</td></tr><tr><td>Cursor</td><td>Can read secrets</td><td class='mono'>not determinable</td><td>No secret store or env-exposure grant is in this evidence.</td></tr><tr><td>Cursor</td><td>Pushes to git/GitHub</td><td class='mono'>not determinable</td><td>No git or GitHub push grant is in this evidence.</td></tr><tr><td>Cursor</td><td>Runs remotely</td><td class='mono'>UNCAPTURED</td><td>Cursor IDE evidence is local; remote agents are a separate inventory.</td></tr><tr><td>Cursor</td><td>Approval mode</td><td class='mono'>not determinable</td><td>Approval mode is not recorded in Cursor local state.</td></tr><tr><td>Codex</td><td>Can read secrets</td><td class='mono'>not determinable</td><td>No secret store or env-exposure grant is in this evidence.</td></tr><tr><td>Codex</td><td>Runs remotely</td><td class='mono'>UNCAPTURED</td><td>Codex evidence is local config and sessions; remote execution is not recorded.</td></tr><tr><td>Copilot/VS Code</td><td>Runs shell commands</td><td class='mono'>UNCAPTURED</td><td>Copilot settings evidence does not record shell or terminal access.</td></tr><tr><td>Copilot/VS Code</td><td>Writes files</td><td class='mono'>UNCAPTURED</td><td>Copilot settings evidence does not record file writes.</td></tr><tr><td>Copilot/VS Code</td><td>Network or MCP access</td><td class='mono'>not determinable</td><td>Copilot evidence does not record MCP servers or network grants.</td></tr><tr><td>Copilot/VS Code</td><td>Can read secrets</td><td class='mono'>UNCAPTURED</td><td>Copilot settings evidence does not record secret stores or env grants.</td></tr><tr><td>Copilot/VS Code</td><td>Pushes to git/GitHub</td><td class='mono'>UNCAPTURED</td><td>Copilot settings evidence does not record git or GitHub pushes.</td></tr><tr><td>Copilot/VS Code</td><td>Runs remotely</td><td class='mono'>not determinable</td><td>Remote execution is not recorded for this agent.</td></tr><tr><td>Copilot/VS Code</td><td>Approval mode</td><td class='mono'>UNCAPTURED</td><td>Copilot settings evidence does not record an approval mode.</td></tr><tr><td>Grok Build</td><td>Runs shell commands</td><td class='mono'>not determinable</td><td>No shell allow rule or shell finding is in this evidence.</td></tr><tr><td>Grok Build</td><td>Writes files</td><td class='mono'>not determinable</td><td>No edit grant, file snapshot, or write-tool record is in this evidence.</td></tr><tr><td>Grok Build</td><td>Can read secrets</td><td class='mono'>not determinable</td><td>No secret store or env-exposure grant is in this evidence.</td></tr><tr><td>Grok Build</td><td>Pushes to git/GitHub</td><td class='mono'>not determinable</td><td>No git or GitHub push grant is in this evidence.</td></tr><tr><td>Grok Build</td><td>Runs remotely</td><td class='mono'>UNCAPTURED</td><td>Grok Build evidence is local config and sessions; remote execution is not recorded.</td></tr><tr><td>Grok Bot</td><td>Runs shell commands</td><td class='mono'>not determinable</td><td>local_execution is unknown (not_determinable_offline).</td></tr><tr><td>Grok Bot</td><td>Writes files</td><td class='mono'>UNCAPTURED</td><td>Grok Bot evidence is presence and size only; file writes are not recorded.</td></tr><tr><td>Grok Bot</td><td>Network or MCP access</td><td class='mono'>UNCAPTURED</td><td>Grok Bot evidence does not record network grants or MCP servers.</td></tr><tr><td>Grok Bot</td><td>Pushes to git/GitHub</td><td class='mono'>UNCAPTURED</td><td>Grok Bot evidence has no git or GitHub grant. box-secrets push state is a secrets file, not a git push.</td></tr><tr><td>Grok Bot</td><td>Runs remotely</td><td class='mono'>UNCAPTURED</td><td>Whether Grok Bot work runs on a hosted computer is not in this evidence.</td></tr><tr><td>Grok Bot</td><td>Approval mode</td><td class='mono'>UNCAPTURED</td><td>Grok Bot approval mode is not on disk (local_execution_reason is not an approval mode).</td></tr><tr><td>Cursor cloud agents</td><td>Runs shell commands</td><td class='mono'>UNCAPTURED</td><td>The Cloud Agents API inventory does not record shell or tool use.</td></tr><tr><td>Cursor cloud agents</td><td>Can read secrets</td><td class='mono'>UNCAPTURED</td><td>The Cloud Agents API inventory does not record secret stores or env grants.</td></tr><tr><td>Cursor cloud agents</td><td>Approval mode</td><td class='mono'>UNCAPTURED</td><td>The Cloud Agents API inventory does not record an approval mode.</td></tr></tbody></table></div>
+  </div>
+</section></section>
+  </main>
+  <footer class="footer">
+    <div class="foot-inner">
+      <span>aiscan briefing · Test User</span>
+      <span class="foot-meta"><span>2026-07-11 to 2026-10-07</span></span>
+    </div>
+  </footer>
+  <script>
+
+(function () {
+  var tabs = document.querySelectorAll("[data-page-tab]");
+  var panels = document.querySelectorAll("[data-page-panel]");
+  function show(id) {
+    tabs.forEach(function (tab) {
+      var on = tab.getAttribute("data-page-tab") === id;
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    panels.forEach(function (panel) {
+      var on = panel.getAttribute("data-page-panel") === id;
+      panel.hidden = !on;
+      panel.classList.toggle("is-active", on);
+    });
+  }
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      var id = tab.getAttribute("data-page-tab");
+      show(id);
+      if (history.replaceState) {
+        history.replaceState(null, "", "#" + id);
+      }
+    });
+  });
+  var initial = (location.hash || "").replace(/^#/, "");
+  tabs.forEach(function (tab) {
+    if (tab.getAttribute("data-page-tab") === initial) {
+      show(initial);
+    }
+  });
+
+  var tabBtns = document.querySelectorAll("#findings-tabs .tab-btn");
+  var tabPanels = document.querySelectorAll("#panel-findings [data-tab].tab-panel");
+  tabBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var target = btn.dataset.tab;
+      tabBtns.forEach(function (b) { b.classList.toggle("active", b === btn); });
+      tabPanels.forEach(function (p) { p.classList.toggle("active", p.dataset.tab === target); });
+    });
+  });
+
+  var searchEl = document.getElementById("findings-search");
+  if (searchEl) {
+    searchEl.addEventListener("input", function () {
+      var q = searchEl.value.toLowerCase();
+      document.querySelectorAll(".frow").forEach(function (row) {
+        var text = (row.textContent || "").toLowerCase();
+        row.style.display = (!q || text.indexOf(q) !== -1) ? "" : "none";
+      });
+    });
+  }
+})();
+
+  </script>
+</body>
+</html>

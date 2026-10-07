@@ -17,6 +17,7 @@ jobs:
           - cursor
           - codex
           - copilot
+          - cowork
           - grok
           - grok-bot
           - chat-history
@@ -24,6 +25,7 @@ jobs:
           - secrets-scan
           - pii-scan
           - cloud-agents
+          - telemetry-import
           - integration
     steps:
       - uses: actions/checkout@v4
