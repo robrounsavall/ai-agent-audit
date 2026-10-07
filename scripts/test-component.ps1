@@ -78,6 +78,8 @@ if ($Name -eq "all") {
     # mcp-visibility is already a component-like tree
     $code = Invoke-Discover -StartDir (Join-Path $RepoRoot "tools\mcp-visibility\tests") -Label "mcp-visibility"
     if ($code -ne 0) { $failed = 1 }
+    $code = Invoke-Discover -StartDir (Join-Path $RepoRoot "tools\github-access\tests") -Label "github-access"
+    if ($code -ne 0) { $failed = 1 }
     exit $failed
 }
 
