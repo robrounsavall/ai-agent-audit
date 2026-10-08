@@ -1248,7 +1248,7 @@
   .sig-line{
     margin-top: 56px;
     border-top: 1px solid var(--fg);
-    width: 340px;
+    width: min(340px, 100%);
     padding-top: 10px;
     color: var(--fg-3);
     font-family: var(--f-mono); font-size: 12px;

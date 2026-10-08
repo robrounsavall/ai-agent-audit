@@ -811,7 +811,8 @@ def _platform_chat_cell(chat_sum: dict[str, Any], platform_key: str) -> str:
         return str(messages)
     files = _platform_chat_metric(chat_sum, platform_key, "files")
     if files is not None:
-        return f"{files} files"
+        noun = "file" if files == 1 else "files"
+        return f"{files} {noun}"
     return "-"
 
 
@@ -1629,10 +1630,12 @@ def render_collection_scope(rows: list[dict[str, Any]]) -> str:
         <h3>Collection scope</h3>
         <p>{len(visible)} collectors produced local evidence. Versions are in the table below.</p>
       </div>
+      <div class="table-scroll">
       <table>
         <thead><tr><th>Collector</th><th>Status</th><th>Version</th><th>Evidence volume</th></tr></thead>
         <tbody>{''.join(row_html)}</tbody>
       </table>
+      </div>
     </div>"""
 
 
@@ -1662,7 +1665,7 @@ def _finding_search_blob(f: dict[str, Any]) -> str:
     return " ".join(
         [
             str(f.get("title", "")),
-            _display_redaction_tokens(f.get("sample_redacted", "")),
+            _fix_plurals(_display_redaction_tokens(f.get("sample_redacted", ""))),
             tags,
             str(f.get("category", "")),
         ]
@@ -2725,10 +2728,11 @@ def render_chat_section(chat_env: dict[str, Any] | None) -> str:
         days = r["retention_days"]
         bar_pct = round((days / scale) * 100) if scale else 0
         over_cls = " over" if days > 90 else ""
+        file_noun = "file" if r["files"] == 1 else "files"
         retention_rows.append(f"""        <div class="retention-row">
           <span class="name">{_esc(r['tool_display'])}</span>
-          <div class="track"><div class="bar{over_cls}" style="width: {bar_pct}%;">{days}d</div><div class="ninety" style="left: {round((90/scale)*100)}%;"></div></div>
-          <span class="right">{r['files']} {'file' if r['files'] == 1 else 'files'} - {_esc(_format_minutes_estimate(r['active_minutes_estimated']))} active est.</span>
+          <div class="track"><div class="bar{over_cls}" style="width: {bar_pct}%;"></div><div class="ninety" style="left: {round((90/scale)*100)}%;"></div></div>
+          <span class="right">{days}d · {r['files']} {file_noun} · {_esc(_format_minutes_estimate(r['active_minutes_estimated']))} active est.</span>
         </div>""")
 
     # Name the tool that is furthest past the 90-day mark, not the first one.
