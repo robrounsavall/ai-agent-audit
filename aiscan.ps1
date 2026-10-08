@@ -5,18 +5,25 @@
 
 .DESCRIPTION
     Runs the collectors against a throwaway temp directory and prints results to
-    the console. Read-only against tool data, offline, no network calls. Use this
-    to see what the collectors find on your own machine.
+    the console. Read-only against tool data. The collectors in 'all' are offline
+    and make no network calls. 'cloud-agents' and 'telemetry' are opt-in and are
+    not part of 'all'. cloud-agents sends HTTPS GET requests only to the Cursor
+    Cloud Agents API. telemetry reads local export files. A briefing run also
+    writes evidence\changes.json from the previous scan before building HTML.
 
     Every collector runs on stock Python with no install. secrets-scan needs
     gitleaks.exe on PATH.
 
 .PARAMETER Collector
     One of: claude cowork cursor codex copilot chat-history git-posture
-    secrets-scan pii-scan grok discover all. Defaults to 'all' when omitted.
+    secrets-scan pii-scan grok grok-bot cloud-agents telemetry discover all.
+    Defaults to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
-    'all' runs all 10 collectors and prints a combined summary.
+    'all' runs the 11 offline collectors and prints a combined summary.
+    'cloud-agents' and 'telemetry' are not included in 'all'. cloud-agents
+    reads CURSOR_API_KEY and never prints that key. telemetry reads export
+    files you pass with -OtelFile and -SplunkExport.
 
 .PARAMETER Json
     Dump raw collector JSON instead of pretty-printed PowerShell formatting.
@@ -57,6 +64,29 @@
     Operator name shown on the briefing hero and attestation. Passed to
     build-briefing.py as --operator.
 
+.PARAMETER IncludeRunResult
+    cloud-agents only. Store the latest run's result text in evidence. Off by
+    default because that text can contain source code or secrets. When set,
+    the text follows the same -Redact behavior as other collectors. The API
+    key is never written either way.
+
+.PARAMETER OtelFile
+    telemetry only. Repeatable path to an OTLP JSON or JSON-lines export of
+    Claude Code tool_decision events. Not used by 'all'.
+
+.PARAMETER SplunkExport
+    telemetry only. Repeatable path to a Splunk JSON or CSV export (approval
+    rows and/or Cursor dashboard usage rows). Not used by 'all'.
+
+.PARAMETER Previous
+    Evidence root of the prior scan. When -Briefing is set, aiscan runs
+    core\\scan_diff.py against this folder before building the HTML. Omit to
+    let scan_diff pick the newest earlier sibling of -OutDir.
+
+.PARAMETER HistoryRoot
+    Folder of dated scan directories. Passed to scan_diff as --history-root
+    when -Previous is omitted. Default is the parent of the scan folder.
+
 .EXAMPLE
     .\aiscan.ps1
     Runs every stdlib collector, unredacted, and prints a combined summary.
@@ -77,12 +107,26 @@
 
 .EXAMPLE
     .\aiscan.ps1 all -Here -Briefing -Customer "Acme Corp" -Operator "Jane Doe"
+
+.EXAMPLE
+    $env:CURSOR_API_KEY = "crsr_..."
+    .\aiscan.ps1 cloud-agents -OutDir C:\scans\today
+    Opt-in inventory of Cursor cloud agents. Not part of 'all'.
+
+.EXAMPLE
+    .\aiscan.ps1 telemetry -OutDir C:\scans\today -OtelFile C:\exports\otel.json -SplunkExport C:\exports\usage.csv
+    Opt-in import of local telemetry exports. Not part of 'all'.
+
+.EXAMPLE
+    .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Previous C:\scans\2026-10-01 -Briefing
+    Offline collectors, then a changes envelope versus the previous scan, then the HTML briefing.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false, Position = 0)]
     [ValidateSet("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
-        "git-posture", "secrets-scan", "pii-scan", "grok", "discover", "all")]
+        "git-posture", "secrets-scan", "pii-scan", "grok", "grok-bot",
+        "cloud-agents", "telemetry", "discover", "all")]
     [string]$Collector = "all",
 
     [switch]$Json,
@@ -101,7 +145,17 @@ param(
 
     [string]$Customer,
 
-    [string]$Operator
+    [string]$Operator,
+
+    [switch]$IncludeRunResult,
+
+    [string[]]$OtelFile,
+
+    [string[]]$SplunkExport,
+
+    [string]$Previous,
+
+    [string]$HistoryRoot
 )
 
 Set-StrictMode -Version Latest
@@ -140,12 +194,19 @@ $ScriptFor = @{
     "secrets-scan" = "secrets-scan\secrets-scan.py"
     "pii-scan"     = "pii-scan\pii-scan.py"
     "grok"         = "grok\grok.py"
+    "grok-bot"     = "grok-bot\grok-bot.py"
+    "cloud-agents" = "cloud-agents\cloud-agents.py"
+    "telemetry"    = "telemetry-import\telemetry-import.py"
 }
+
+# Opt-in collectors stay out of $StdlibOrder: cloud-agents (network) and
+# telemetry (local export files). A GitHub access inventory, if added later,
+# is the same kind of opt-in and must not be appended here.
 
 # Collectors run by 'all', in order. pii-scan runs last so it can pick up the
 # chat-history export under raw/ from the same run.
 $StdlibOrder = @("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
-    "git-posture", "secrets-scan", "grok", "pii-scan")
+    "git-posture", "secrets-scan", "grok", "grok-bot", "pii-scan")
 
 # Resolve real tool-history paths via the shared discover.py so coverage
 # includes override locations. The --json output is SENSITIVE (raw filesystem
@@ -209,6 +270,21 @@ function Get-CollectorExtras {
             # (raw\chat-history export + native chat locations) from these.
             $extra += $script:PathArgs
         }
+        "cloud-agents" {
+            if ($IncludeRunResult) { $extra += "--include-run-result" }
+        }
+        "telemetry" {
+            if ($OtelFile) {
+                foreach ($path in @($OtelFile)) {
+                    if ($path) { $extra += @("--otel-file", $path) }
+                }
+            }
+            if ($SplunkExport) {
+                foreach ($path in @($SplunkExport)) {
+                    if ($path) { $extra += @("--splunk-export", $path) }
+                }
+            }
+        }
     }
     return $extra
 }
@@ -266,6 +342,34 @@ function Remove-PeekRoot {
     }
     else {
         Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Writes evidence\changes.json by comparing this scan with the previous one.
+# Failures warn and fall through; the briefing then says changes were not collected.
+function Invoke-ScanDiff {
+    param([string]$Root)
+    $diffScript = Join-Path $CoreDir "scan_diff.py"
+    if (-not (Test-Path -LiteralPath $diffScript)) {
+        Write-Host "scan_diff.py not found; changes will be marked not collected." -ForegroundColor Yellow
+        return
+    }
+    Write-Host ""
+    Write-Host "Computing changes versus the previous scan..." -ForegroundColor Cyan
+    $diffArgs = @($diffScript, "--current", $Root)
+    if ($Previous) {
+        $diffArgs += @("--previous", $Previous)
+    }
+    elseif ($HistoryRoot) {
+        $diffArgs += @("--history-root", $HistoryRoot)
+    }
+    elseif (-not $OutDir -and -not $Here) {
+        # A throwaway folder's parent is TEMP. Do not treat other temp dirs as scan history.
+        $diffArgs += @("--history-root", $Root)
+    }
+    & $Python @diffArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Scan diff failed (exit $LASTEXITCODE). The briefing will say changes were not collected." -ForegroundColor Yellow
     }
 }
 
@@ -444,7 +548,10 @@ if ($Collector -eq "all") {
     }
     Write-Host ""
     $rows | Format-Table -AutoSize
-    if ($Briefing) { Invoke-AiscanBriefing -Root $root }
+    if ($Briefing) {
+        Invoke-ScanDiff -Root $root
+        Invoke-AiscanBriefing -Root $root
+    }
     Remove-PeekRoot -Root $root
     exit 0
 }
@@ -458,7 +565,11 @@ $code = Invoke-OneCollector -Name $Collector -EvidenceRoot $root
 $evidenceWritten = Test-Path -LiteralPath (Join-Path $root "evidence\$Collector.json")
 if ($code -eq 2 -and $evidenceWritten) {
     Write-Host ""
-    Write-Host "${Collector}: platform not detected (tool not installed or no local data)." -ForegroundColor Yellow
+    Write-Host "${Collector}: platform not detected (tool not installed, no local data, or no telemetry export)." -ForegroundColor Yellow
+    if ($Briefing) {
+        Invoke-ScanDiff -Root $root
+        Invoke-AiscanBriefing -Root $root
+    }
     Remove-PeekRoot -Root $root
     exit 0
 }
@@ -485,6 +596,9 @@ else {
     Show-Peek -Result $j
 }
 
-if ($Briefing) { Invoke-AiscanBriefing -Root $root }
+if ($Briefing) {
+    Invoke-ScanDiff -Root $root
+    Invoke-AiscanBriefing -Root $root
+}
 Remove-PeekRoot -Root $root
 exit 0

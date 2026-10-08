@@ -1,8 +1,9 @@
-"""HTML shell for CIO briefing — dark editorial template (Geist + JetBrains Mono).
+"""Shared CSS extras and the small script for the report v2 briefing.
 
-Placeholders use %%NAME%% tokens. The build-briefing.py renderer fills these
-in via a single dict.replace() pass. Keep tokens in one canonical place (here)
-so adding a new token is a one-file edit.
+build-briefing.py inlines briefing.css plus REPORT_V2_CSS and REPORT_V2_JS.
+The page is one offline HTML file: no font CDN, no external assets.
+
+HTML_SHELL is the previous long-scroll layout. Report v2 does not fill it.
 """
 
 HTML_SHELL = """<!doctype html>
@@ -11,9 +12,6 @@ HTML_SHELL = """<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>%%TITLE%%</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
 %%CSS%%
   </style>
@@ -34,6 +32,7 @@ HTML_SHELL = """<!doctype html>
       <a href="#permissions">Permissions</a>
       <a href="#chat">Chat</a>
       <a href="#secrets-git">Secrets &amp; Git</a>
+      %%CLOUD_AGENTS_NAV%%
       <a href="#methodology">Methodology</a>
       <a href="#appendix">Appendix</a>
     </div>
@@ -87,12 +86,12 @@ HTML_SHELL = """<!doctype html>
       <div>
         <div class="lbl">Critical</div>
         <div class="v red">%%COUNT_CRITICAL%%</div>
-        <div class="note">action this week</div>
+        <div class="note">needs action</div>
       </div>
       <div>
         <div class="lbl">High</div>
         <div class="v amber">%%COUNT_HIGH%%</div>
-        <div class="note">30-day window</div>
+        <div class="note">high priority</div>
       </div>
       <div>
         <div class="lbl">Medium</div>
@@ -216,6 +215,8 @@ HTML_SHELL = """<!doctype html>
   </div>
 </section>
 
+%%CLOUD_AGENTS_SECTION%%
+
 <!-- ============ METHODOLOGY ============ -->
 <section id="methodology" class="section section--alt">
   <div class="wrap">
@@ -313,4 +314,194 @@ HTML_SHELL = """<!doctype html>
 </script>
 </body>
 </html>
+"""
+
+# System fonts only. Inter / IBM Plex are named in briefing.css as a first
+# choice; these overrides win so a machine without those faces still renders.
+REPORT_V2_CSS = """
+:root {
+  --f-sans: ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+  --f-mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  --f-display: ui-sans-serif, "Segoe UI", sans-serif;
+  --f-serif: ui-sans-serif, "Segoe UI", sans-serif;
+  --section-y: 36px;
+}
+.report-summary { padding: 48px 0 28px; }
+.report-summary .display { margin: 12px 0 8px; }
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin: 22px 0 8px;
+}
+.summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+}
+.summary-card h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  font-weight: 600;
+}
+.summary-card p { margin: 0; color: var(--fg-2); }
+.agent-status { list-style: none; margin: 0; padding: 0; }
+.agent-status li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.agent-status li:last-child { border-bottom: 0; }
+.page-tablist {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--nav-bg);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: saturate(180%) blur(14px);
+}
+.page-tablist-inner {
+  max-width: var(--max-w);
+  margin: 0 auto;
+  padding: 10px var(--pad-x);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.page-tab {
+  appearance: none;
+  background: transparent;
+  color: var(--fg-3);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: 500 13px/1.2 var(--f-sans);
+  cursor: pointer;
+}
+.page-tab:hover { color: var(--fg); }
+.page-tab[aria-selected="true"] {
+  color: var(--fg);
+  background: var(--accent-2);
+  border-color: var(--line-2);
+}
+.page-panel[hidden] { display: none !important; }
+.empty-note {
+  margin: 28px 0;
+  padding: 16px 18px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius);
+  color: var(--fg-2);
+}
+.report-summary .meta-list { margin-bottom: 36px; }
+.page-panel .section { padding-top: 28px; padding-bottom: 40px; }
+@media print {
+  .page-tablist { display: none !important; }
+  .page-panel[hidden] { display: block !important; }
+  .summary-card, .agent-status, .agent-status li, .lede {
+    background: #fff !important;
+    color: #111 !important;
+  }
+}
+"""
+
+REPORT_V2_JS = """
+(function () {
+  var tabs = document.querySelectorAll("[data-page-tab]");
+  var panels = document.querySelectorAll("[data-page-panel]");
+  function show(id) {
+    tabs.forEach(function (tab) {
+      var on = tab.getAttribute("data-page-tab") === id;
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    panels.forEach(function (panel) {
+      var on = panel.getAttribute("data-page-panel") === id;
+      panel.hidden = !on;
+      panel.classList.toggle("is-active", on);
+    });
+  }
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      var id = tab.getAttribute("data-page-tab");
+      show(id);
+      if (history.replaceState) {
+        history.replaceState(null, "", "#" + id);
+      }
+    });
+  });
+  var initial = (location.hash || "").replace(/^#/, "");
+  tabs.forEach(function (tab) {
+    if (tab.getAttribute("data-page-tab") === initial) {
+      show(initial);
+    }
+  });
+
+  var tabBtns = document.querySelectorAll("#findings-tabs .tab-btn");
+  var tabPanels = document.querySelectorAll("#panel-findings [data-tab].tab-panel");
+  tabBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var target = btn.dataset.tab;
+      tabBtns.forEach(function (b) { b.classList.toggle("active", b === btn); });
+      tabPanels.forEach(function (p) { p.classList.toggle("active", p.dataset.tab === target); });
+    });
+  });
+
+  function rowMatches(row, q) {
+    var text = (row.getAttribute("data-search") || row.textContent || "").toLowerCase();
+    return !q || text.indexOf(q) !== -1;
+  }
+  function setShown(row, shown) {
+    row.hidden = !shown;
+    row.style.display = shown ? "" : "none";
+  }
+  var searchEl = document.getElementById("findings-search");
+  if (searchEl) {
+    searchEl.addEventListener("input", function () {
+      var q = searchEl.value.toLowerCase();
+      var buttons = document.querySelectorAll("#findings-tabs .tab-btn");
+      var firstMatch = null;
+      var activeHas = false;
+      buttons.forEach(function (btn) {
+        var slug = btn.getAttribute("data-tab");
+        var panel = document.querySelector('#panel-findings .tab-panel[data-tab="' + slug + '"]');
+        if (!panel) return;
+        var n = 0;
+        panel.querySelectorAll(".frow").forEach(function (row) {
+          var ok = rowMatches(row, q);
+          setShown(row, ok);
+          if (ok) n += 1;
+        });
+        var empty = panel.querySelector(".filter-empty");
+        if (empty) setShown(empty, q && n === 0);
+        var ct = btn.querySelector(".ct");
+        if (ct) {
+          if (!btn.getAttribute("data-total")) btn.setAttribute("data-total", ct.textContent || "0");
+          ct.textContent = q ? String(n) : btn.getAttribute("data-total");
+        }
+        if (n > 0 && !firstMatch) firstMatch = btn;
+        if (btn.classList.contains("active") && n > 0) activeHas = true;
+      });
+      document.querySelectorAll("#panel-findings .case").forEach(function (card) {
+        setShown(card, rowMatches(card, q));
+      });
+      var appendixHits = 0;
+      document.querySelectorAll("#panel-findings .appendix-table tbody tr").forEach(function (row) {
+        if (row.classList.contains("filter-empty")) return;
+        var ok = rowMatches(row, q);
+        setShown(row, ok);
+        if (ok) appendixHits += 1;
+      });
+      var appendixEmpty = document.querySelector("#panel-findings .appendix-table .filter-empty");
+      if (appendixEmpty) setShown(appendixEmpty, q && appendixHits === 0);
+      if (q && !activeHas && firstMatch) firstMatch.click();
+    });
+  }
+})();
 """

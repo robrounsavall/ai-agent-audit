@@ -1,0 +1,28 @@
+{
+  "collector": "cowork",
+  "version": "1.0.0",
+  "ran_at": "2026-07-01T15:00:00+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "cowork-prev",
+  "summary": {
+    "sessions": 3,
+    "transcript_files": 3,
+    "findings": 1
+  },
+  "findings": [
+    {
+      "id": "cowork.sessions.present",
+      "severity": "low",
+      "category": "Cross-Agent Visibility",
+      "title": "Cowork session workspaces present locally",
+      "evidence_count": 3,
+      "sample_redacted": "sessions=3",
+      "tags": [
+        "history_retention"
+      ]
+    }
+  ],
+  "rules": [],
+  "raw_pointers": []
+}

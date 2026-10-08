@@ -1,0 +1,8 @@
+{
+  "name": "telemetry-import",
+  "evidence": "telemetry",
+  "in_all": false,
+  "needs_paths": false,
+  "needs_repo_roots": false,
+  "deps": ["stdlib"]
+}

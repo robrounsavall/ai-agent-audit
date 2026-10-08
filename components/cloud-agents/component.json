@@ -1,0 +1,9 @@
+{
+  "name": "cloud-agents",
+  "evidence": "cloud-agents",
+  "in_all": false,
+  "needs_paths": false,
+  "needs_repo_roots": false,
+  "deps": ["stdlib"],
+  "network": "opt-in GET https://api.cursor.com"
+}

@@ -1,0 +1,15 @@
+{
+  "collector": "copilot",
+  "version": "1.0.0",
+  "ran_at": "2026-07-01T15:00:00+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": false,
+  "scope_hash": "copilot-prev",
+  "summary": {
+    "platforms_found": 0,
+    "findings": 0
+  },
+  "findings": [],
+  "rules": [],
+  "raw_pointers": []
+}

@@ -4,8 +4,9 @@
     Run unit tests for one component (or core / integration).
 
 .PARAMETER Name
-    Component name: claude, cowork, cursor, codex, copilot, grok, chat-history,
-    git-posture, secrets-scan, pii-scan, core, integration, all.
+    Component name: claude, cowork, cursor, codex, copilot, grok, grok-bot,
+    chat-history, git-posture, secrets-scan, pii-scan, cloud-agents,
+    telemetry-import, core, integration, all.
 
 .EXAMPLE
     .\scripts\test-component.ps1 -Name codex
@@ -15,9 +16,9 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet(
-        "claude", "cowork", "cursor", "codex", "copilot", "grok",
+        "claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot",
         "chat-history", "git-posture", "secrets-scan", "pii-scan",
-        "core", "integration", "all"
+        "cloud-agents", "telemetry-import", "core", "integration", "all"
     )]
     [string]$Name
 )
@@ -66,8 +67,9 @@ $failed = 0
 
 if ($Name -eq "all") {
     $order = @(
-        "core", "claude", "cowork", "cursor", "codex", "copilot", "grok",
-        "chat-history", "git-posture", "secrets-scan", "pii-scan", "integration"
+        "core", "claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot",
+        "chat-history", "git-posture", "secrets-scan", "pii-scan",
+        "cloud-agents", "telemetry-import", "integration"
     )
     foreach ($n in $order) {
         & $PSCommandPath -Name $n

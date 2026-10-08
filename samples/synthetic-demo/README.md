@@ -6,4 +6,7 @@ Use with:
 
     python report\build-briefing.py --evidence-root samples\synthetic-demo --out demo-briefing.html
 
+The report v2 draft (summary, tabs, changes versus samples\synthetic-previous, plus the sample telemetry export) is samples\report-v2-draft.html. Regenerate it with scripts\build-draft-report.ps1.
+
 Contains no real paths, identities, or credentials.
+cloud-agents.json is synthetic opt-in evidence for the Cloud Agents API inventory.

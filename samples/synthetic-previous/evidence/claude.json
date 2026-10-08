@@ -1,0 +1,47 @@
+{
+  "collector": "claude",
+  "version": "1.0.0",
+  "ran_at": "2026-07-01T15:00:00+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "claude-prev",
+  "summary": {
+    "settings_files": 1,
+    "rules": 1,
+    "findings": 1,
+    "allow_rules": 1,
+    "deny_rules": 0,
+    "ask_rules": 0,
+    "desktop_mcp_servers": 1
+  },
+  "findings": [
+    {
+      "id": "claude.permission.bash_curl",
+      "severity": "high",
+      "category": "Shell Execution",
+      "title": "Claude has unrestricted curl approval",
+      "evidence_count": 1,
+      "first_seen": "",
+      "last_seen": "",
+      "sample_redacted": "Bash(curl:*)",
+      "secret_redacted": false,
+      "tags": [
+        "network_egress"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "platform": "claude",
+      "scope": "user",
+      "scope_label_redacted": "user#abc123",
+      "rule_type": "mcp_tool",
+      "rule": "mcp__slack",
+      "decision": "allow",
+      "command_or_tool_redacted": "slack",
+      "risk": "medium",
+      "exposure_category": "MCP Tooling"
+    }
+  ],
+  "raw_pointers": []
+}

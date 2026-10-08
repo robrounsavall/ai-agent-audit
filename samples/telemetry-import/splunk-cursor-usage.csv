@@ -1,0 +1,4 @@
+_time,event,sourcetype,model,kind,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,total_tokens,cost_cents
+2026-04-02T15:00:00Z,cursor_usage_event,cursor:usage_events,example-small,agent,100,40,10,5,155,12
+2026-04-02T16:00:00Z,cursor_usage_event,cursor:usage_events,example-small,chat,20,10,0,0,30,
+2026-04-03T15:00:00Z,cursor_usage_event,cursor:usage_events,example-large,agent,50,25,0,0,75,8
