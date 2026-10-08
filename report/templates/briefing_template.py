@@ -86,12 +86,12 @@ HTML_SHELL = """<!doctype html>
       <div>
         <div class="lbl">Critical</div>
         <div class="v red">%%COUNT_CRITICAL%%</div>
-        <div class="note">action this week</div>
+        <div class="note">needs action</div>
       </div>
       <div>
         <div class="lbl">High</div>
         <div class="v amber">%%COUNT_HIGH%%</div>
-        <div class="note">30-day window</div>
+        <div class="note">high priority</div>
       </div>
       <div>
         <div class="lbl">Medium</div>

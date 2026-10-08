@@ -1125,7 +1125,7 @@ def render_hero_lede(tool_names: list[str], counts: Counter[str]) -> str:
     if crit:
         sev_part = (
             f"{crit} critical finding{'s' if crit != 1 else ''} need"
-            f"{'' if crit != 1 else 's'} action this week."
+            f"{'' if crit != 1 else 's'} action."
         )
     elif high:
         sev_part = f"{high} high-severity findings need review."
@@ -1142,7 +1142,7 @@ def render_executive_headline(counts: Counter[str]) -> str:
     if crit:
         return (
             f"{total} findings. "
-            f"{crit} require{'s' if crit == 1 else ''} action this week."
+            f"{crit} require{'s' if crit == 1 else ''} action."
         )
     if high:
         return f"{total} findings. {high} high-severity items to review."
@@ -3622,8 +3622,8 @@ def build_html(
         <p class="sub">{_esc(render_executive_sub(envelopes, counts))}</p>
       </header>
       <div class="sev-strip">
-        <div><div class="lbl">Critical</div><div class="v red">{counts.get("critical", 0)}</div><div class="note">action this week</div></div>
-        <div><div class="lbl">High</div><div class="v amber">{counts.get("high", 0)}</div><div class="note">30-day window</div></div>
+        <div><div class="lbl">Critical</div><div class="v red">{counts.get("critical", 0)}</div><div class="note">needs action</div></div>
+        <div><div class="lbl">High</div><div class="v amber">{counts.get("high", 0)}</div><div class="note">high priority</div></div>
         <div><div class="lbl">Medium</div><div class="v yellow">{counts.get("medium", 0)}</div><div class="note">policy / backlog</div></div>
         <div><div class="lbl">Low</div><div class="v green">{counts.get("low", 0)}</div><div class="note">informational</div></div>
       </div>
