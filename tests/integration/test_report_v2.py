@@ -106,13 +106,13 @@ class TestReportV2(unittest.TestCase):
             ):
                 self.assertIn(label, html)
             self.assertIn('role="tablist"', html)
-            self.assertIn("UNCAPTURED", _panel(html, "coverage"))
+            self.assertIn("Not collected by design", _panel(html, "coverage"))
             self.assertIn(
-                "Not collected — run aiscan telemetry -OtelFile",
+                "Not collected in this scan.",
                 _panel(html, "approvals"),
             )
             self.assertIn(
-                "Not collected — run aiscan cloud-agents to enable.",
+                "Not collected in this scan.",
                 _panel(html, "agents"),
             )
             self.assertNotIn('id="cloud-agents"', html)
@@ -129,7 +129,7 @@ class TestReportV2(unittest.TestCase):
             )
             html = briefing.build_html(root, customer="Example", operator="Test")
             self.assertIn(
-                "Not collected — run python core/scan_diff.py --current",
+                "Not collected in this scan.",
                 _panel(html, "changes"),
             )
 
