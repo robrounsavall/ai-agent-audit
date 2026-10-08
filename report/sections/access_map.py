@@ -115,10 +115,6 @@ def render_access_map_section(envelopes: dict[str, dict]) -> str:
         f"<th title='{_esc(column['label'])}'>{_esc(column['short'])}</th>"
         for column in grid["columns"]
     )
-    evidence_rows = []
-    for row in grid["rows"]:
-        for column in grid["columns"]:
-            evidence_rows.append(_render_evidence_row(row, column, grid["cells"][row["id"]][column["id"]]))
     return f"""<style>{_ACCESS_CSS}</style>
 <section id="access-map" class="section">
   <div class="wrap">
@@ -136,22 +132,12 @@ def render_access_map_section(envelopes: dict[str, dict]) -> str:
       <li><span class="pill ok">no</span> recorded restriction, or nothing in an inventory that ran</li>
       <li><span class="pill skipped">unknown</span> evidence cannot tell</li>
     </ul>
-    <p class="posture-grid-caption">Color tracks access risk. The headline counts yes only, not partial or unknown. Each cell links to the evidence row below. Network cells show the MCP server count when that collector records one.</p>
-    <div class="table-wrap" style="max-height: none;">
+    <p class="posture-grid-caption">Color tracks access risk. The headline counts yes only, not partial or unknown. Open a cell for the evidence behind it. Network cells show the MCP server count when that collector records one.</p>
+    <div class="table-wrap table-scroll" style="max-height: none;">
       <table class="posture-grid access-map">
         <thead><tr><th>Agent</th>{headers}</tr></thead>
         <tbody>{''.join(rows_html)}</tbody>
       </table>
-    </div>
-    <div class="access-map-evidence" id="access-map-evidence">
-      <h3>Evidence behind each cell</h3>
-      <p class="sub">Anchors match the grid. Sources are evidence files and the field or finding that decided the cell.</p>
-      <div class="table-wrap" style="max-height: none;">
-        <table>
-          <thead><tr><th>Agent</th><th>Capability</th><th>Value</th><th>Evidence</th><th>Why</th><th>Source</th></tr></thead>
-          <tbody>{''.join(evidence_rows)}</tbody>
-        </table>
-      </div>
     </div>
   </div>
 </section>"""
@@ -171,8 +157,11 @@ def _render_cell(cell: dict[str, Any], column_id: str) -> str:
     return (
         f"<td class='access-cell access-cell--{_esc(value)}'>"
         f"<a class='pill {pill}' href='#{_esc(anchor)}'>{_esc(value)}</a>"
+        f"<details id='{_esc(anchor)}' class='access-detail'>"
+        f"<summary>Evidence</summary>"
         f"<div class='access-reason'>{_esc(cell.get('reason') or '')}</div>"
         f"<div class='access-meta'>{' · '.join(meta_bits)}</div>"
+        "</details>"
         "</td>"
     )
 

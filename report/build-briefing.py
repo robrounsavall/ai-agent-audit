@@ -6,10 +6,12 @@ This rev targets the dark editorial template — Geist +
 JetBrains Mono, warm-near-black background, single amber accent, mono `/NN`
 section kickers. Structural change worth flagging:
 
-  - Appendix rows are aggregated by (severity, title, ref). Identical
-    gitleaks findings — the historical pain point that produced ~170
-    near-identical "raw/secrets-scan/findings.csv" rows — collapse to one
-    row per rule with a count badge.
+  - Secret-scanner hits are grouped by rule (and by file, when the finding
+    carries one) in the summary bars, the findings table, and the appendix.
+    The evidence column is the hit count. Per-hit samples stay in the local CSV.
+  - Obvious placeholder or example values are labeled "likely test value"
+    and counted as low. They stay in the report.
+  - Section kickers are numbered in render order after the page is assembled.
 
 Usage:
     python build-briefing.py --evidence-root <path> --out <html-path> \\
@@ -44,7 +46,7 @@ from access_map import build_access_map  # noqa: E402
 from briefing_template import REPORT_V2_CSS, REPORT_V2_JS  # noqa: E402
 from scan_diff import load_changes_envelope  # noqa: E402
 from sections.access_map import render_access_map_section  # noqa: E402
-from sections.changes import render_changes_nav, render_changes_section  # noqa: E402
+from sections.changes import render_changes_section  # noqa: E402
 from sections.telemetry import (  # noqa: E402
     has_approval_evidence,
     render_approvals_section,
@@ -108,6 +110,7 @@ TOOL_LABELS = {
     "git-posture": "Git Posture",
     "discovery": "Discovery",
     "pii-scan": "PII Scan",
+    "telemetry": "Telemetry import",
     "cloud-agents": "Cursor Cloud Agents",
 }
 COLLECTOR_PURPOSES = {
@@ -200,11 +203,427 @@ def _display_redaction_tokens(value: Any) -> str:
     return text
 
 
+_TRAILING_COUNT_RE = re.compile(r"^(?P<body>.+?):\s*(?P<count>\d+)\s*$")
+_SECRET_TITLE_RE = re.compile(
+    r"^Secret detected by (?P<scanner>[A-Za-z0-9_.-]+):\s*(?P<rule>.+)$"
+)
+_REDACTED_SAMPLE_RE = re.compile(r"^(?P<body>.*?)\s+\((?P<kind>[^)]+)\)\s*$")
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_KICKER_NUM_RE = re.compile(
+    r"(<div class=\"kicker\">\s*<span class=\"num\">)(.*?)(</span>)",
+    re.DOTALL,
+)
+_PLACEHOLDER_LABEL = "likely test value"
+_PII_TITLE_RE = re.compile(
+    r"^(?P<entity>[A-Z][A-Z0-9_]*) detected \((?P<hits>\d+) hit\(s\) across (?P<files>\d+) file\(s\)\)$"
+)
+_CHAT_SECRET_TITLE_RE = re.compile(
+    r"^Chat transcripts contain potential secrets \((?P<tool>[A-Za-z0-9_-]+)\)$"
+)
+_SECRET_RULE_LABELS = {
+    "generic-api-key": "Generic API key",
+    "generic": "Generic secret",
+    "curl-auth-user": "curl username and password",
+    "curl-auth-header": "curl authorization header",
+    "github-oauth": "GitHub token",
+    "github-pat": "GitHub token",
+    "private-key": "Private key",
+    "jwt": "JSON web token",
+}
+_PII_ENTITY_LABELS = {
+    "CREDIT_CARD": "Credit card numbers",
+    "US_SSN": "US Social Security numbers",
+    "IBAN_CODE": "IBANs",
+    "EMAIL_ADDRESS": "Email addresses",
+    "PHONE_NUMBER": "Phone numbers",
+    "IP_ADDRESS": "Public IP addresses",
+    "SECRET_GITHUB_PAT": "GitHub tokens",
+    "SECRET_GENERIC_SECRET": "Generic secrets",
+    "SECRET_HEX_SECRET": "Hex secrets",
+    "SECRET_AWS_KEY": "AWS access keys",
+    "SECRET_SLACK_TOKEN": "Slack tokens",
+}
+_TOOL_ALIASES = {
+    "cursor-composer": "Cursor composer",
+    "composer": "Cursor composer",
+    "copilot": "GitHub Copilot",
+    "vscode": "GitHub Copilot",
+    "vs-code": "GitHub Copilot",
+    "vs code": "GitHub Copilot",
+    "codex": "Codex Desktop",
+    "claude": "Claude Code",
+    "grok": "Grok Build",
+    "cursor": "Cursor",
+}
+
+
+def _strip_redundant_count(title: str, evidence_count: Any) -> str:
+    """Drop a trailing ': N' when N is already the evidence-column count."""
+    match = _TRAILING_COUNT_RE.match(title)
+    if not match:
+        return title
+    try:
+        shown = int(match.group("count"))
+        evidence = int(evidence_count)
+    except (TypeError, ValueError):
+        return title
+    if shown == evidence and evidence > 0:
+        return match.group("body").strip()
+    return title
+
+
+def _tool_display_name(key: str) -> str:
+    text = str(key or "").strip()
+    if text in TOOL_LABELS:
+        return TOOL_LABELS[text]
+    lowered = text.lower()
+    if lowered in TOOL_LABELS:
+        return TOOL_LABELS[lowered]
+    if lowered in _TOOL_ALIASES:
+        return _TOOL_ALIASES[lowered]
+    return text
+
+
+def _fix_plurals(text: str) -> str:
+    def files_flagged(match: re.Match[str]) -> str:
+        count = int(match.group(1))
+        noun = "file" if count == 1 else "files"
+        return f"{count} {noun} flagged"
+
+    def paren_plural(match: re.Match[str]) -> str:
+        count = int(match.group(1))
+        noun = match.group(2)
+        if count == 1:
+            return f"{count} {noun}"
+        return f"{count} {noun}s"
+
+    updated = re.sub(r"\b(\d+) files flagged\b", files_flagged, text)
+    return re.sub(r"\b(\d+) (hit|file)\(s\)", paren_plural, updated)
+
+
+def _plain_pii_title(title: str) -> str | None:
+    match = _PII_TITLE_RE.match(title.strip())
+    if not match:
+        return None
+    entity = match.group("entity")
+    files = int(match.group("files"))
+    label = _PII_ENTITY_LABELS.get(entity, entity.replace("_", " ").title())
+    noun = "file" if files == 1 else "files"
+    return f"{label} across {files} {noun}"
+
+
 def _display_finding_title(finding: dict[str, Any]) -> str:
     finding_id = str(finding.get("id", ""))
     if finding_id == "claude.permission.skip_dangerous_prompt":
-        return "Claude dangerous-mode confirmation prompt is disabled"
-    return str(finding.get("title", ""))
+        title = "Claude dangerous-mode confirmation prompt is disabled"
+    elif finding.get("_rule"):
+        rule = str(finding.get("_rule") or "")
+        label = _SECRET_RULE_LABELS.get(rule.lower(), rule.replace("-", " ").replace("_", " "))
+        scanner = str(finding.get("_scanner") or "")
+        title = f"{label} ({scanner})" if scanner else label
+    else:
+        title = str(finding.get("title") or "")
+        plain = _plain_pii_title(title)
+        if plain:
+            title = plain
+        else:
+            chat = _CHAT_SECRET_TITLE_RE.match(title)
+            if chat:
+                title = (
+                    "Chat transcripts contain potential secrets "
+                    f"({_tool_display_name(chat.group('tool'))})"
+                )
+    title = _strip_redundant_count(title, finding.get("evidence_count"))
+    title = _fix_plurals(title)
+    reason = finding.get("_placeholder_reason")
+    if reason and _PLACEHOLDER_LABEL not in title.lower():
+        title = f"{title} · {_PLACEHOLDER_LABEL}"
+    return title
+
+
+def _secret_title_parts(title: str) -> tuple[str, str] | None:
+    base = str(title or "")
+    marker = f" · {_PLACEHOLDER_LABEL}"
+    if base.endswith(marker):
+        base = base[: -len(marker)]
+    match = _SECRET_TITLE_RE.match(base.strip())
+    if not match:
+        return None
+    return match.group("scanner").strip().lower(), match.group("rule").strip()
+
+
+def _redacted_sample_parts(sample: str) -> tuple[str, str]:
+    text = str(sample or "").strip()
+    match = _REDACTED_SAMPLE_RE.match(text)
+    if not match:
+        return text, ""
+    return match.group("body").strip(), match.group("kind").strip().lower()
+
+
+def _sample_compact(sample: str) -> str:
+    body, _kind = _redacted_sample_parts(sample)
+    return re.sub(r"\s+", "", body).lower()
+
+
+def likely_placeholder_reason(finding: dict[str, Any]) -> str | None:
+    """Return an explainable reason when a secret hit looks like an example.
+
+    Only scanner hits titled "Secret detected by <scanner>: <rule>" are
+    considered. Short values that redact to ****REDACTED:...**** are left
+    alone: the letters are gone, so a placeholder cannot be distinguished
+    from a real secret. Nothing is deleted; callers relabel and downgrade.
+    """
+    parts = _secret_title_parts(str(finding.get("title") or ""))
+    if parts is None:
+        return None
+    _scanner, rule = parts
+    rule_name = rule.lower()
+    sample = str(finding.get("sample_redacted") or "")
+    compact = _sample_compact(sample)
+    _body, kind = _redacted_sample_parts(sample)
+    if "redacted" in compact and "..." not in compact:
+        return None
+
+    # Documentation tokens such as YOUR_API_KEY_HERE redact to YOUR...HERE.
+    if re.fullmatch(r"your\.\.\.here", compact):
+        return "redacted sample is YOUR...HERE, a documentation placeholder"
+
+    # curl -u examples. Compared only for this rule, and only for the
+    # redaction windows of admin:admin, admin:password / admin:Password,
+    # admin:pass / admin:PASS, and admin:passwd.
+    if rule_name == "curl-auth-user" or kind == "curl-auth-user":
+        if re.fullmatch(r"admi\.\.\.(dmin|word|pass|sswd)", compact):
+            return (
+                "redacted sample matches an admin:admin, admin:password, "
+                "or admin:PASS example credential"
+            )
+        if re.fullmatch(r"(root|user|test|guest|demo)\.\.\.\1", compact):
+            return "redacted sample matches a repeated example username and password"
+
+    # generic-api-key sometimes matches the scanner's own name. The windows
+    # are what redact_sample keeps of gitleaks, trufflehog, or the two names
+    # written together (gitleaks...trufflehog -> gitl...ehog).
+    if rule_name in {"generic-api-key", "generic"} or kind in {"generic-api-key", "generic"}:
+        if compact in {"gitl...ehog", "gitl...eaks", "truf...ehog", "truf...eaks"}:
+            return "redacted sample matches the literal scanner name gitleaks or trufflehog"
+        if compact in {"gitleaks", "trufflehog"}:
+            return "sample is the literal scanner name gitleaks or trufflehog"
+        prefix = compact.split("...", 1)[0]
+        if prefix in {"gpl-", "lgpl", "agpl", "gfdl"} or prefix.startswith(("gpl-", "lgpl", "agpl", "gfdl")):
+            return "redacted sample starts with a license name (GPL, LGPL, AGPL, or GFDL)"
+        if re.fullmatch(r"ed25\.\.\.ekey", compact):
+            return "redacted sample matches an ed25519 key-type name, not a secret value"
+    return None
+
+
+def canonical_secret_severity(finding: dict[str, Any]) -> str | None:
+    """One severity per secret type, whichever scanner recorded it.
+
+    GitHub, AWS, Slack, and private keys are critical. Generic secrets, JWTs,
+    curl auth, and hex secrets are high. Placeholders are downgraded later.
+    """
+    token = ""
+    parts = _secret_title_parts(str(finding.get("title") or ""))
+    if parts:
+        token = parts[1]
+    else:
+        title = str(finding.get("title") or "")
+        match = re.match(r"^(SECRET_[A-Z0-9_]+)\b", title)
+        if match:
+            token = match.group(1)
+        else:
+            finding_id = str(finding.get("id") or "")
+            if finding_id.startswith("pii_scan.secret_"):
+                token = finding_id[len("pii_scan.") :]
+            else:
+                return None
+    bare = token.lower().replace("-", "_")
+    if bare.startswith("secret_"):
+        bare = bare[len("secret_") :]
+    if any(piece in bare for piece in ("github", "aws", "private_key", "slack")):
+        return "critical"
+    if any(piece in bare for piece in ("generic", "jwt", "curl_auth", "hex_secret", "api_key")):
+        return "high"
+    return None
+
+
+def _secret_file_key(finding: dict[str, Any]) -> str:
+    for key in ("file", "path", "filename", "source_file"):
+        value = finding.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _secret_group_key(finding: dict[str, Any]) -> tuple[str, ...] | None:
+    scanner = str(finding.get("_scanner") or "")
+    rule = str(finding.get("_rule") or "")
+    if not scanner or not rule:
+        parts = _secret_title_parts(str(finding.get("title") or ""))
+        if parts is None:
+            return None
+        scanner, rule = parts
+    return (
+        scanner.lower(),
+        rule.lower(),
+        _sample_compact(str(finding.get("sample_redacted") or "")),
+        str(finding.get("severity") or "low"),
+        str(finding.get("_placeholder_reason") or ""),
+    )
+
+
+def _collapse_secret_group(members: list[dict[str, Any]]) -> dict[str, Any]:
+    first = dict(members[0])
+    hits = sum(int(m.get("evidence_count") or 1) for m in members)
+    first["evidence_count"] = hits
+    first["_grouped_members"] = len(members)
+    files: list[str] = []
+    samples: list[str] = []
+    for member in members:
+        file_key = _secret_file_key(member)
+        if file_key and file_key not in files:
+            files.append(file_key)
+        sample = str(member.get("sample_redacted") or "").strip()
+        if sample and sample not in samples:
+            samples.append(sample)
+    first["_files"] = files
+    reason = str(first.get("_placeholder_reason") or "")
+    if samples:
+        shown = samples[0]
+        first["sample_redacted"] = f"{shown} · {reason}" if reason else shown
+    elif reason:
+        first["sample_redacted"] = reason
+    elif hits > 1:
+        first["sample_redacted"] = "Per-hit samples stay in raw/secrets-scan/findings.csv"
+    last_seen = [str(m.get("last_seen") or "") for m in members if m.get("last_seen")]
+    if last_seen:
+        first["last_seen"] = max(last_seen)
+    first_seen = [str(m.get("first_seen") or "") for m in members if m.get("first_seen")]
+    if first_seen:
+        first["first_seen"] = min(first_seen)
+    return first
+
+
+def present_findings(
+    findings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Label placeholders, then group secret-scanner hits for the report.
+
+    Returns the rows the briefing should count and render, plus hit stats.
+    Placeholder rows stay in the list at low severity.
+    """
+    stats = {
+        "secret_hits": 0,
+        "secret_rows": 0,
+        "placeholder_hits": 0,
+        "placeholder_rows": 0,
+    }
+    passthrough: list[dict[str, Any]] = []
+    buckets: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    order: list[tuple[str, ...]] = []
+
+    for raw in findings:
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        parts = _secret_title_parts(str(row.get("title") or ""))
+        if parts:
+            row["_scanner"], row["_rule"] = parts
+        canon = canonical_secret_severity(row)
+        if canon:
+            row["severity"] = canon
+        reason = likely_placeholder_reason(row)
+        if reason:
+            row["severity"] = "low"
+            row["_placeholder_reason"] = reason
+            tags = [str(tag) for tag in (row.get("tags") or [])]
+            if "likely_test_value" not in tags:
+                tags.append("likely_test_value")
+            row["tags"] = tags
+            stats["placeholder_hits"] += int(row.get("evidence_count") or 1)
+        row["title"] = _display_finding_title(row)
+        key = _secret_group_key(row)
+        if key is None:
+            passthrough.append(row)
+            continue
+        stats["secret_hits"] += int(row.get("evidence_count") or 1)
+        if key not in buckets:
+            order.append(key)
+            buckets[key] = []
+        buckets[key].append(row)
+
+    grouped = [_collapse_secret_group(buckets[key]) for key in order]
+    stats["secret_rows"] = len(grouped)
+    stats["placeholder_rows"] = sum(1 for row in grouped if row.get("_placeholder_reason"))
+    presented = passthrough + grouped
+    presented.sort(
+        key=lambda f: (
+            SEVERITY_ORDER.get(str(f.get("severity", "low")), 9),
+            -(int(f.get("evidence_count") or 1)),
+            str(f.get("title", "")),
+        )
+    )
+    return presented, stats
+
+
+def secret_rule_breakdown(findings: list[dict[str, Any]]) -> list[tuple[str, int]]:
+    """Hit counts by rule, with likely placeholders called out separately."""
+    counts: Counter[tuple[str, bool]] = Counter()
+    saw = False
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        parts = _secret_title_parts(str(finding.get("title") or ""))
+        if parts is None:
+            continue
+        saw = True
+        _scanner, rule = parts
+        placeholder = likely_placeholder_reason(finding) is not None
+        counts[(rule, placeholder)] += int(finding.get("evidence_count") or 1)
+    if not saw:
+        return []
+    rows: list[tuple[str, int]] = []
+    for (rule, placeholder), count in sorted(
+        counts.items(),
+        key=lambda item: (-item[1], item[0][0].lower(), item[0][1]),
+    ):
+        label = f"{rule} · {_PLACEHOLDER_LABEL}" if placeholder else rule
+        rows.append((label, count))
+    return rows
+
+
+def number_section_kickers(html: str) -> str:
+    """Assign /01, /02, ... to section kickers in the order they are rendered."""
+    counter = 0
+
+    def repl(match: re.Match[str]) -> str:
+        nonlocal counter
+        counter += 1
+        return f"{match.group(1)}/{counter:02d}{match.group(3)}"
+
+    return _KICKER_NUM_RE.sub(repl, html)
+
+
+def manifest_briefing_text(digest_or_status: str) -> tuple[str, str]:
+    """Header fragment and attestation sentence for the manifest line.
+
+    A real SHA-256 is shown as its first 16 hex chars, with that limit stated.
+    Any other status (for example "manifest not present") is shown in full.
+    """
+    if _SHA256_RE.fullmatch(digest_or_status or ""):
+        short = digest_or_status[:16].lower()
+        header = f"Manifest SHA-256 · {short} (first 16 of 64 hex chars)"
+        attest = (
+            '<p><strong style="color: var(--green); font-weight: 500;">Manifest SHA-256</strong> '
+            f"(first 16 of 64 hex chars): <code>{_esc(short)}</code></p>"
+        )
+        return header, attest
+    header = "Manifest: not generated"
+    attest = (
+        '<p><strong style="color: var(--green); font-weight: 500;">Manifest</strong>: '
+        "<code>not generated</code></p>"
+    )
+    return header, attest
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
@@ -489,7 +908,7 @@ def render_posture_grid(envelopes: dict[str, dict[str, Any]]) -> str:
             f"<tr>"
             f"<td><strong>{_esc(label)}</strong></td>"
             f"<td>{det_label}</td>"
-            f"<td>{_esc(risk_flag)}</td>"
+            f"<td class='risk-word {_esc(risk_flag)}'>{_esc(risk_flag)}</td>"
             f"<td class='num'>{mcp_cnt}</td>"
             f"<td class='num'>{allow_cnt}</td>"
             f"<td class='num'>{_esc(approval_evidence)}</td>"
@@ -515,15 +934,33 @@ def render_posture_grid(envelopes: dict[str, dict[str, Any]]) -> str:
         )
     if secrets_env:
         target_text = f" across {secrets_targets} targets" if secrets_targets else ""
+        secret_findings = [
+            item for item in (secrets_env.get("findings") or []) if isinstance(item, dict)
+        ]
+        placeholder_hits = sum(
+            int(item.get("evidence_count") or 1)
+            for item in secret_findings
+            if likely_placeholder_reason(item)
+        )
+        placeholder_text = (
+            f" {placeholder_hits} look like test values and are labeled low, not dropped."
+            if placeholder_hits
+            else ""
+        )
         caption_parts.append(
-            f"Secrets scan total: {secrets_hits} hits{target_text}; reported under Findings / Secrets Exposure."
+            "Secrets scan total: "
+            f"{secrets_hits} hits{target_text}; grouped by rule under Findings."
+            f"{placeholder_text}"
         )
     caption = (
         f"<p class='posture-grid-caption'>{_esc(' '.join(caption_parts))}</p>"
         if caption_parts
         else ""
     )
-    table = f"<table class='posture-grid'><thead>{header}</thead><tbody>{''.join(rows)}</tbody></table>{caption}"
+    table = (
+        f"<div class='table-scroll'><table class='posture-grid'><thead>{header}</thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></div>{caption}"
+    )
     return table
 
 
@@ -588,7 +1025,7 @@ def build_tools_table(
             }
         )
 
-    for key in ("chat-history", "secrets-scan", "git-posture", "cloud-agents"):
+    for key in ("chat-history", "secrets-scan", "git-posture", "pii-scan", "telemetry", "cloud-agents"):
         env = envelopes.get(key)
         if not env:
             continue
@@ -608,6 +1045,12 @@ def build_tools_table(
         elif key == "git-posture":
             n = int(summary.get("repos_scanned") or 0)
             extra = f"{n} git repos" if n else ""
+        elif key == "pii-scan":
+            n = int(summary.get("hits") or 0)
+            extra = f"{n} pattern hits" if n else "scan recorded"
+        elif key == "telemetry":
+            n = int(summary.get("approval_events") or summary.get("usage_events") or 0)
+            extra = f"{n} telemetry events" if n else "export recorded"
         elif key == "cloud-agents":
             n = int(summary.get("total_agents") or 0)
             extra = f"{n} cloud agents" if n else "no agents listed"
@@ -654,6 +1097,9 @@ def detected_tool_names(
             env = envelopes.get(key)
             if env and env.get("platform_detected"):
                 names.append(TOOL_LABELS[key])
+    cowork_summary = (envelopes.get("cowork") or {}).get("summary") or {}
+    if cowork_summary.get("design_used") and "Claude Design" not in names:
+        names.append("Claude Design")
     return names
 
 
@@ -783,15 +1229,20 @@ def render_cover_status(
     high = counts.get("high", 0)
     med = counts.get("medium", 0)
     low = counts.get("low", 0)
+    show_duration = any(
+        measure not in ("", "-", "unknown", "not recorded") for _name, _status, measure, _detail in rows
+    )
     row_html = []
     for name, status, measure, detail in rows:
         status_class = "ok" if status in ("detected", "collected") else "muted"
+        duration_cell = f"<td>{_esc(measure)}</td>" if show_duration else ""
         row_html.append(
             f"<tr><td><span class='status-dot {status_class}'></span>{_esc(name)}</td>"
             f"<td>{_esc(status)}</td>"
-            f"<td>{_esc(measure)}</td>"
-            f"<td>{_esc(detail)}</td></tr>"
+            f"{duration_cell}"
+            f"<td class='date'>{_esc(detail)}</td></tr>"
         )
+    duration_head = "<th>Duration</th>" if show_duration else ""
 
     return f"""      <div class="evidence-panel-body">
         <div class="evidence-metrics">
@@ -805,10 +1256,10 @@ def render_cover_status(
           <span>medium {med}</span>
           <span>low {low}</span>
         </div>
-        <table class="evidence-status-table">
-          <thead><tr><th>Tool</th><th>Status</th><th>Duration</th><th>Last used</th></tr></thead>
+        <div class="table-scroll"><table class="evidence-status-table">
+          <thead><tr><th>Tool</th><th>Status</th>{duration_head}<th>Last used</th></tr></thead>
           <tbody>{''.join(row_html)}</tbody>
-        </table>
+        </table></div>
       </div>"""
 
 
@@ -943,15 +1394,26 @@ def render_severity_bar_segments(counts: Counter[str]) -> str:
     )
 
 
-def render_severity_bar_note(counts: Counter[str], envelopes: dict[str, dict[str, Any]]) -> str:
-    """Right-side annotation on the severity bar (e.g., gitleaks aggregation note)."""
-    high = counts.get("high", 0)
-    sec_env = envelopes.get("secrets-scan")
-    gitleaks_hits = 0
-    if sec_env:
-        gitleaks_hits = int((sec_env.get("summary") or {}).get("hits") or 0)
-    if high and gitleaks_hits and gitleaks_hits <= high:
-        return f"{gitleaks_hits} / {high} high are gitleaks hits · grouped in appendix"
+def render_severity_bar_note(
+    counts: Counter[str],
+    envelopes: dict[str, dict[str, Any]],
+    secret_stats: dict[str, int] | None = None,
+) -> str:
+    """Right-side annotation on the severity bar."""
+    del counts, envelopes
+    stats = secret_stats or {}
+    hits = int(stats.get("secret_hits") or 0)
+    rows = int(stats.get("secret_rows") or 0)
+    placeholders = int(stats.get("placeholder_hits") or 0)
+    parts: list[str] = []
+    if hits and rows and hits != rows:
+        parts.append(f"{hits} secret hits grouped into {rows} rows")
+    elif hits and rows:
+        parts.append(f"{hits} secret hits")
+    if placeholders:
+        parts.append(f"{placeholders} likely test values labeled low")
+    if parts:
+        return " · ".join(parts)
     return "see appendix for grouped evidence index"
 
 
@@ -1059,11 +1521,11 @@ def render_risk_register(findings: list[dict[str, Any]]) -> str:
         elif sample and len(sample) < 220:
             summary_text = sample
         else:
-            summary_text = f"Flagged under {category}."
+            summary_text = "No sample stored for this finding."
 
         status_cls = "is-crit" if sev == "critical" else "is-active"
         tag_cls = "crit" if sev == "critical" else "high"
-        tag_id = f"{sev_label[:4]}-{i:02d}"
+        tag_id = f"C{i}"
         occ_tag = f'\n      <span class="tag {tag_cls}">×{occurrences}</span>' if occurrences > 1 else ""
         summary_html = f"\n  <p class=\"case-summary\">{_esc(summary_text)}</p>" if summary_text else ""
 
@@ -1096,9 +1558,9 @@ def render_risk_register(findings: list[dict[str, Any]]) -> str:
     </div>
   </div>"""
 
-        chunks.append(f"""<article class="case">
+        chunks.append(f"""<article class="case" data-search="{_esc(_finding_search_blob(f))}">
   <div class="case-head">
-    <div class="case-num">/{i:02d}</div>
+    <div class="case-num">C{i}</div>
     <div>
       <h3 class="case-title">{_esc(title)}</h3>
       <div class="case-meta">{meta_html}</div>
@@ -1165,7 +1627,7 @@ def render_collection_scope(rows: list[dict[str, Any]]) -> str:
     return f"""    <div class="collection-scope">
       <div class="collection-scope-head">
         <h3>Collection scope</h3>
-        <p>{len(visible)} collectors produced local evidence. Completion times are in Methodology.</p>
+        <p>{len(visible)} collectors produced local evidence. Versions are in the table below.</p>
       </div>
       <table>
         <thead><tr><th>Collector</th><th>Status</th><th>Version</th><th>Evidence volume</th></tr></thead>
@@ -1180,7 +1642,7 @@ def render_tools_sub(rows: list[dict[str, Any]]) -> str:
     parts = [
         f"{n_collectors} collector{'s' if n_collectors != 1 else ''} ran against this endpoint.",
         "Each tile shows whether local tool data was found and the primary evidence volume collected.",
-        "Collector versions are listed in Methodology."
+        "Collector versions are in the table below."
     ]
     if not_detected:
         if len(not_detected) == 1:
@@ -1235,16 +1697,30 @@ def render_findings_section(findings: list[dict[str, Any]]) -> tuple[str, str]:
         for f in by_category[cat]:
             sev = _esc(f.get("severity", "low"))
             blob = _esc(_finding_search_blob(f))
-            sample = _display_redaction_tokens(f.get("sample_redacted") or "")
-            sample_html = f"<code>{_esc(sample)}</code>" if sample else "<span class='mono' style='color:var(--fg-4)'>n/a</span>"
+            sample = _fix_plurals(_display_redaction_tokens(f.get("sample_redacted") or ""))
+            files = [str(path) for path in (f.get("_files") or []) if str(path).strip()]
+            if files:
+                noun = "file" if len(files) == 1 else "files"
+                items = "".join(f"<li>{_esc(path)}</li>" for path in files)
+                file_html = (
+                    f"<details class='hit-files'><summary>{len(files)} {noun}</summary>"
+                    f"<ul>{items}</ul></details>"
+                )
+            else:
+                file_html = ""
+            sample_html = (
+                f"<code>{_esc(sample)}</code>{file_html}"
+                if sample
+                else (file_html or "<span class='mono' style='color:var(--fg-4)'>n/a</span>")
+            )
             last_seen = (f.get("last_seen") or "")[:10] or "n/a"
             rows.append(
                 f'<tr class="frow" data-search="{blob}">'
-                f'<td><span class="pill {sev}">{sev}</span></td>'
-                f"<td>{_esc(f.get('title', ''))}</td>"
-                f"<td class='num'>{int(f.get('evidence_count') or 1)}</td>"
-                f"<td class='mono'>{_esc(last_seen)}</td>"
-                f"<td>{sample_html}</td>"
+                f'<td data-label="Severity"><span class="pill {sev}">{sev}</span></td>'
+                f'<td data-label="Title">{_esc(f.get("title", ""))}</td>'
+                f'<td class="num" data-label="Evidence">{int(f.get("evidence_count") or 1)}</td>'
+                f'<td class="mono date" data-label="Last seen">{_esc(last_seen)}</td>'
+                f'<td data-label="Sample">{sample_html}</td>'
                 f"</tr>"
             )
         panels.append(
@@ -1253,7 +1729,9 @@ def render_findings_section(findings: list[dict[str, Any]]) -> tuple[str, str]:
             f'<thead><tr><th style="width:90px">Severity</th><th>Title</th>'
             f'<th style="width:90px">Evidence</th><th style="width:110px">Last seen</th>'
             f"<th>Sample</th></tr></thead>"
-            f"<tbody>{''.join(rows)}</tbody></table></div></div>"
+            f"<tbody>{''.join(rows)}"
+            f'<tr class="filter-empty" hidden><td colspan="5">No matches</td></tr>'
+            f"</tbody></table></div></div>"
         )
     return "\n".join(tabs), "\n".join(panels)
 
@@ -1957,7 +2435,7 @@ def render_permissions_section(envelopes: dict[str, dict[str, Any]]) -> str:
                 highest = risk
         highest_color = {
             "critical": "var(--red)",
-            "high": "var(--accent)",
+            "high": "var(--amber)",
             "medium": "var(--yellow)",
             "low": "var(--green)",
         }.get(highest, "var(--fg-3)")
@@ -2165,25 +2643,27 @@ def per_tool_chat_stats(chat_env: dict[str, Any] | None) -> list[dict[str, Any]]
         secret_hits[tool] += int(f.get("evidence_count") or 0)
 
     tool_labels = {
-        "claude": "claude",
-        "codex": "codex",
-        "cursor": "cursor",
-        "cursor-composer": "composer",
-        "grok": "grok",
+        "claude": _tool_display_name("claude"),
+        "codex": _tool_display_name("codex"),
+        "cursor": _tool_display_name("cursor"),
+        "cursor-composer": _tool_display_name("cursor-composer"),
+        "grok": _tool_display_name("grok"),
     }
     rows: list[dict[str, Any]] = []
     for tool, label in tool_labels.items():
         info = by_tool.get(tool, {"dates": [], "files": 0})
         files = info["files"] or int(summary.get(f"{tool}_files") or 0)
+        if files <= 0:
+            continue
         dates = info["dates"]
-        oldest = min(dates).strftime("%Y-%m-%d") if dates else summary.get("oldest_date", "n/a")
-        newest = max(dates).strftime("%Y-%m-%d") if dates else summary.get("newest_date", "n/a")
-        retention = (datetime.now() - min(dates)).days if dates else summary.get("retention_days", 0)
+        oldest = min(dates).strftime("%Y-%m-%d") if dates else "n/a"
+        newest = max(dates).strftime("%Y-%m-%d") if dates else "n/a"
+        retention = (datetime.now() - min(dates)).days if dates else 0
         rows.append(
             {
                 "tool_key": tool,
                 "tool_label": label,
-                "tool_display": tool.replace("-", " "),
+                "tool_display": label,
                 "oldest": oldest,
                 "newest": newest,
                 "files": files,
@@ -2207,7 +2687,7 @@ def render_chat_section(chat_env: dict[str, Any] | None) -> str:
     active_minutes = int(summary.get("active_minutes_estimated") or 0)
     active_gap_cap = int(summary.get("active_gap_cap_minutes") or 30)
     secret_files = int(summary.get("secret_hit_files") or 0)
-    max_retention = int(summary.get("retention_days") or max((r["retention_days"] for r in rows), default=0))
+    max_retention = max((r["retention_days"] for r in rows), default=0)
 
     # Stat cards (left column)
     pct = round((secret_files / total_files) * 100, 1) if total_files else 0
@@ -2248,12 +2728,14 @@ def render_chat_section(chat_env: dict[str, Any] | None) -> str:
         retention_rows.append(f"""        <div class="retention-row">
           <span class="name">{_esc(r['tool_display'])}</span>
           <div class="track"><div class="bar{over_cls}" style="width: {bar_pct}%;">{days}d</div><div class="ninety" style="left: {round((90/scale)*100)}%;"></div></div>
-          <span class="right">{r['files']} files - {_esc(_format_minutes_estimate(r['active_minutes_estimated']))} active est.</span>
+          <span class="right">{r['files']} {'file' if r['files'] == 1 else 'files'} - {_esc(_format_minutes_estimate(r['active_minutes_estimated']))} active est.</span>
         </div>""")
 
-    # Find which tool is over policy (if any) for the cap
-    over_tool = next((r["tool_display"] for r in rows if r["retention_days"] > 90), None)
-    over_days = max((r["retention_days"] - 90 for r in rows if r["retention_days"] > 90), default=0)
+    # Name the tool that is furthest past the 90-day mark, not the first one.
+    over_rows = [r for r in rows if r["retention_days"] > 90]
+    over_row = max(over_rows, key=lambda r: r["retention_days"]) if over_rows else None
+    over_tool = over_row["tool_display"] if over_row else None
+    over_days = (over_row["retention_days"] - 90) if over_row else 0
     cap = (
         f"▮ 90-day policy mark · {_esc(over_tool)} over by {over_days} days"
         if over_tool
@@ -2268,9 +2750,9 @@ def render_chat_section(chat_env: dict[str, Any] | None) -> str:
 
     # Table
     table_rows = "\n".join(
-        f"        <tr><td class='mono'>{_esc(r['tool_key'])}</td>"
-        f"<td class='mono'>{_esc(r['oldest'])}</td>"
-        f"<td class='mono'>{_esc(r['newest'])}</td>"
+        f"        <tr><td>{_esc(r['tool_display'])}</td>"
+        f"<td class='mono date'>{_esc(r['oldest'])}</td>"
+        f"<td class='mono date'>{_esc(r['newest'])}</td>"
         f"<td class='num'>{r['files']}</td>"
         f"<td class='num'>{_esc(_format_minutes_estimate(r['active_minutes_estimated']))}</td>"
         f"<td class='num'>{r['secret_hits']}</td>"
@@ -2283,7 +2765,7 @@ def render_chat_section(chat_env: dict[str, Any] | None) -> str:
 {retention_panel}
     </div>
 
-    <div class="table-wrap" style="margin-top: 24px;"><table>
+    <div class="table-wrap table-scroll" style="margin-top: 24px; max-height: none;"><table>
       <thead><tr><th>Tool</th><th>Oldest</th><th>Newest</th><th>Files</th><th>Active estimate</th><th>Secret-hit files</th><th>Retention</th></tr></thead>
       <tbody>
 {table_rows}
@@ -2525,11 +3007,12 @@ def render_secrets_section(secrets_env: dict[str, Any] | None) -> str:
     summary = secrets_env.get("summary") or {}
     scanner = summary.get("scanner", "unknown")
 
-    by_rule: list[tuple[str, int]] = []
-    for key, val in sorted(summary.items()):
-        if key.startswith("rule_") and isinstance(val, int):
-            by_rule.append((key[5:], val))
-    by_rule.sort(key=lambda kv: -kv[1])
+    by_rule = secret_rule_breakdown(secrets_env.get("findings") or [])
+    if not by_rule:
+        for key, val in sorted(summary.items()):
+            if key.startswith("rule_") and isinstance(val, int):
+                by_rule.append((key[5:], val))
+        by_rule.sort(key=lambda kv: -kv[1])
 
     chat_hits = 0
     repo_hits = 0
@@ -2557,11 +3040,17 @@ def render_secrets_section(secrets_env: dict[str, Any] | None) -> str:
     else:
         bars = "<p style='color: var(--fg-3);'>No rule breakdown recorded.</p>"
 
+    placeholder_note = ""
+    if any(_PLACEHOLDER_LABEL in name for name, _val in by_rule):
+        placeholder_note = (
+            "<br/>// likely test values stay in this report at low severity"
+        )
     note = (
         f'<p style="margin-top: 20px; font-family: var(--f-mono); font-size: 11.5px; '
         f'color: var(--fg-3); line-height: 1.6;">'
         f"// by location · chat: {chat_hits} · repos: {repo_hits}<br/>"
-        f"// scanner: {_esc(scanner)}</p>"
+        f"// scanner: {_esc(scanner)}"
+        f"{placeholder_note}</p>"
     )
     return bars + "\n" + note
 
@@ -2624,7 +3113,7 @@ def render_git_section(git_env: dict[str, Any] | None) -> str:
 def render_collectors_table(
     envelopes: dict[str, dict[str, Any]],
     runs: list[dict[str, Any]],
-) -> str:
+) -> tuple[str, bool]:
     run_map = {str(r.get("name", "")): r for r in runs}
     rows = []
     for name in sorted(envelopes.keys()):
@@ -2646,14 +3135,29 @@ def render_collectors_table(
             status_label = "error"
         label, purpose = COLLECTOR_PURPOSES.get(name, (name, "Collector run"))
         rows.append(
-            f"        <tr><td><strong>{_esc(label)}</strong><div class='mono'>{_esc(name)}</div></td>"
-            f"<td>{_esc(purpose)}</td>"
-            f"<td class='mono'>{_esc(produced_at)}</td>"
-            f"<td class='mono'>{_esc(duration)}</td>"
-            f"<td class='mono'>{_esc(version)}</td>"
-            f"<td><span class='pill {status}'>{_esc(status_label)}</span></td></tr>"
+            {
+                "html_lead": (
+                    f"<td><strong>{_esc(label)}</strong><div class='mono'>{_esc(name)}</div></td>"
+                    f"<td>{_esc(purpose)}</td>"
+                    f"<td class='mono date'>{_esc(produced_at)}</td>"
+                ),
+                "duration": duration,
+                "tail": (
+                    f"<td class='mono'>{_esc(version)}</td>"
+                    f"<td><span class='pill {status}'>{_esc(status_label)}</span></td>"
+                ),
+            }
         )
-    return "\n".join(rows) if rows else "<tr><td colspan='6'>No collectors recorded.</td></tr>"
+    if not rows:
+        return "<tr><td colspan='5'>No collectors recorded.</td></tr>", False
+    show_duration = any(
+        str(row["duration"]) not in {"", "unknown", "not recorded", "-"} for row in rows
+    )
+    rendered = []
+    for row in rows:
+        duration_cell = f"<td class='mono'>{_esc(row['duration'])}</td>" if show_duration else ""
+        rendered.append(f"        <tr>{row['html_lead']}{duration_cell}{row['tail']}</tr>")
+    return "\n".join(rendered), show_duration
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2701,29 +3205,25 @@ def render_appendix_grouped(findings: list[dict[str, Any]]) -> tuple[str, str]:
         sev = g["severity"]
         count = g["count"]
         count_cls = "count one" if count <= 1 else "count"
+        search = _esc(f"{g['title']} {g['ref']}".lower())
         row_html.append(
-            f"          <tr>"
+            f"          <tr data-search=\"{search}\">"
             f"<td><span class='pill {sev}'>{_esc(sev)}</span></td>"
             f"<td>{_esc(g['title'])}</td>"
-            f"<td><span class='{count_cls}'>{count}</span></td>"
+            f"<td class='num'><span class='{count_cls}'>{count}</span></td>"
             f"<td class='mono'>{_esc(g['ref'])}</td></tr>"
         )
 
-    # Aggregation note — only show if real collapsing happened
-    collapsed = raw_count - len(groups)
+    biggest = max(sorted_groups, key=lambda g: g["count"])
     note_html = ""
-    if collapsed > 10:
-        # Find the largest collapsed rule for a concrete example
-        biggest = max(sorted_groups, key=lambda g: g["count"])
+    if biggest["count"] > 1 or raw_count != len(groups):
         note_html = (
             '    <div class="appendix-note">\n'
-            "      <strong>aggregation note · </strong>"
-            f"{collapsed} individual findings collapsed into "
-            f"{len(groups)} grouped rows. Largest group: "
-            f"<span class='mono'>{_esc(biggest['title'])}</span> ({biggest['count']} hits) → "
-            f"<span class='mono'>{_esc(biggest['ref'])}</span>. "
-            "Per-row evidence (file path, line offset, redacted sample) lives in the linked CSV — "
-            "the manifest hash is the integrity anchor.\n"
+            "      <strong>Hits are matches, findings are rows. </strong>"
+            f"The largest row is <span class='mono'>{_esc(biggest['title'])}</span> "
+            f"with {biggest['count']} hits. "
+            "That number can be larger than the finding-row total because one row "
+            "stands for many matches. Per-hit paths stay in the local CSV.\n"
             "    </div>"
         )
     return "\n".join(row_html), note_html
@@ -2756,15 +3256,14 @@ def _as_int(value: Any) -> int:
 
 
 def _not_collected(command: str) -> str:
-    return (
-        f'<p class="empty-note">Not collected — run {_esc(command)} to enable.</p>'
-    )
+    del command
+    return '<div class="wrap"><p class="empty-note">Not collected in this scan.</p></div>'
 
 
 def _changes_headline(env: dict[str, Any] | None) -> str:
     """One sentence for the summary card. Detail stays on the Changes tab."""
     if not isinstance(env, dict):
-        return "Not collected — run a scan that can see the previous evidence folder to enable."
+        return "Not collected in this scan."
     summary = env.get("summary") if isinstance(env.get("summary"), dict) else {}
     if summary.get("comparison") == "first_scan":
         label = str(summary.get("current_label") or "This scan")
@@ -2834,6 +3333,9 @@ def _agent_status_list(envelopes: dict[str, dict[str, Any]]) -> str:
         items.append(
             f"<li><span>{_esc(label)}</span> <strong>{_esc(status)}</strong></li>"
         )
+    cowork_summary = (envelopes.get("cowork") or {}).get("summary") or {}
+    if cowork_summary.get("design_used"):
+        items.append("<li><span>Claude Design</span> <strong>detected</strong></li>")
     return f'<ul class="agent-status">{"".join(items)}</ul>'
 
 
@@ -2846,36 +3348,43 @@ def render_coverage_gaps(envelopes: dict[str, dict[str, Any]]) -> str:
         if isinstance(item, dict)
     }
     columns = {str(column["id"]): str(column.get("label") or column["id"]) for column in grid["columns"]}
-    rows: list[str] = []
+    grouped: dict[tuple[str, str, str], list[str]] = {}
     for row in grid["rows"]:
         agent_id = str(row["id"])
+        label = str(row.get("label") or agent_id)
         for column in grid["columns"]:
             column_id = str(column["id"])
             cell = grid["cells"][agent_id][column_id]
             value = str(cell.get("value") or "unknown")
             key = (agent_id, column_id)
             if key in uncaptured:
-                kind = "UNCAPTURED"
+                kind = "Not collected by design"
                 reason = uncaptured[key]
             elif value == "unknown":
-                kind = "not determinable"
+                kind = "Not determinable from this scan"
                 reason = str(cell.get("reason") or "")
             else:
                 continue
-            rows.append(
-                "<tr>"
-                f"<td>{_esc(row.get('label') or agent_id)}</td>"
-                f"<td>{_esc(columns.get(column_id, column_id))}</td>"
-                f"<td class='mono'>{_esc(kind)}</td>"
-                f"<td>{_esc(reason)}</td>"
-                "</tr>"
-            )
+            question = columns.get(column_id, column_id)
+            grouped.setdefault((question, kind, reason), [])
+            if label not in grouped[(question, kind, reason)]:
+                grouped[(question, kind, reason)].append(label)
+    rows: list[str] = []
+    for (question, kind, reason), agents in grouped.items():
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(question)}</td>"
+            f"<td>{_esc(kind)}</td>"
+            f"<td>{_esc(', '.join(agents))}</td>"
+            f"<td>{_esc(reason)}</td>"
+            "</tr>"
+        )
     if not rows:
         body = "<p>No coverage gaps in this evidence.</p>"
     else:
         body = (
-            '<div class="table-wrap" style="max-height:none"><table>'
-            "<thead><tr><th>Agent</th><th>Question</th><th>Gap</th><th>Why</th></tr></thead>"
+            '<div class="table-wrap table-scroll" style="max-height:none"><table>'
+            "<thead><tr><th>Question</th><th>Gap</th><th>Agents</th><th>Why</th></tr></thead>"
             f"<tbody>{''.join(rows)}</tbody></table></div>"
         )
     return f"""<section id="coverage-gaps" class="section">
@@ -2883,7 +3392,7 @@ def render_coverage_gaps(envelopes: dict[str, dict[str, Any]]) -> str:
     <header class="sh">
       <div class="kicker"><span class="num">/07</span><span class="kicker-label">COVERAGE GAPS</span></div>
       <h2 class="h2">What this evidence cannot tell you.</h2>
-      <p class="sub">UNCAPTURED means that collector has no field for the question, so the cell stays unknown on purpose. Not determinable means this scan's evidence does not settle it. Presence and counts only — no prompts, file contents, or secrets.</p>
+      <p class="sub">Not collected by design means that collector has no field for the question, so the cell stays unknown on purpose. Not determinable from this scan means this evidence does not settle it. Each gap is listed once. Presence and counts only.</p>
     </header>
     {body}
   </div>
@@ -2901,8 +3410,9 @@ def _page_tabs(active: str = "findings") -> str:
         )
     return (
         '<div class="page-tablist" role="tablist" aria-label="Briefing sections">'
+        '<div class="page-tablist-inner">'
         + "".join(buttons)
-        + "</div>"
+        + "</div></div>"
     )
 
 
@@ -2941,7 +3451,7 @@ def build_html(
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     engagement_date = engagement_dates(evidence_root, envelopes)
 
-    findings = aggregate_findings(envelopes)
+    findings, secret_stats = present_findings(aggregate_findings(envelopes))
     counts = severity_counts(findings)
     tools_rows = build_tools_table(envelopes, discovery, runs_map)
     posture_grid = render_posture_grid(envelopes)
@@ -2955,24 +3465,17 @@ def build_html(
     git_env = envelopes.get("git-posture")
     git_repos = int((git_env or {}).get("summary", {}).get("repos_scanned") or 0)
 
-    manifest_full = manifest_sha256(evidence_root)
-    # 16-char fingerprint avoids tripping the secrets scanner's hex
-    # threshold while preserving an integrity anchor; full hashes ship in
-    # manifest.json itself.
-    manifest_short = manifest_full[:16] if len(manifest_full) >= 16 else manifest_full
+    manifest_header, manifest_attest = manifest_briefing_text(manifest_sha256(evidence_root))
 
     css = (TEMPLATES_DIR / "briefing.css").read_text(encoding="utf-8") + "\n" + REPORT_V2_CSS
 
     # The changes envelope is loaded on its own. It is not in `envelopes`.
     changes_env = load_changes_envelope(evidence_root)
     changes_section = render_changes_section(changes_env)
-    changes_nav = render_changes_nav(changes_env)
     if changes_section:
-        changes_panel = (changes_nav or "") + changes_section
+        changes_panel = changes_section
     else:
-        changes_panel = _not_collected(
-            "python core/scan_diff.py --current <evidence root>"
-        )
+        changes_panel = _not_collected("scan diff")
 
     telemetry_env = envelopes.get("telemetry")
     approvals_panel = _telemetry_or_note(
@@ -3014,12 +3517,12 @@ def build_html(
     <header class="sh">
       <div class="kicker"><span class="num">/03</span><span class="kicker-label">FINDINGS</span></div>
       <h2 class="h2">{sum(counts.values())} findings across {category_count} categories.</h2>
-      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags. Samples stay redacted. Per-hit secrets are grouped.</p>
+      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples stay redacted. Secret-scanner hits are grouped by rule and redacted value, with the hit count in the evidence column. Likely test values are labeled and counted as low. Per-hit detail stays in the local CSV.</p>
     </header>
     <div class="sev-bar">
       <div class="hdr">
         <span>severity distribution · n = {sum(counts.values())}</span>
-        <span>{_esc(render_severity_bar_note(counts, envelopes))}</span>
+        <span>{_esc(render_severity_bar_note(counts, envelopes, secret_stats))}</span>
       </div>
       <div class="sev-bar-track">{render_severity_bar_segments(counts)}</div>
     </div>
@@ -3030,18 +3533,19 @@ def build_html(
     <header class="sh" style="margin-top: 48px;">
       <div class="kicker"><span class="num">/08</span><span class="kicker-label">APPENDIX</span></div>
       <h2 class="h2">Evidence index</h2>
-      <p class="sub">Identical findings collapse into one row with a hit count. Full per-row detail stays in the local CSV, not in this page.</p>
+      <p class="sub">Secret-scanner hits collapse to one row per rule and redacted value, with a hit count. Rows labeled likely test value were downgraded to low and kept. Full per-hit detail stays in the local CSV, not in this page.</p>
     </header>
     {appendix_note}
     <div class="table-wrap appendix-table" style="max-height: none;">
       <table>
         <thead><tr><th>Severity</th><th>Finding</th><th>Hits</th><th>Evidence reference</th></tr></thead>
-        <tbody>{appendix_rows}</tbody>
+        <tbody>{appendix_rows}<tr class="filter-empty" hidden><td colspan="4">No matches</td></tr></tbody>
       </table>
     </div>
   </div>
 </section>"""
 
+    collector_rows, collector_show_duration = render_collectors_table(envelopes, runs_list)
     agents_inner = f"""<section id="agents" class="section">
   <div class="wrap">
     <header class="sh">
@@ -3073,12 +3577,12 @@ def build_html(
       <h2 class="h2">How this evidence was produced.</h2>
     </header>
     {render_collection_scope(tools_rows)}
-    <div class="table-wrap" style="max-height: none;"><table>
-      <thead><tr><th>Collector</th><th>Work performed</th><th>Completed at</th><th>Duration</th><th>Version</th><th>Status</th></tr></thead>
-      <tbody>{render_collectors_table(envelopes, runs_list)}</tbody>
+    <div class="table-wrap table-scroll" style="max-height: none;"><table>
+      <thead><tr><th>Collector</th><th>Work performed</th><th>Completed at</th>{'<th>Duration</th>' if collector_show_duration else ''}<th>Version</th><th>Status</th></tr></thead>
+      <tbody>{collector_rows}</tbody>
     </table></div>
     <div class="attestation">
-      <p><strong style="color: var(--green); font-weight: 500;">Manifest SHA-256</strong> (first 16 chars): <code>{_esc(manifest_short)}</code></p>
+      {manifest_attest}
       <p>Raw evidence stays in the local output directory.</p>
       <div class="sig-line">{_esc(operator_name)} · {_esc(generated_at)}</div>
     </div>
@@ -3086,7 +3590,7 @@ def build_html(
 </section>"""
 
     title = _esc(f"{customer_name} · AI Coding Tool Exposure Review")
-    return f"""<!doctype html>
+    html_doc = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -3106,7 +3610,7 @@ def build_html(
         <li><span class="meta-dash">—</span>Customer · <strong>{_esc(customer_name)}</strong></li>
         <li><span class="meta-dash">—</span>Engagement · {_esc(engagement_date)}</li>
         <li><span class="meta-dash">—</span>Operator · {_esc(operator_name)}</li>
-        <li><span class="meta-dash">—</span>Manifest SHA-256 · {_esc(manifest_short)}…</li>
+        <li><span class="meta-dash">—</span>{_esc(manifest_header)}</li>
       </ul>
       <header class="sh">
         <div class="kicker"><span class="num">/01</span><span class="kicker-label">EXECUTIVE SUMMARY</span></div>
@@ -3119,6 +3623,7 @@ def build_html(
         <div><div class="lbl">Medium</div><div class="v yellow">{counts.get("medium", 0)}</div><div class="note">policy / backlog</div></div>
         <div><div class="lbl">Low</div><div class="v green">{counts.get("low", 0)}</div><div class="note">informational</div></div>
       </div>
+      <p class="posture-grid-caption">These counts are finding rows. A row's evidence number is how many underlying hits it stands for, so a hit total can be larger than the row total.</p>
       <div class="summary-cards">{''.join(summary_cards)}</div>
       <p class="surface-note">Presence and counts only. This page does not include prompts, transcript text, or secret values.</p>
     </div>
@@ -3145,6 +3650,7 @@ def build_html(
 </body>
 </html>
 """
+    return number_section_kickers(html_doc)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -864,7 +864,7 @@
   }
   .mode-chip{
     border: 1px solid var(--line);
-    background: rgba(255,255,255,.025);
+    background: var(--fill);
     padding: 12px;
     min-height: 74px;
   }
@@ -1081,7 +1081,7 @@
     gap: 12px;
     align-items: center;
     padding: 10px;
-    background: rgba(255,255,255,.025);
+    background: var(--fill);
     border: 1px solid var(--line);
   }
   .posture-list strong{
@@ -1130,7 +1130,7 @@
     color: var(--fg); letter-spacing: .04em;
   }
   .retention-row .track{
-    height: 22px; background: rgba(255,255,255,.04);
+    height: 22px; background: var(--fill);
     position: relative; border: 1px solid var(--line);
   }
   .retention-row .bar{
@@ -1196,7 +1196,7 @@
   .secret-rules .name{ font-family: var(--f-mono); font-size: 12.5px; color: var(--fg-2);}
   .secret-rules .track{
     height: 4px;
-    background: rgba(255,255,255,.06);
+    background: var(--fill);
     position: relative;
   }
   .secret-rules .track .b{
@@ -1269,21 +1269,17 @@
   }
   .appendix-note strong{ color: var(--green); font-weight: 500; }
 
-  .appendix-table td .count{
-    display:inline-block;
-    font-family: var(--f-mono);
-    font-size: 13px;
-    background: var(--accent);
-    color: var(--bg);
-    padding: 3px 10px;
+  .appendix-table td .count,
+  .appendix-table td .count.one{
+    display: block;
+    background: transparent;
+    color: var(--fg);
+    padding: 0;
+    text-align: right;
     font-variant-numeric: tabular-nums;
     font-weight: 500;
   }
-  .appendix-table td .count.one{
-    background: transparent;
-    color: var(--fg-4);
-    padding: 3px 0;
-  }
+  .appendix-table td.num{ text-align: right; }
 
   /* ───── FOOTER ───── */
   .footer{
@@ -1303,18 +1299,37 @@
   }
   .foot-meta{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
-  /* Print */
+  /* Print: flip the theme tokens so light text is not left on a white page. */
   @media print{
+    :root{
+      color-scheme: light;
+      --bg: #fff;
+      --bg-alt: #fff;
+      --bg-card: #fff;
+      --fg: #111;
+      --fg-2: #222;
+      --fg-3: #333;
+      --fg-4: #444;
+      --line: #ccc;
+      --line-2: #bbb;
+      --nav-bg: #fff;
+      --fill: transparent;
+      --code-bg: #f4f4f4;
+      --shadow: none;
+      --ring: none;
+    }
     body{ background: white; color: #111; }
     body::before{ display: none; }
-    .nav, .tab-btn, .filter{ display: none !important; }
-    .tab-panel{ display: block !important; padding-top: 8px; }
+    .nav, .tab-btn, .filter, .page-tablist{ display: none !important; }
+    .tab-panel, .page-panel{ display: block !important; padding-top: 8px; }
     .table-wrap{ max-height: none; overflow: visible; }
-    .panel, .case, .perm-summary, .coverage, .retention, .sev-bar, .stat, .stack-card, .rule-group, .attestation{
+    .panel, .case, .perm-summary, .coverage, .retention, .sev-bar, .stat, .stack-card, .rule-group, .attestation,
+    .summary-card, .agent-status, .agent-status li, .table-wrap, .lede, .report-summary, .section{
       background: white !important;
       color: #111 !important;
       border-color: #ccc !important;
     }
+    .lede, .summary-card h3, .summary-card p, .agent-status, .agent-status strong{ color: #111 !important; }
     code{ background: #f4f4f4 !important; color: #111 !important; border-color: #ddd !important; }
   }
 
@@ -1365,4 +1380,122 @@
     font-size: 11.5px;
     letter-spacing: .04em;
     color: var(--fg-3);
+  }
+
+  .platform-head .stats b.warn{ color: var(--amber); }
+  td.risk-word.critical{ color: var(--red); }
+  td.risk-word.high{ color: var(--amber); }
+  td.risk-word.medium{ color: var(--yellow); }
+  td.risk-word.low{ color: var(--green); }
+  .date, td.date, th.date{ white-space: nowrap; }
+  .table-scroll{
+    display: block;
+    width: 0;
+    min-width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .stat-num, .sev-strip .v, .perm-summary .n, .evidence-metrics strong, .git-grid .v{
+    white-space: nowrap;
+  }
+  .hit-files{ margin-top: 8px; }
+  .hit-files summary{ cursor: pointer; }
+  .filter-empty td{ color: var(--fg-3); }
+  tr[hidden], .case[hidden]{ display: none !important; }
+  .wrap{
+    max-width: min(100%, var(--max-w));
+    min-width: 0;
+  }
+  .page-panel, .report-summary, .section, .two-col, .chat-grid, .panel,
+  .retention, .collection-scope, .platform, .summary-cards, .summary-card,
+  .posture-list{
+    min-width: 0;
+    max-width: 100%;
+  }
+  .two-col > *, .chat-grid > *{ min-width: 0; max-width: 100%; }
+  .table-wrap, .table-scroll{
+    display: block;
+    width: 0;
+    min-width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  @media (max-width: 600px){
+    .tab-bar{
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+    .tab-btn{ flex: 0 0 auto; white-space: nowrap; }
+    .table-wrap{ max-height: none; }
+    .perm-summary{ grid-template-columns: 1fr 1fr; }
+    .perm-summary .ps:nth-child(2n){ border-right: 0; }
+    .posture-list li,
+    .retention-row,
+    .secret-rules{
+      grid-template-columns: 1fr;
+    }
+    .retention-row .right{ text-align: left; }
+    #panel-findings .tab-panel tr.filter-empty td::before{
+      content: none;
+      display: none;
+    }
+    #panel-findings .tab-panel table,
+    #panel-findings .tab-panel thead,
+    #panel-findings .tab-panel tbody,
+    #panel-findings .tab-panel tr,
+    #panel-findings .tab-panel td{
+      display: block;
+      width: auto;
+    }
+    #panel-findings .tab-panel thead{ display: none; }
+    #panel-findings .tab-panel tr.frow{
+      margin: 0 0 12px;
+      padding: 8px 0 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    #panel-findings .tab-panel td{
+      padding: 4px 12px;
+      border: 0;
+    }
+    #panel-findings .tab-panel td::before{
+      content: attr(data-label);
+      display: block;
+      margin-bottom: 2px;
+      font-family: var(--f-mono);
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--fg-3);
+    }
+  }
+
+  @media (prefers-color-scheme: light){
+    :root{
+      color-scheme: light;
+      --bg: #f4f6f8;
+      --bg-alt: #e8ecef;
+      --bg-card: #ffffff;
+      --fg: #1a1d21;
+      --fg-2: #2c333b;
+      --fg-3: #5c6770;
+      --fg-4: #6f7b86;
+      --line: rgba(0,0,0,.12);
+      --line-2: rgba(0,0,0,.18);
+      --nav-bg: rgba(244,246,248,.92);
+      --fill: rgba(0,0,0,.04);
+      --code-bg: #eef1f4;
+      --ring: 0 0 0 1px rgba(0,0,0,.06);
+      --shadow: 0 1px 3px rgba(0,0,0,.06);
+      --red-bg: rgba(176,48,48,.10);
+      --amber-bg: rgba(180,90,0,.10);
+    }
+  }
+
+  @media print{
+    .table-wrap, .table-scroll{ overflow: visible; width: auto; min-width: 0; }
+    .summary-card, .agent-status, .agent-status li, .agent-status strong, .lede{
+      background: #fff !important;
+      color: #111 !important;
+    }
   }

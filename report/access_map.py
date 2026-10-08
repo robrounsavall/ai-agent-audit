@@ -95,8 +95,7 @@ UNCAPTURED: dict[tuple[str, str], str] = {
         "Whether Grok Bot work runs on a hosted computer is not in this evidence."
     ),
     ("grok-bot", "approval"): (
-        "Grok Bot approval mode is not on disk "
-        "(local_execution_reason is not an approval mode)."
+        "Grok Bot approval mode is not stored on this computer."
     ),
     ("cloud-agents", "shell"): (
         "The Cloud Agents API inventory does not record shell or tool use."
@@ -621,7 +620,11 @@ def _grok_bot_shell(view: _View) -> Cell:
             view,
             "shell",
             "unknown",
-            f"local_execution is unknown ({reason_code}).",
+            (
+                "Local execution is unknown. This offline scan cannot tell."
+                if reason_code == "not_determinable_offline"
+                else f"Local execution is unknown ({reason_code.replace('_', ' ')})."
+            ),
             "none",
             ["summary.local_execution"],
         )
@@ -703,7 +706,11 @@ def _files(view: _View) -> Cell:
             view,
             "files",
             "yes",
-            f"{output_files} Cowork session output file(s) are on disk.",
+            (
+                f"{output_files} Cowork session output file is on disk."
+                if output_files == 1
+                else f"{output_files} Cowork session output files are on disk."
+            ),
             "moderate",
             ["summary.output_files"],
         )

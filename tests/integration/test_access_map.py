@@ -193,7 +193,7 @@ class AccessMapSyntheticTests(unittest.TestCase):
         self.assertNotIn("cowork", self.envelopes)
         grok = self.grid["cells"]["grok-bot"]
         self.assertEqual(grok["shell"]["value"], "unknown")
-        self.assertIn("not_determinable_offline", grok["shell"]["reason"])
+        self.assertIn("This offline scan cannot tell", grok["shell"]["reason"])
         self.assertEqual(grok["secrets"]["value"], "yes")
         cloud = self.grid["cells"]["cloud-agents"]
         self.assertEqual(cloud["git"]["value"], "yes")
@@ -231,7 +231,7 @@ class AccessMapFixtureTests(unittest.TestCase):
         self.assertEqual(cells["secrets"]["value"], "yes")
         self.assertIn("sand-secrets.json", cells["secrets"]["reason"])
         self.assertEqual(cells["shell"]["value"], "unknown")
-        self.assertIn("not_determinable_offline", cells["shell"]["reason"])
+        self.assertIn("This offline scan cannot tell", cells["shell"]["reason"])
         self.assertEqual(cells["git"]["value"], "unknown")
         self.assertIn("not a git push", cells["git"]["reason"])
         self.assertEqual(cells["remote"]["value"], "unknown")
