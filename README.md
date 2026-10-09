@@ -151,6 +151,15 @@ MCP server inventory across all five tools:
 python tools\mcp-visibility\mcp_visibility.py --format summary
 ```
 
+GitHub Apps installed on organizations you own, plus SAML-authorized
+credentials, using a token you already have. This is not part of `aiscan`
+(that scan stays offline). A token cannot list personal-account app installs
+or the OAuth apps you authorized; the tool prints those settings links instead.
+
+```powershell
+python tools\github-access\github_access.py
+```
+
 ## Evidence model
 
 Every collector writes one JSON envelope to `evidence/<name>.json`:
@@ -182,6 +191,7 @@ components/
   telemetry-import/   # opt-in approvals and usage from local exports (not in `all`)
 report/               # HTML briefing builder (summary, then tabs)
 tools/mcp-visibility/ # cross-tool MCP inventory utility
+tools/github-access/  # opt-in GitHub App and SAML credential inventory
 scripts/test-component.ps1
 aiscan.ps1            # orchestrator (one tool or all)
 SCHEMA.md             # evidence contract (all collectors)
