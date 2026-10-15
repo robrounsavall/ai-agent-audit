@@ -134,7 +134,7 @@ COLLECTOR_PURPOSES = {
         "Grok Bot posture",
         "Grok Bot desktop presence, secrets-store and lockfile signals",
     ),
-    "secrets-scan": ("Secrets scan", "gitleaks scan over chat exports and repo roots"),
+    "secrets-scan": ("Secrets scan", "Secret scanner run over chat exports and repo roots"),
     "discovery": ("Discovery", "Local tool path and capability discovery"),
     "pii-scan": ("PII scan", "Regulated-data scan: cards, SSNs, IBANs, emails, phones, public IPs"),
     "cloud-agents": (
@@ -142,6 +142,20 @@ COLLECTOR_PURPOSES = {
         "Opt-in read-only inventory via the official Cloud Agents API (api.cursor.com)",
     ),
 }
+
+SCANNER_LABELS = {"betterleaks": "Betterleaks", "gitleaks": "gitleaks", "trufflehog": "trufflehog"}
+
+
+def secrets_scan_purpose(env: dict[str, Any] | None) -> str:
+    """Collection-scope text for secrets-scan, naming the scanner that ran."""
+    scanner = str(((env or {}).get("summary") or {}).get("scanner") or "")
+    if scanner == "none":
+        return "No secret scanner was installed; chat exports and repo roots were not scanned"
+    label = SCANNER_LABELS.get(scanner, scanner)
+    if not label:
+        return COLLECTOR_PURPOSES["secrets-scan"][1]
+    return f"{label} scan over chat exports and repo roots"
+
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
@@ -409,13 +423,16 @@ def likely_placeholder_reason(finding: dict[str, Any]) -> str | None:
             return "redacted sample matches a repeated example username and password"
 
     # generic-api-key sometimes matches the scanner's own name. The windows
-    # are what redact_sample keeps of gitleaks, trufflehog, or the two names
-    # written together (gitleaks...trufflehog -> gitl...ehog).
+    # are what redact_sample keeps of betterleaks, gitleaks, trufflehog, or two
+    # names written together (gitleaks...trufflehog -> gitl...ehog).
     if rule_name in {"generic-api-key", "generic"} or kind in {"generic-api-key", "generic"}:
-        if compact in {"gitl...ehog", "gitl...eaks", "truf...ehog", "truf...eaks"}:
-            return "redacted sample matches the literal scanner name gitleaks or trufflehog"
-        if compact in {"gitleaks", "trufflehog"}:
-            return "sample is the literal scanner name gitleaks or trufflehog"
+        if compact in {
+            "gitl...ehog", "gitl...eaks", "truf...ehog", "truf...eaks",
+            "bett...eaks", "bett...ehog",
+        }:
+            return "redacted sample matches a literal scanner name (betterleaks, gitleaks, or trufflehog)"
+        if compact in {"betterleaks", "gitleaks", "trufflehog"}:
+            return "sample is a literal scanner name (betterleaks, gitleaks, or trufflehog)"
         prefix = compact.split("...", 1)[0]
         if prefix in {"gpl-", "lgpl", "agpl", "gfdl"} or prefix.startswith(("gpl-", "lgpl", "agpl", "gfdl")):
             return "redacted sample starts with a license name (GPL, LGPL, AGPL, or GFDL)"
@@ -1342,7 +1359,7 @@ def render_cover_terminal(
     if env:
         s = env.get("summary") or {}
         hits = int(s.get("hits") or 0)
-        scanner = str(s.get("scanner") or "gitleaks")
+        scanner = str(s.get("scanner") or "unknown scanner")
         rows.append(("ok", "secrets", f"{scanner} · {hits} hits"))
 
     max_name = max((len(name) for _, name, _ in rows), default=0) + 1
@@ -2610,6 +2627,17 @@ def _render_cursor_state_summary(summary: dict[str, Any]) -> str:
     ]
     if summary.get("agent_autorun_default_attempted"):
         chips.append(("Agent autorun default", "attempted"))
+    # Run mode and allowlists from the IDE state blob and the Agent CLI config.
+    if summary.get("ide_run_mode"):
+        chips.append(("IDE run mode", str(summary.get("ide_run_mode"))))
+    full_auto = summary.get("ide_full_auto_modes") or []
+    if isinstance(full_auto, list) and full_auto:
+        chips.append(("Full auto-run modes", ", ".join(str(m) for m in full_auto[:4])))
+    if "ide_allowlist_count" in summary:
+        chips.append(("IDE command allowlist", str(int(summary.get("ide_allowlist_count") or 0))))
+    if summary.get("cli_config_present"):
+        chips.append(("CLI approvalMode", str(summary.get("cli_approval_mode") or "unset")))
+        chips.append(("CLI allow / deny", f"{int(summary.get('cli_allow_count') or 0)} / {int(summary.get('cli_deny_count') or 0)}"))
     chip_html = "".join(
         f"<div class='mode-chip'><span>{_esc(label)}</span><strong>{_esc(value)}</strong></div>"
         for label, value in chips
@@ -2623,7 +2651,7 @@ def _render_cursor_state_summary(summary: dict[str, Any]) -> str:
     return f"""<div class="telemetry-summary">
         <div class="rule-group-head">
           <h4>Cursor local permission state</h4>
-          <span class="meta">mcp.json + state.vscdb + agent transcripts</span>
+          <span class="meta">mcp.json + cli-config.json + state.vscdb + agent transcripts</span>
         </div>
         <p class="surface-note">{_esc(note)}</p>
         <div class="mode-grid">{chip_html}</div>
@@ -3546,6 +3574,8 @@ def render_collectors_table(
         elif status == "error":
             status_label = "error"
         label, purpose = COLLECTOR_PURPOSES.get(name, (name, "Collector run"))
+        if name == "secrets-scan":
+            purpose = secrets_scan_purpose(env)
         rows.append(
             {
                 "html_lead": (

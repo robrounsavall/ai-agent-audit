@@ -198,7 +198,7 @@ HTML_SHELL = """<!doctype html>
         <span class="kicker-label">SECRETS &amp; GIT POSTURE</span>
       </div>
       <h2 class="h2">Secret scanning and git posture.</h2>
-      <p class="sub">gitleaks scans chat exports and repo roots for credential-shaped strings; samples are redacted and full hits stay in <span class="mono">raw/secrets-scan/findings.csv</span>. Git posture checks local repos for .env in history, hook presence, .gitignore coverage, and large blobs.</p>
+      <p class="sub">The secrets scanner (Betterleaks, gitleaks, or trufflehog) scans chat exports and repo roots for credential-shaped strings; samples are redacted and full hits stay in <span class="mono">raw/secrets-scan/findings.csv</span>. Git posture checks local repos for .env in history, hook presence, .gitignore coverage, and large blobs.</p>
     </header>
 
     <div class="two-col">
@@ -253,7 +253,7 @@ HTML_SHELL = """<!doctype html>
         <span class="kicker-label">APPENDIX — EVIDENCE INDEX</span>
       </div>
       <h2 class="h2">Where to find the raw evidence behind each finding.</h2>
-      <p class="sub">Per-hit gitleaks rows are aggregated by rule type. Identical findings collapse into a single row with a hit count; full per-row detail lives in the linked CSV.</p>
+      <p class="sub">Per-hit secret-scanner rows are aggregated by rule type. Identical findings collapse into a single row with a hit count; full per-row detail lives in the linked CSV.</p>
     </header>
 
 %%APPENDIX_NOTE%%

@@ -12,7 +12,8 @@
     writes evidence\changes.json from the previous scan before building HTML.
 
     Every collector runs on stock Python with no install. secrets-scan needs
-    gitleaks.exe on PATH.
+    a scanner: betterleaks.exe (BETTERLEAKS_PATH or PATH), gitleaks.exe, or
+    trufflehog.exe. aiscan never turns on Betterleaks credential validation.
 
 .PARAMETER Collector
     One of: claude cowork cursor codex copilot chat-history git-posture
