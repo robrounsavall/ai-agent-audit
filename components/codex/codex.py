@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import paths
+from codex_permissions import collect_permissions
 from common import (
     add_base_args,
     classify_rule,
@@ -35,7 +36,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "codex"
 
@@ -532,7 +533,7 @@ def detect_auth_method(auth_json: Path) -> str:
     return "present"
 
 
-def collect(tp: paths.ToolPaths) -> dict:
+def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
     codex_sessions = tp.codex_sessions
     config_toml = tp.codex_config
     auth_json = tp.codex_auth
@@ -746,9 +747,11 @@ def collect(tp: paths.ToolPaths) -> dict:
                         otel_exporter_headers_configured = bool(
                             otel_summary.get("headers_configured")
                         )
-        except (tomllib.TOMLDecodeError, OSError):
+        except (tomllib.TOMLDecodeError, OSError, UnicodeError):
             # Skip on parse error or file access error
             pass
+
+    perm_summary = collect_permissions(tp, rules, findings, repo_roots=repo_roots, managed_dirs=managed_dirs, config_parser=parse_config_toml)
 
     auth_method = detect_auth_method(auth_json)
     envelope["rules"] = rules
@@ -772,6 +775,7 @@ def collect(tp: paths.ToolPaths) -> dict:
         "auth_json_exists": auth_json.exists(),
         "auth_method": auth_method,
     }
+    envelope["summary"].update(perm_summary)
     return envelope
 
 
@@ -779,11 +783,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Codex permission collector")
     add_base_args(parser)
     paths.add_path_args(parser)
+    parser.add_argument(
+        "--repo-roots",
+        default=None,
+        help="Comma-separated repo scan roots for project .codex layers "
+        "(default: common code dirs under the user profile)",
+    )
     args = parser.parse_args()
     evidence_root = validate_evidence_root(args.evidence_root)
     tp = paths.resolve_from_args(args)
 
-    envelope = collect(tp)
+    repo_roots = None
+    if args.repo_roots:
+        repo_roots = [Path(p.strip()) for p in args.repo_roots.split(",") if p.strip()]
+
+    envelope = collect(tp, repo_roots=repo_roots)
     if not envelope["platform_detected"]:
         finish_collector(envelope, evidence_root, dry_run=args.dry_run)
         sys.exit(2)

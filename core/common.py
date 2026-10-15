@@ -21,8 +21,9 @@ from typing import Any, Iterable
 USERPROFILE = Path(os.environ.get("USERPROFILE", Path.home()))
 APPDATA = Path(os.environ.get("APPDATA", USERPROFILE / "AppData" / "Roaming"))
 
-# Common developer code roots checked by git-posture and secrets-scan when no
-# --repo-roots is given. Directory names only; each is used iff it exists.
+# Common developer code roots checked by cursor, grok, git-posture and
+# secrets-scan when no --repo-roots is given. Directory names only; each is
+# used iff it exists.
 DEFAULT_REPO_ROOT_NAMES = (
     "repos", "code", "src", "projects", "source", "dev", "git", "work",
     "workspace", "cursor-projects",
@@ -35,8 +36,9 @@ DEFAULT_REPO_ROOT_EXTRA = (
 
 def default_repo_roots() -> list[Path]:
     """Return the default repo roots that exist under the user profile."""
-    roots = [USERPROFILE / name for name in DEFAULT_REPO_ROOT_NAMES]
-    roots += [USERPROFILE.joinpath(*parts) for parts in DEFAULT_REPO_ROOT_EXTRA]
+    home = Path(os.environ.get("USERPROFILE", Path.home()))
+    roots = [home / name for name in DEFAULT_REPO_ROOT_NAMES]
+    roots += [home.joinpath(*parts) for parts in DEFAULT_REPO_ROOT_EXTRA]
     return [r for r in roots if r.exists()]
 
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
