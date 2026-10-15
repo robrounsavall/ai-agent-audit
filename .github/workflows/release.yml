@@ -1,0 +1,57 @@
+name: Release
+
+# Publishes aiscan-<version>.zip, its SHA256 file, and get-aiscan.ps1 to a
+# GitHub Release. Cut a release by pushing a tag:
+#   git tag v0.2.0 && git push origin v0.2.0
+# or run this workflow by hand with a version (it creates the tag on the
+# commit the workflow runs from).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without the leading v, e.g. 0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION#v}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build zip and checksum
+        run: bash scripts/build-release-zip.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "aiscan $VERSION" \
+            --generate-notes \
+            $prerelease \
+            "dist/aiscan-$VERSION.zip" \
+            "dist/aiscan-$VERSION.zip.sha256" \
+            "scripts/get-aiscan.ps1"
