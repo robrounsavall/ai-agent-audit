@@ -1309,6 +1309,22 @@ def _claude_approval(view: _View) -> Cell:
             "high",
             ["finding claude.permission.bypass_mode"],
         )
+    for auto_id in ("claude.permission.auto_mode", "claude.permission.auto_mode_default"):
+        if view.has_id(auto_id):
+            lead = (
+                "No permission mode is set, so sessions start in auto mode: "
+                if auto_id.endswith("_default")
+                else "Auto mode: "
+            )
+            return _cell(
+                view,
+                "approval",
+                "partial",
+                lead + "actions run without prompts after a background classifier check; "
+                "ask and deny rules still apply.",
+                "moderate",
+                [f"finding {auto_id}"],
+            )
     if view.has_id("claude.permission.skip_dangerous_prompt"):
         return _cell(
             view,

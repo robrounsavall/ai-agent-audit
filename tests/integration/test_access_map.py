@@ -374,6 +374,29 @@ class AccessMapFixtureTests(unittest.TestCase):
         self.assertEqual(cells["git"]["value"], "yes")
         self.assertEqual(cells["network"]["mcp_count"], 0)
 
+    def test_claude_auto_mode_default_approval(self) -> None:
+        grid = build_access_map(
+            {
+                "claude": {
+                    "collector": "claude",
+                    "platform_detected": True,
+                    "summary": {"allow_rules": 0, "ask_rules": 0, "desktop_mcp_servers": 0},
+                    "findings": [
+                        {
+                            "id": "claude.permission.auto_mode_default",
+                            "severity": "medium",
+                            "category": "Shell Execution",
+                            "title": "No Claude permission mode is set",
+                        }
+                    ],
+                    "rules": [],
+                }
+            }
+        )
+        cell = grid["cells"]["claude"]["approval"]
+        self.assertEqual(cell["value"], "partial")
+        self.assertIn("auto mode", cell["reason"])
+
     def test_cowork_outputs_and_bridge(self) -> None:
         grid = build_access_map(
             {
