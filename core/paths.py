@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import compressed
 from common import APPDATA, USERPROFILE, sha256_short
 
 # Override units and their config keys / env vars.
@@ -260,7 +261,12 @@ def _scan_dir(path: Path, pattern: str = "*.jsonl") -> tuple[bool, int, str | No
     if path.is_file():
         ts = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")
         return True, 1, ts
-    files = list(path.rglob(pattern))
+    if pattern == "*.jsonl":
+        # Also counts Codex's compressed rollouts (*.jsonl.zst); a plain/zst
+        # twin counts once. mtimes are preserved by compression.
+        files = compressed.jsonl_files(path, pattern)
+    else:
+        files = list(path.rglob(pattern))
     if not files:
         return True, 0, None
     newest = max(f.stat().st_mtime for f in files)

@@ -47,6 +47,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Callable, Iterable
 
+import compressed
 import paths
 from common import (
     add_base_args,
@@ -64,7 +65,7 @@ from common import (
 # Major stays 1: the envelope version doubles as the evidence schema major
 # (build-briefing.py gates on it) and the envelope shape is unchanged. The
 # Presidio->stdlib engine swap is internal to the collector.
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 COLLECTOR = "pii-scan"
 
@@ -193,14 +194,27 @@ DETECTORS: dict[str, tuple[re.Pattern, Callable[[str], bool] | None, float]] = {
 DEFAULT_ENTITIES = list(DETECTORS)
 
 
+def _text_suffix(path: Path) -> str:
+    """Extension that decides text-ness; a.jsonl.zst is judged as .jsonl."""
+    if compressed.is_compressed(path):
+        return compressed.plain_twin(path).suffix.lower()
+    return path.suffix.lower()
+
+
 def iter_text_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        if path.suffix.lower() not in TEXT_EXTENSIONS:
+        if _text_suffix(path) not in TEXT_EXTENSIONS:
+            continue
+        is_zst = compressed.is_compressed(path)
+        # Codex keeps either a.jsonl or a.jsonl.zst; if both exist scan the
+        # plain one only so hits are not double counted.
+        if is_zst and compressed.plain_twin(path).is_file():
             continue
         try:
-            if path.stat().st_size > MAX_FILE_BYTES:
+            # .zst size is checked after decompression (read_text max_bytes).
+            if not is_zst and path.stat().st_size > MAX_FILE_BYTES:
                 continue
         except OSError:
             continue
@@ -209,8 +223,10 @@ def iter_text_files(root: Path) -> Iterable[Path]:
 
 def read_text(path: Path) -> str | None:
     try:
+        if compressed.is_compressed(path):
+            return compressed.read_text(path, errors="replace", max_bytes=MAX_FILE_BYTES)
         return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    except (OSError, compressed.TooLarge, compressed.ZstdUnavailable):
         return None
 
 
@@ -350,6 +366,8 @@ def collect(
         return envelope, []
 
     all_hits: list[dict] = []
+    compressed_unreadable: set[Path] = set()
+    zstd_ok = compressed.zstd_backend() is not None
     files_scanned = 0
     total_hits = 0
     samples_truncated = 0
@@ -368,6 +386,9 @@ def collect(
             file=sys.stderr, flush=True,
         )
         for file_path in target_files:
+            if not zstd_ok and compressed.is_compressed(file_path):
+                compressed_unreadable.add(file_path.resolve())
+                continue
             files_scanned += 1
             if files_scanned % 200 == 0:
                 print(
@@ -398,6 +419,14 @@ def collect(
         file=sys.stderr, flush=True,
     )
 
+    if compressed_unreadable:
+        findings.append(make_finding(
+            "pii-scan.compressed_files_unreadable", "medium", "PII Exposure",
+            f"{len(compressed_unreadable)} compressed file(s) (.jsonl.zst) were not scanned for PII: "
+            f"this needs {compressed.UNAVAILABLE_HINT}",
+            evidence_count=len(compressed_unreadable),
+            tags=["coverage_gap"],
+        ))
     write_raw_outputs(raw_dir, all_hits, entity_counts, file_counts, samples_truncated)
 
     for entity, count in entity_counts.most_common():
@@ -421,6 +450,7 @@ def collect(
     envelope["summary"] = {
         "targets": [str(t) for t in targets],
         "files_scanned": files_scanned,
+        "compressed_files_unreadable": len(compressed_unreadable),
         "files_with_hits": len(file_counts),
         "hits": total_hits,
         "sample_rows_stored": len(all_hits),

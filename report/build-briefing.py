@@ -1017,7 +1017,12 @@ def build_tools_table(
         version = disc.get("version") or (env or {}).get("summary", {}).get("version", "unknown")
         if version == "unknown" and env:
             version = env.get("version", "unknown")
-        last_used = disc.get("last_used") or disc.get("last_seen") or "unknown"
+        last_used = (
+            _tool_last_used(key, envelopes)
+            or disc.get("last_used")
+            or disc.get("last_seen")
+            or "unknown"
+        )
         status = collector_status(key, env, runs.get(key))
         if not detected:
             status = "skipped"
@@ -1202,7 +1207,7 @@ def _tool_last_used(key: str, envelopes: dict[str, dict[str, Any]]) -> str:
     if key == "claude":
         return newest("claude_projects")
     if key == "codex":
-        return newest("codex_sessions")
+        return str(((envelopes.get("codex") or {}).get("summary") or {}).get("last_used") or newest("codex_sessions"))
     if key == "cursor":
         return newest("cursor_projects", "cursor_db")
     if key == "grok":
@@ -1240,6 +1245,18 @@ def render_cover_status(
         duration = dur if dur and dur != "unknown" else "-"
         rows.append((label, "detected", duration, _tool_last_used(key, envelopes) or "unknown"))
 
+    # Codex Desktop (Store app) is an install/launch signal for Codex, not a
+    # separate tool, so it does not bump the detected count. Its date is when
+    # the app was last OPENED (log mtimes); the Codex row stays last USED.
+    codex_summary = (envelopes.get("codex") or {}).get("summary") or {}
+    if codex_summary.get("desktop_installed"):
+        codex_label = TOOL_LABELS.get("codex", "codex")
+        index = next(
+            (i + 1 for i, row in enumerate(rows) if row[0] == codex_label), len(rows)
+        )
+        opened = codex_summary.get("desktop_last_opened") or "unknown"
+        rows.insert(index, ("Codex Desktop app", "installed", "-", f"opened {opened}"))
+
     # Claude Design is not a collector; its usage signal rides in the cowork
     # summary (design window file presence + last-open date).
     cowork_summary = (envelopes.get("cowork") or {}).get("summary") or {}
@@ -1261,7 +1278,7 @@ def render_cover_status(
     )
     row_html = []
     for name, status, measure, detail in rows:
-        status_class = "ok" if status in ("detected", "collected") else "muted"
+        status_class = "ok" if status in ("detected", "collected", "installed") else "muted"
         duration_cell = f"<td>{_esc(measure)}</td>" if show_duration else ""
         row_html.append(
             f"<tr><td><span class='status-dot {status_class}'></span>{_esc(name)}</td>"
