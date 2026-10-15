@@ -92,6 +92,40 @@ winget install Gitleaks.Gitleaks
 macOS/Linux are not supported yet. The evidence schema and collector logic are
 portable; path resolution is Windows-first. Contributions welcome.
 
+## Run without cloning
+
+Each [GitHub release](https://github.com/robrounsavall/ai-agent-audit/releases)
+carries a versioned zip (`aiscan-<version>.zip`), its SHA256 file, and a small
+installer, `get-aiscan.ps1`. The installer downloads the zip to
+`%LOCALAPPDATA%\aiscan\<version>`, checks the SHA256, extracts it, and runs
+`aiscan.ps1` with whatever arguments you give it. No admin rights, and no
+machine-wide execution policy change: only the child PowerShell that runs
+aiscan gets `-ExecutionPolicy Bypass`. Python 3.10+ (and gitleaks, for
+`secrets-scan`) are still needed, as above.
+
+```powershell
+# Latest release, with arguments
+& ([scriptblock]::Create((irm https://github.com/robrounsavall/ai-agent-audit/releases/latest/download/get-aiscan.ps1))) all -Briefing
+
+# Latest release, no arguments (same as .\aiscan.ps1)
+irm https://github.com/robrounsavall/ai-agent-audit/releases/latest/download/get-aiscan.ps1 | iex
+```
+
+`-Version 0.2.0` pins a release, and `-InstallOnly` downloads, verifies and
+prints the install path without running anything. Delete
+`%LOCALAPPDATA%\aiscan` to remove it.
+
+Prefer to read before you run? Download the script, look at it, then run it:
+
+```powershell
+irm https://github.com/robrounsavall/ai-agent-audit/releases/latest/download/get-aiscan.ps1 -OutFile get-aiscan.ps1
+notepad get-aiscan.ps1
+powershell -ExecutionPolicy Bypass -File .\get-aiscan.ps1 -InstallOnly
+```
+
+To check a zip by hand, compare `Get-FileHash .\aiscan-<version>.zip` with the
+hash in `aiscan-<version>.zip.sha256` from the same release.
+
 ## Usage
 
 ```powershell

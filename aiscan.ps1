@@ -178,6 +178,11 @@ $CoreDir = Join-Path $ScriptDir "core"
 $ComponentsDir = Join-Path $ScriptDir "components"
 $Python = "python"
 
+# Release zips carry a VERSION file (written by scripts/build-release-zip.sh).
+# A repo checkout has none and reports "dev".
+$VersionFile = Join-Path $ScriptDir "VERSION"
+$AiscanVersion = if (Test-Path -LiteralPath $VersionFile) { (Get-Content -LiteralPath $VersionFile -TotalCount 1).Trim() } else { "dev" }
+
 # core/ holds shared common.py + paths.py; every collector script imports them.
 # Prepend so child Python processes resolve imports without an install step.
 $env:PYTHONPATH = if ($env:PYTHONPATH) { "$CoreDir;$env:PYTHONPATH" } else { $CoreDir }
@@ -522,6 +527,7 @@ Resolve-Discovery
 # --- all: run collectors, combined summary ---
 if ($Collector -eq "all") {
     $root = New-PeekRoot
+    Write-Host "aiscan $AiscanVersion" -ForegroundColor DarkGray
     $rows = @()
     foreach ($name in $StdlibOrder) {
         Write-Host "Running $name..." -ForegroundColor Cyan
