@@ -2202,6 +2202,17 @@ def _render_cursor_state_summary(summary: dict[str, Any]) -> str:
     ]
     if summary.get("agent_autorun_default_attempted"):
         chips.append(("Agent autorun default", "attempted"))
+    # Run mode and allowlists from the IDE state blob and the Agent CLI config.
+    if summary.get("ide_run_mode"):
+        chips.append(("IDE run mode", str(summary.get("ide_run_mode"))))
+    full_auto = summary.get("ide_full_auto_modes") or []
+    if isinstance(full_auto, list) and full_auto:
+        chips.append(("Full auto-run modes", ", ".join(str(m) for m in full_auto[:4])))
+    if "ide_allowlist_count" in summary:
+        chips.append(("IDE command allowlist", str(int(summary.get("ide_allowlist_count") or 0))))
+    if summary.get("cli_config_present"):
+        chips.append(("CLI approvalMode", str(summary.get("cli_approval_mode") or "unset")))
+        chips.append(("CLI allow / deny", f"{int(summary.get('cli_allow_count') or 0)} / {int(summary.get('cli_deny_count') or 0)}"))
     chip_html = "".join(
         f"<div class='mode-chip'><span>{_esc(label)}</span><strong>{_esc(value)}</strong></div>"
         for label, value in chips
@@ -2215,7 +2226,7 @@ def _render_cursor_state_summary(summary: dict[str, Any]) -> str:
     return f"""<div class="telemetry-summary">
         <div class="rule-group-head">
           <h4>Cursor local permission state</h4>
-          <span class="meta">mcp.json + state.vscdb + agent transcripts</span>
+          <span class="meta">mcp.json + cli-config.json + state.vscdb + agent transcripts</span>
         </div>
         <p class="surface-note">{_esc(note)}</p>
         <div class="mode-grid">{chip_html}</div>

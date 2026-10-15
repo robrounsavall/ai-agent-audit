@@ -419,6 +419,8 @@ def _sandbox_off(view: _View) -> bool:
         return True
     if view.has_id("codex.sandbox.full_access", "codex.sandbox.bypass", "grok.sandbox.off"):
         return True
+    if view.has_id("codex.permissions.full_access", "codex.desktop.full_access_mode"):
+        return True
     if (_as_int(view.summary.get("sandbox_off_sessions")) or 0) > 0:
         return True
     for finding in view.findings:
@@ -432,7 +434,9 @@ def _approval_never(view: _View) -> bool:
     policy = view.summary.get("approval_policy")
     if isinstance(policy, str) and policy.strip().lower() == "never":
         return True
-    return view.has_id("codex.approval.never")
+    return view.has_id(
+        "codex.approval.never", "cursor.run_mode.unrestricted", "cursor.run_mode.full_auto_mode"
+    )
 
 
 def _bypass(view: _View) -> bool:
@@ -534,7 +538,7 @@ def _shell(view: _View) -> Cell:
             "shell",
             "yes",
             "Sandbox is disabled, so shell commands are not contained.",
-            "high" if view.has_id("codex.sandbox.full_access", "codex.sandbox.bypass", "grok.sandbox.off") else "moderate",
+            "high" if view.has_id("codex.sandbox.full_access", "codex.sandbox.bypass", "grok.sandbox.off", "codex.permissions.full_access", "codex.desktop.full_access_mode") else "moderate",
             ["sandbox off"],
         )
     if tool_hits:
@@ -1244,7 +1248,11 @@ def _codex_approval(view: _View) -> Cell:
         bits = []
         if policy_text == "never" or view.has_id("codex.approval.never"):
             bits.append("approval_policy is never")
-        if _sandbox_off(view):
+        if view.has_id("codex.desktop.full_access_mode"):
+            bits.append("Codex Desktop agent mode is Full access")
+        elif view.has_id("codex.permissions.full_access"):
+            bits.append("default_permissions is :danger-full-access")
+        elif _sandbox_off(view):
             bits.append(f"sandbox is {mode or 'disabled'}")
         return _cell(
             view,
@@ -1253,6 +1261,15 @@ def _codex_approval(view: _View) -> Cell:
             "Auto-approve: " + " and ".join(bits) + ".",
             "high",
             ["codex approval"],
+        )
+    if view.has_id("codex.approval.auto_review"):
+        return _cell(
+            view,
+            "approval",
+            "partial",
+            "Approval prompts are decided by the auto_review agent, not the user.",
+            "moderate",
+            ["finding codex.approval.auto_review"],
         )
     if policy_text == "granular":
         return _cell(
@@ -1369,6 +1386,36 @@ def _claude_approval(view: _View) -> Cell:
 
 
 def _cursor_approval(view: _View) -> Cell:
+    if view.has_id("cursor.run_mode.unrestricted", "cursor.run_mode.full_auto_mode"):
+        modes = view.summary.get("ide_full_auto_modes") or []
+        if view.has_id("cursor.run_mode.unrestricted"):
+            reason = "Auto-approve: Run Everything is on, so every tool call runs without asking."
+            ref = "finding cursor.run_mode.unrestricted"
+        else:
+            shown = ", ".join(str(m) for m in modes[:3]) if isinstance(modes, list) and modes else "a mode"
+            reason = f"Auto-approve: {shown} runs every tool call automatically (fullAutoRun)."
+            ref = "finding cursor.run_mode.full_auto_mode"
+        return _cell(view, "approval", "yes", reason, "high", [ref])
+    auto_modes = view.summary.get("ide_auto_run_modes") or []
+    allow_n = _as_int(view.summary.get("ide_allowlist_count")) or 0
+    if (isinstance(auto_modes, list) and auto_modes) or str(view.summary.get("ide_run_mode") or "").startswith("auto-run"):
+        return _cell(
+            view,
+            "approval",
+            "partial",
+            f"Allowlist: {allow_n} allowlisted command(s) auto-run; other calls ask.",
+            "high",
+            ["summary.ide_run_mode"],
+        )
+    if str(view.summary.get("cli_approval_mode") or "").lower() == "auto-review":
+        return _cell(
+            view,
+            "approval",
+            "partial",
+            "Auto-review: Cursor's classifier decides which CLI tool calls run.",
+            "moderate",
+            ["summary.cli_approval_mode"],
+        )
     workspaces = _as_int(view.summary.get("composer_auto_accept_workspaces")) or 0
     if workspaces > 0:
         return _cell(
