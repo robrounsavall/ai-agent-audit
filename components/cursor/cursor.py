@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sqlite3
 import sys
 from pathlib import Path
 
+import cursor_permissions as cperm
 import paths
 from common import (
     USERPROFILE,
@@ -31,7 +33,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "cursor"
 
@@ -348,6 +350,7 @@ def search_vscdb(
         "known_mcp_unmatched": 0,
         "composer_auto_accept_workspaces": 0,
         "agent_autorun_default_attempted": False,
+        "ide_state_read": False,
     }
     known_ids: list[str] = []
     seen_targeted: set[str] = set()
@@ -430,56 +433,49 @@ def search_vscdb(
         summary["known_mcp_matched"] = matched
         summary["known_mcp_unmatched"] = unmatched
 
-        for table in ("ItemTable", "cursorDiskKV"):
-            try:
-                cur.execute(f"SELECT key, value FROM {table}")
-            except sqlite3.Error:
-                continue
-            for key, value in cur.fetchall():
-                key_str = str(key)
-                val_str = str(value) if value is not None else ""
-                if not PERMISSION_KEY_RE.search(key_str) and not PERMISSION_KEY_RE.search(val_str[:500]):
-                    continue
-                searched.append(f"{table}:{key_str}")
-                if DURABLE_VALUE_RE.search(val_str):
-                    durable_found = True
-                    try:
-                        parsed = json.loads(val_str)
-                    except (json.JSONDecodeError, TypeError):
-                        parsed = None
-                    if isinstance(parsed, dict):
-                        for allow_key in ("allowedTools", "allowlist", "allowList", "trustedCommands"):
-                            items = parsed.get(allow_key)
-                            if isinstance(items, list):
-                                for item in items:
-                                    if isinstance(item, str):
-                                        rules.append(
-                                            make_rule(
-                                                "cursor",
-                                                "user",
-                                                "global",
-                                                "other",
-                                                item,
-                                                "allow",
-                                                command_or_tool=item,
-                                                risk="medium",
-                                            )
+        # Legacy allow-list parse: keys only, never cursorDiskKV, never chat/auth rows.
+        for key_str in cperm.legacy_permission_keys(con, PERMISSION_KEY_RE, extra_skip=targeted):
+            val_str = cperm.fetch_value_text(con, key_str)
+            searched.append(f"ItemTable:{key_str}")
+            if DURABLE_VALUE_RE.search(val_str):
+                durable_found = True
+                try:
+                    parsed = json.loads(val_str)
+                except (ValueError, TypeError, RecursionError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    for allow_key in ("allowedTools", "allowlist", "allowList", "trustedCommands"):
+                        items = parsed.get(allow_key)
+                        if isinstance(items, list):
+                            for item in items:
+                                if isinstance(item, str):
+                                    rules.append(
+                                        make_rule(
+                                            "cursor",
+                                            "user",
+                                            "global",
+                                            "other",
+                                            item,
+                                            "allow",
+                                            command_or_tool=item,
+                                            risk="medium",
                                         )
-                    elif isinstance(parsed, list):
-                        for item in parsed:
-                            if isinstance(item, str):
-                                rules.append(
-                                    make_rule(
-                                        "cursor",
-                                        "user",
-                                        "global",
-                                        "other",
-                                        item,
-                                        "allow",
-                                        command_or_tool=item,
-                                        risk="medium",
                                     )
+                elif isinstance(parsed, list):
+                    for item in parsed:
+                        if isinstance(item, str):
+                            rules.append(
+                                make_rule(
+                                    "cursor",
+                                    "user",
+                                    "global",
+                                    "other",
+                                    item,
+                                    "allow",
+                                    command_or_tool=item,
+                                    risk="medium",
                                 )
+                            )
     finally:
         con.close()
 
@@ -518,8 +514,17 @@ def search_transcripts(cursor_root: Path) -> tuple[int, list[str]]:
     return count, searched
 
 
-def collect(tp: paths.ToolPaths, repo_roots: list[Path] | None = None) -> dict:
+def collect(
+    tp: paths.ToolPaths,
+    repo_roots: list[Path] | None = None,
+    *,
+    cursor_home: Path | None = None,
+    install_dirs=None,
+) -> dict:
     roots = repo_roots if repo_roots is not None else default_repo_roots()
+    if cursor_home is None:
+        env_home = os.environ.get("CURSOR_CONFIG_DIR", "").strip()
+        cursor_home = Path(env_home) if env_home else Path(tp.cursor_user_mcp).parent
     scanned = [
         str(tp.cursor_db),
         str(tp.cursor_projects),
@@ -533,6 +538,7 @@ def collect(tp: paths.ToolPaths, repo_roots: list[Path] | None = None) -> dict:
         or tp.cursor_projects.exists()
         or tp.cursor_user_mcp.exists()
         or tp.shared_mcp.exists()
+        or (cursor_home / "cli-config.json").exists()
     )
 
     envelope = make_envelope(
@@ -560,19 +566,27 @@ def collect(tp: paths.ToolPaths, repo_roots: list[Path] | None = None) -> dict:
         tp.cursor_db, registered_names=registered
     )
     perm_events, transcript_searched = search_transcripts(tp.cursor_projects)
+    ide_state, admin_state = cperm.read_permission_state(tp.cursor_db)
+    perm = cperm.collect_permission_sources(
+        cursor_home, roots, ide_state, admin_state, install_dirs=install_dirs
+    )
 
-    rules = mcp_rules + vscdb_rules
+    rules = mcp_rules + perm["rules"] + vscdb_rules
     envelope["rules"] = rules
-    findings: list[dict] = list(mcp_findings)
+    findings: list[dict] = list(mcp_findings) + perm["findings"]
 
-    non_mcp_rules = [r for r in rules if r.get("rule_type") != "mcp_tool"]
-    if not non_mcp_rules:
+    non_mcp_rules = [
+        r for r in rules if r.get("rule_type") != "mcp_tool" and r.get("decision") == "allow"
+    ]
+    legacy_allowlist = any(r.get("decision") == "allow" for r in vscdb_rules
+                          if r.get("rule_type") != "mcp_tool")
+    if not (perm["has_allowlist"] or legacy_allowlist) and not perm["run_mode_finding"]:
         findings.append(
             make_finding(
                 "cursor.permissions.no_durable_allowlist",
                 "medium",
                 "General Tooling",
-                "No durable Cursor command allow-list found in local state",
+                "No Cursor command allow-list found in cli-config.json or IDE state",
                 evidence_count=len(vscdb_searched) + len(transcript_searched),
                 tags=["history_retention"],
             )
@@ -607,6 +621,7 @@ def collect(tp: paths.ToolPaths, repo_roots: list[Path] | None = None) -> dict:
             p.exists() for p in (tp.cursor_user_mcp, tp.cursor_appdata_mcp, tp.shared_mcp)
         ),
         **state_summary,
+        **perm["summary"],
     }
     return envelope
 
