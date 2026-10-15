@@ -41,6 +41,12 @@
     own machine, where masking only hides what you came to inspect. Use this if
     you intend to share aiscan output.
 
+.PARAMETER LocalLinks
+    With -Briefing, show full local file paths in the briefing with Copy path
+    buttons and folder links, and write briefing\briefing-local.html. The file
+    contains local paths: do not share it. Ignored (with a warning) when -Redact
+    is set.
+
 .PARAMETER OutDir
     Persistent output root instead of the throwaway temp directory. Creates
     <OutDir>\evidence and <OutDir>\raw and writes collector output there. Implies
@@ -107,6 +113,11 @@
     opens an HTML briefing from that evidence.
 
 .EXAMPLE
+    .\aiscan.ps1 all -OutDir C:\scans\today -Briefing -LocalLinks
+    Builds briefing\briefing-local.html with full paths, Copy path buttons and
+    folder links. Local use only.
+
+.EXAMPLE
     .\aiscan.ps1 all -Here -Briefing -Customer "Acme Corp" -Operator "Jane Doe"
 
 .EXAMPLE
@@ -137,6 +148,8 @@ param(
     [switch]$Keep,
 
     [switch]$Redact,
+
+    [switch]$LocalLinks,
 
     [string]$OutDir,
 
@@ -171,6 +184,11 @@ if ($Here -and $OutDir) {
 # The collectors read AISCAN_REDACT centrally (sanitize_text). -Redact turns on
 # masking for output you intend to share.
 if ($Redact) { $env:AISCAN_REDACT = "1" } else { $env:AISCAN_REDACT = $null }
+$UseLocalLinks = [bool]$LocalLinks
+if ($LocalLinks -and $Redact) {
+    Write-Host "-Redact turns off -LocalLinks; building a shareable briefing without local paths." -ForegroundColor Yellow
+    $UseLocalLinks = $false
+}
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
@@ -384,7 +402,8 @@ function Invoke-ScanDiff {
 function Invoke-AiscanBriefing {
     param([string]$Root)
     $briefingScript = Join-Path $ScriptDir "report\build-briefing.py"
-    $briefingOut = Join-Path $Root "briefing\briefing.html"
+    $briefingName = if ($UseLocalLinks) { "briefing-local.html" } else { "briefing.html" }
+    $briefingOut = Join-Path $Root "briefing\$briefingName"
     if (-not (Test-Path -LiteralPath $briefingScript)) {
         Write-Host "build-briefing.py not found; skipping briefing." -ForegroundColor Yellow
         return
@@ -397,6 +416,7 @@ function Invoke-AiscanBriefing {
         "--evidence-root", $Root,
         "--out", $briefingOut
     )
+    if ($UseLocalLinks) { $briefingArgs += "--local-links" }
     if ($Customer) { $briefingArgs += @("--customer", $Customer) }
     if ($Operator) { $briefingArgs += @("--operator", $Operator) }
     try {

@@ -504,4 +504,52 @@ REPORT_V2_JS = """
     });
   }
 })();
+(function () {
+  function fallbackCopy(path, btn) {
+    var ok = false;
+    var ta = document.createElement("textarea");
+    ta.value = path;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) return true;
+    var box = btn.parentNode.querySelector(".copy-path-fallback");
+    if (!box) {
+      box = document.createElement("input");
+      box.type = "text";
+      box.readOnly = true;
+      box.className = "copy-path-fallback";
+      btn.parentNode.insertBefore(box, btn.nextSibling);
+    }
+    box.value = path;
+    box.title = "Press Ctrl+C";
+    box.focus();
+    box.select();
+    btn.textContent = "Press Ctrl+C";
+    return false;
+  }
+  function flash(btn) {
+    btn.textContent = "Copied";
+    setTimeout(function () { btn.textContent = "Copy path"; }, 1500);
+  }
+  document.addEventListener("click", function (ev) {
+    var target = ev.target;
+    var btn = target && target.closest ? target.closest("button.copy-path") : null;
+    if (!btn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    var path = btn.dataset.path || "";
+    if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(path).then(function () { flash(btn); }, function () {
+        if (fallbackCopy(path, btn)) flash(btn);
+      });
+    } else if (fallbackCopy(path, btn)) {
+      flash(btn);
+    }
+  });
+})();
 """

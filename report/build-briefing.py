@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import csv
 import hashlib
 import html
 import json
@@ -30,7 +31,7 @@ import sys
 import urllib.parse
 from collections import Counter, defaultdict
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 REPORT_DIR = Path(__file__).resolve().parent
@@ -44,6 +45,13 @@ sys.path.insert(0, str(TEMPLATES_DIR))
 
 from access_map import build_access_map  # noqa: E402
 from briefing_template import REPORT_V2_CSS, REPORT_V2_JS  # noqa: E402
+from common import (  # noqa: E402
+    _hash_path,
+    mask_secrets,
+    redact_paths,
+    redact_sample,
+    redaction_disabled,
+)
 from scan_diff import load_changes_envelope  # noqa: E402
 from sections.access_map import render_access_map_section  # noqa: E402
 from sections.changes import render_changes_section  # noqa: E402
@@ -504,6 +512,7 @@ def _collapse_secret_group(members: list[dict[str, Any]]) -> dict[str, Any]:
         if sample and sample not in samples:
             samples.append(sample)
     first["_files"] = files
+    first["_member_samples"] = samples
     reason = str(first.get("_placeholder_reason") or "")
     if samples:
         shown = samples[0]
@@ -1689,7 +1698,399 @@ def _finding_search_blob(f: dict[str, Any]) -> str:
     ).lower()
 
 
-def render_findings_section(findings: list[dict[str, Any]]) -> tuple[str, str]:
+# ─────────────────────────────────────────────────────────────────────────────
+# Evidence cards: locations from raw CSVs, path display, opt-in local links
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MAX_CSV_ROWS = 5000
+_MAX_LOCATIONS = 20
+_EXTRA_VALUE_LIMIT = 300
+_STD_FINDING_KEYS = frozenset(
+    {
+        "id", "severity", "category", "title", "evidence_count", "first_seen",
+        "last_seen", "sample_redacted", "secret_redacted", "tags", "raw_evidence_ref",
+        "file", "path", "filename", "source_file",
+    }
+)
+_WIN_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_WIN_UNC_RE = re.compile(r"^\\\\[^\\/]+\\[^\\/]+")
+_WSL_MNT_RE = re.compile(r"^/mnt/([A-Za-z])(?:/(.*))?$")
+
+
+def _pure_path(path: str) -> PureWindowsPath | PurePosixPath | None:
+    """Classify an absolute path as Windows (incl. UNC, WSL /mnt) or POSIX."""
+    text = str(path or "")
+    if not text.strip() or text.startswith("\\\\?\\") or text.startswith("//?/"):
+        return None
+    wsl = _WSL_MNT_RE.match(text)
+    if wsl:
+        text = f"{wsl.group(1).upper()}:\\" + (wsl.group(2) or "").replace("/", "\\")
+    if _WIN_DRIVE_RE.match(text) or _WIN_UNC_RE.match(text):
+        return PureWindowsPath(text)
+    if text.startswith("/") and not text.startswith("//"):
+        return PurePosixPath(text)
+    return None
+
+
+def local_file_uri(path: str, is_dir: bool = False) -> str | None:
+    """file: URI for an absolute local path, or None when it cannot be linked."""
+    try:
+        pure = _pure_path(path)
+        if pure is None:
+            return None
+        uri = pure.as_uri()
+        if is_dir and not uri.endswith("/"):
+            uri += "/"
+        return uri
+    except Exception:
+        return None
+
+
+def local_folder_uri(path: str) -> str | None:
+    try:
+        pure = _pure_path(path)
+        if pure is None:
+            return None
+        return local_file_uri(str(pure.parent), is_dir=True)
+    except Exception:
+        return None
+
+
+_SAMPLE_FORMAT_RE = re.compile(r".{4}\.\.\..{4} \([^()]*\)|\*\*\*\*REDACTED:[^*]*\*\*\*\*")
+_CLEAN_REL_RE = re.compile(r"[\w.\-]+(?:/[\w.\-]+)*/?")
+_ABS_LOOKING_RE = re.compile(
+    r"[A-Za-z]:[\\/]|\\\\|file:|(?<![\w:.])/[^/\s]+/[^/\s]*", re.I
+)
+
+
+def _looks_redacted(value: str) -> bool:
+    """True only for the exact formats redact_sample writes."""
+    return _SAMPLE_FORMAT_RE.fullmatch(value) is not None
+
+
+def _safe_display_path(text: str) -> str:
+    """Display form of a path-bearing string when local links are off."""
+    text = str(text or "")
+    if not text:
+        return text
+    if _CLEAN_REL_RE.fullmatch(text) and ".." not in text.split("/"):
+        return text
+    shown = redact_paths(text)
+    if (_pure_path(text) is not None and "<userprofile>" not in shown) or _ABS_LOOKING_RE.search(shown):
+        return _hash_path(text)
+    return shown
+
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")
+_ENTITY_RE = re.compile(r"[A-Za-z0-9_\-]{1,40}")
+_RULE_RE = re.compile(r"[A-Za-z0-9_.\- ]{1,80}")
+_EXTRA_KEY_RE = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
+
+
+def _card_text(text: Any, local_links: bool = False) -> str:
+    """Single sink for evidence-derived text shown in cards and hit-file lists."""
+    text = mask_secrets(str(text if text is not None else ""))
+    text = _EMAIL_RE.sub(lambda m: redact_sample(m.group(0), "EMAIL"), text)
+    if not local_links:
+        text = _safe_display_path(text)
+    return text
+
+
+def _clean_score(value: str) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if number != number or number in (float("inf"), float("-inf")):
+        return ""
+    return f"{number:.3f}".rstrip("0").rstrip(".")
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    try:
+        with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+            for idx, row in enumerate(csv.DictReader(handle)):
+                if idx >= _MAX_CSV_ROWS:
+                    break
+                rows.append(
+                    {
+                        str(k).strip().lower(): (v if isinstance(v, str) else "")
+                        for k, v in row.items()
+                        if k is not None
+                    }
+                )
+    except Exception:
+        pass
+    return rows
+
+
+class EvidenceContext:
+    """Build-time lookups behind the evidence cards (raw CSV locations, path display)."""
+
+    def __init__(self, evidence_root: Path | str | None, local_links: bool = False):
+        self.root = Path(evidence_root) if evidence_root else None
+        self.local_links = bool(local_links)
+        self._secrets: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+        self._pii: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        if self.root is not None:
+            self._load_secrets()
+            self._load_pii()
+
+    @staticmethod
+    def _line(value: str) -> str:
+        value = (value or "").strip()
+        return value if value.isascii() and value.isdigit() else ""
+
+    def _load_secrets(self) -> None:
+        assert self.root is not None
+        for row in _read_csv_rows(self.root / "raw" / "secrets-scan" / "findings.csv"):
+            rule = (row.get("rule") or "").strip()
+            file = (row.get("file") or "").strip()
+            if not rule or not file:
+                continue
+            if not _RULE_RE.fullmatch(rule):
+                rule = "unknown rule"
+            sample = (row.get("sample_redacted") or "").strip()
+            if sample and sample != rule and not _looks_redacted(sample):
+                sample = redact_sample(sample, rule)
+            self._secrets[rule.lower()].append(
+                (
+                    _sample_compact(sample),
+                    {"path": file, "line": self._line(row.get("line", "")), "sample": sample},
+                )
+            )
+
+    def _load_pii(self) -> None:
+        assert self.root is not None
+        for row in _read_csv_rows(self.root / "raw" / "pii-scan" / "findings.csv"):
+            entity = (row.get("entity") or "").strip()
+            file = (row.get("file") or "").strip()
+            if not entity or not file:
+                continue
+            shown_entity = entity if _ENTITY_RE.fullmatch(entity) else ""
+            if "sample_redacted" in row:
+                sample = (row.get("sample_redacted") or "").strip()
+                if sample and not _looks_redacted(sample):
+                    sample = redact_sample(sample, entity)
+            else:
+                raw = (row.get("sample") or "").strip()
+                sample = redact_sample(raw, entity) if raw else ""
+            self._pii[entity.lower()].append(
+                {
+                    "path": file,
+                    "line": self._line(row.get("line", "")),
+                    "entity": shown_entity,
+                    "score": _clean_score((row.get("score") or "").strip()),
+                    "sample": sample,
+                }
+            )
+
+    def locations(self, finding: dict[str, Any]) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(loc: dict[str, Any]) -> None:
+            key = (str(loc.get("path") or ""), str(loc.get("line") or ""))
+            if key in seen or not key[0]:
+                return
+            seen.add(key)
+            found.append(loc)
+
+        file_key = _secret_file_key(finding)
+        if file_key:
+            add({"path": file_key, "line": ""})
+        for path in finding.get("_files") or []:
+            if str(path).strip():
+                add({"path": str(path).strip(), "line": ""})
+        rule = str(finding.get("_rule") or "").lower()
+        if rule and rule in self._secrets:
+            members = finding.get("_member_samples") or [finding.get("sample_redacted") or ""]
+            wanted = {_sample_compact(str(m)) for m in members}
+            for compact, loc in self._secrets[rule]:
+                if compact in wanted:
+                    add(dict(loc))
+        fid = str(finding.get("id") or "").lower()
+        if fid.startswith("pii_scan."):
+            candidates = [fid[len("pii_scan."):]]
+            candidates += [str(t).lower() for t in (finding.get("tags") or [])]
+            for cand in dict.fromkeys(candidates):
+                for loc in self._pii.get(cand, []):
+                    add(dict(loc))
+        return found
+
+    # -- path display -------------------------------------------------------
+
+    def path_text(self, path: str) -> str:
+        path = str(path or "")
+        return _display_redaction_tokens(_card_text(path, self.local_links))
+
+    def path_html(self, path: str, *, label: str | None = None, folder: bool = True) -> str:
+        text = _esc(label if label is not None else self.path_text(path))
+        if not self.local_links or mask_secrets(path) != path:
+            return f'<span class="ev-path">{text}</span>'
+        return self._with_actions(path, f'<span class="ev-path">{text}</span>', folder=folder)
+
+    def _with_actions(self, path: str, inner: str, *, folder: bool = True) -> str:
+        parts = [
+            inner,
+            f'<button type="button" class="copy-path" data-path="{_esc(path)}">Copy path</button>',
+        ]
+        furi = local_folder_uri(path) if folder else None
+        if furi:
+            parts.append(
+                f'<a class="folder-link" href="{_esc(furi)}" target="_blank" '
+                f'rel="noopener">Folder ↗</a>'
+            )
+        return " ".join(parts)
+
+    def raw_ref_html(self, ref: str) -> str:
+        if not self.local_links:
+            return f'<span class="ev-path">{_esc(_card_text(ref))}</span>'
+        absolute = ref if _pure_path(ref) is not None else (
+            str(self.root.resolve() / ref) if self.root is not None else ref
+        )
+        label = _esc(_card_text(ref, True))
+        if mask_secrets(absolute) != absolute:
+            return f'<span class="ev-path">{label}</span>'
+        uri = local_file_uri(absolute)
+        inner = (
+            f'<a class="ev-path" href="{_esc(uri)}" target="_blank" rel="noopener">{label}</a>'
+            if uri
+            else f'<span class="ev-path">{label}</span>'
+        )
+        return self._with_actions(absolute, inner)
+
+
+def _effective_local_links(requested: bool) -> bool:
+    if requested and not redaction_disabled():
+        print(
+            "-Redact turns off -LocalLinks; building a shareable briefing without local paths.",
+            file=sys.stderr,
+        )
+        return False
+    return bool(requested)
+
+
+def _truncate(text: str, limit: int = _EXTRA_VALUE_LIMIT) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+_SENSITIVE_KEY_PARTS = (
+    "secret", "token", "password", "passwd", "credential", "apikey", "api_key",
+    "sample", "match", "raw",
+)
+_SCALARS = (str, int, float, bool)
+
+
+def _extra_finding_items(finding: dict[str, Any], ctx: EvidenceContext) -> list[tuple[str, str]]:
+    items: list[tuple[str, str]] = []
+    for key, value in finding.items():
+        if key in _STD_FINDING_KEYS or str(key).startswith("_"):
+            continue
+        if not _EXTRA_KEY_RE.fullmatch(str(key)):
+            continue
+        lowered = str(key).lower()
+        if not lowered.endswith("_redacted") and any(p in lowered for p in _SENSITIVE_KEY_PARTS):
+            continue
+        if isinstance(value, _SCALARS):
+            text = str(value)
+        elif isinstance(value, (list, tuple)) and all(isinstance(v, _SCALARS) for v in value):
+            text = ", ".join(str(v) for v in value)
+        else:
+            items.append((str(key), "(structured value omitted)"))
+            continue
+        items.append((str(key), _truncate(_card_text(text, ctx.local_links))))
+    return items
+
+
+def _kv(label: str, inner_html: str) -> str:
+    return f"<dt>{_esc(label)}</dt><dd>{inner_html}</dd>"
+
+
+def render_evidence_card(finding: dict[str, Any], ctx: EvidenceContext) -> str:
+    links = ctx.local_links
+    collector = str(finding.get("_collector") or "")
+    meta = [f"id {_card_text(finding.get('id', ''), links)}"]
+    if collector:
+        meta.append(f"collector {_card_text(collector, links)}")
+    tags = [_card_text(t, links) for t in (finding.get("tags") or []) if str(t)]
+    if tags:
+        meta.append("tags " + ", ".join(tags))
+    if finding.get("first_seen"):
+        meta.append(f"first seen {_card_text(str(finding['first_seen'])[:19], links)}")
+    if finding.get("last_seen"):
+        meta.append(f"last seen {_card_text(str(finding['last_seen'])[:19], links)}")
+    meta_html = f'<p class="ev-meta">{_esc(" · ".join(meta))}</p>'
+
+    trig: list[str] = []
+    sample = _fix_plurals(_display_redaction_tokens(finding.get("sample_redacted") or ""))
+    if sample:
+        trig.append(_kv("Sample", f"<code>{_esc(sample)}</code>"))
+    if finding.get("_rule"):
+        rule = _card_text(finding["_rule"], links)
+        scanner = _card_text(finding.get("_scanner") or "", links)
+        trig.append(_kv("Rule", _esc(f"{rule} ({scanner})" if scanner else rule)))
+    fid = str(finding.get("id") or "")
+    if fid.lower().startswith("pii_scan."):
+        trig.append(_kv("Entity", _esc(_card_text(fid[len("pii_scan."):].upper(), links))))
+    members = int(finding.get("_grouped_members") or 0)
+    if members > 1:
+        trig.append(_kv("Grouped", _esc(f"{members} scanner rows with the same rule and redacted value")))
+    if finding.get("_placeholder_reason"):
+        trig.append(_kv("Placeholder reason", _esc(_card_text(finding["_placeholder_reason"], links))))
+    for key, text in _extra_finding_items(finding, ctx):
+        trig.append(_kv(key, f"<code>{_esc(text)}</code>"))
+
+    locs = ctx.locations(finding)
+    raw_ref = str(finding.get("raw_evidence_ref") or "")
+    if not (trig or locs or raw_ref):
+        return (
+            f'<div class="ev-card">{meta_html}'
+            '<p class="ev-none">No detail recorded by this collector.</p></div>'
+        )
+
+    sections = [meta_html]
+    if trig:
+        sections.append(
+            f'<div class="ev-sec"><h4>What triggered it</h4><dl class="ev-kv">{"".join(trig)}</dl></div>'
+        )
+    if locs:
+        items = []
+        for loc in locs[:_MAX_LOCATIONS]:
+            bits = [ctx.path_html(str(loc["path"]))]
+            if loc.get("line"):
+                bits.append(f'<span class="ev-line">line {_esc(loc["line"])}</span>')
+            if loc.get("entity") and _ENTITY_RE.fullmatch(str(loc["entity"])):
+                bits.append(f'<span class="ev-line">{_esc(_card_text(loc["entity"], links))}</span>')
+            if loc.get("score") and _clean_score(str(loc["score"])):
+                bits.append(f'<span class="ev-line">score {_esc(_clean_score(str(loc["score"])))}</span>')
+            if loc.get("sample"):
+                bits.append(f'<code>{_esc(_display_redaction_tokens(_card_text(loc["sample"], links)))}</code>')
+            items.append(f"<li>{' '.join(bits)}</li>")
+        more = ""
+        if len(locs) > _MAX_LOCATIONS:
+            where = raw_ref or (f"raw/{collector}/" if collector else "raw/")
+            where = _card_text(where, links)
+            more = f'<p class="ev-more">+{len(locs) - _MAX_LOCATIONS} more in {_esc(where)}</p>'
+        sections.append(
+            f'<div class="ev-sec"><h4>Where</h4><ul class="ev-locs">{"".join(items)}</ul>{more}</div>'
+        )
+    ref = raw_ref or (f"evidence/{collector}.json" if collector else "")
+    if ref:
+        sections.append(f'<div class="ev-sec"><h4>Raw evidence</h4><p>{ctx.raw_ref_html(ref)}</p></div>')
+    return f'<div class="ev-card">{"".join(sections)}</div>'
+
+
+def render_findings_section(
+    findings: list[dict[str, Any]],
+    *,
+    evidence_root: Path | str | None = None,
+    local_links: bool = False,
+    ctx: EvidenceContext | None = None,
+) -> tuple[str, str]:
+    if ctx is None:
+        ctx = EvidenceContext(evidence_root, local_links)
     by_category: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for f in findings:
         cat = str(f.get("category") or "General Tooling")
@@ -1718,10 +2119,16 @@ def render_findings_section(findings: list[dict[str, Any]]) -> tuple[str, str]:
             sev = _esc(f.get("severity", "low"))
             blob = _esc(_finding_search_blob(f))
             sample = _fix_plurals(_display_redaction_tokens(f.get("sample_redacted") or ""))
-            files = [str(path) for path in (f.get("_files") or []) if str(path).strip()]
+            files: list[str] = []
+            for loc in ctx.locations(f):
+                shown = ctx.path_text(str(loc["path"]))
+                if shown not in files:
+                    files.append(shown)
             if files:
                 noun = "file" if len(files) == 1 else "files"
-                items = "".join(f"<li>{_esc(path)}</li>" for path in files)
+                items = "".join(f"<li>{_esc(path)}</li>" for path in files[:_MAX_LOCATIONS])
+                if len(files) > _MAX_LOCATIONS:
+                    items += f"<li>+{len(files) - _MAX_LOCATIONS} more</li>"
                 file_html = (
                     f"<details class='hit-files'><summary>{len(files)} {noun}</summary>"
                     f"<ul>{items}</ul></details>"
@@ -1737,7 +2144,8 @@ def render_findings_section(findings: list[dict[str, Any]]) -> tuple[str, str]:
             rows.append(
                 f'<tr class="frow" data-search="{blob}">'
                 f'<td data-label="Severity"><span class="pill {sev}">{sev}</span></td>'
-                f'<td data-label="Title">{_esc(f.get("title", ""))}</td>'
+                f'<td data-label="Title"><details class="ev"><summary>{_esc(f.get("title", ""))}</summary>'
+                f'{render_evidence_card(f, ctx)}</details></td>'
                 f'<td class="num" data-label="Evidence">{int(f.get("evidence_count") or 1)}</td>'
                 f'<td class="mono date" data-label="Last seen">{_esc(last_seen)}</td>'
                 f'<td data-label="Sample">{sample_html}</td>'
@@ -3473,7 +3881,9 @@ def build_html(
     *,
     customer: str | None,
     operator: str | None,
+    local_links: bool = False,
 ) -> str:
+    local_links = _effective_local_links(local_links)
     envelopes = load_evidence(evidence_root)
     discovery = envelopes.get("discovery")
     runs_list = load_collectors_run(evidence_root)
@@ -3491,7 +3901,9 @@ def build_html(
     posture_grid = render_posture_grid(envelopes)
     tool_names = detected_tool_names(envelopes, tools_rows)
 
-    findings_tabs, findings_panels = render_findings_section(findings)
+    findings_tabs, findings_panels = render_findings_section(
+        findings, evidence_root=evidence_root, local_links=local_links
+    )
     appendix_rows, appendix_note = render_appendix_grouped(findings)
 
     secrets_env = envelopes.get("secrets-scan")
@@ -3551,7 +3963,7 @@ def build_html(
     <header class="sh">
       <div class="kicker"><span class="num">/03</span><span class="kicker-label">FINDINGS</span></div>
       <h2 class="h2">{sum(counts.values())} findings across {category_count} categories.</h2>
-      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples stay redacted. Secret-scanner hits are grouped by rule and redacted value, with the hit count in the evidence column. Likely test values are labeled and counted as low. Per-hit detail stays in the local CSV.</p>
+      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples stay redacted. Secret-scanner hits are grouped by rule and redacted value, with the hit count in the evidence column. Likely test values are labeled and counted as low. Click a finding title to expand it: the row shows the redacted sample and the file and line where the scanner recorded one.</p>
     </header>
     <div class="sev-bar">
       <div class="hdr">
@@ -3567,7 +3979,7 @@ def build_html(
     <header class="sh" style="margin-top: 48px;">
       <div class="kicker"><span class="num">/08</span><span class="kicker-label">APPENDIX</span></div>
       <h2 class="h2">Evidence index</h2>
-      <p class="sub">Secret-scanner hits collapse to one row per rule and redacted value, with a hit count. Rows labeled likely test value were downgraded to low and kept. Full per-hit detail stays in the local CSV, not in this page.</p>
+      <p class="sub">Secret-scanner hits collapse to one row per rule and redacted value, with a hit count. Rows labeled likely test value were downgraded to low and kept. Expand a finding row above for the redacted sample and the file and line where the scanner recorded one.</p>
     </header>
     {appendix_note}
     <div class="table-wrap appendix-table" style="max-height: none;">
@@ -3624,17 +4036,26 @@ def build_html(
 </section>"""
 
     title = _esc(f"{customer_name} · AI Coding Tool Exposure Review")
+    noindex_meta = '<meta name="robots" content="noindex" />' if local_links else ""
+    local_banner = (
+        '<div class="local-links-banner" role="note">Contains local file paths. '
+        "Don't share this file. Build without -LocalLinks for a shareable copy.</div>"
+        if local_links
+        else ""
+    )
     html_doc = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>{title}</title>
+  {noindex_meta}
   <style>
 {css}
   </style>
 </head>
 <body>
+  {local_banner}
   <header class="report-summary" id="top">
     <div class="wrap">
       <div class="mono-eyebrow"><span>ENDPOINT POSTURE BRIEFING</span></div>
@@ -3693,6 +4114,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", required=True, help="Output HTML path")
     parser.add_argument("--customer", default=None, help="Customer name override")
     parser.add_argument("--operator", default=None, help="Operator name override")
+    parser.add_argument(
+        "--local-links",
+        action="store_true",
+        help="Show full local paths with Copy path and folder links (do not share the output)",
+    )
     return parser
 
 
@@ -3706,6 +4132,7 @@ def main() -> int:
             root,
             customer=args.customer,
             operator=args.operator,
+            local_links=args.local_links,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
