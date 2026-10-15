@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote
 
+import compressed
 import paths
 from common import (
     APPDATA,
@@ -301,10 +302,13 @@ def collect_claude_roots(buckets, include_tool_details, roots: list[Path], metri
 def collect_codex(buckets, include_tool_details, root):
     if not root.exists():
         return
-    for jsonl in root.rglob("*.jsonl"):
+    for jsonl in compressed.jsonl_files(root):
         try:
-            lines = jsonl.read_text(encoding="utf-8").splitlines()
-        except OSError:
+            # Plain or compressed (.jsonl.zst) rollout. Without a zstd backend
+            # a compressed rollout is skipped here; the codex collector reports
+            # the gap as codex.compressed_sessions_unreadable.
+            lines = compressed.read_text(jsonl).splitlines()
+        except (OSError, compressed.ZstdUnavailable, compressed.TooLarge):
             continue
         for raw in lines:
             try:

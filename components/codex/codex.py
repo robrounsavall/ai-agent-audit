@@ -4,7 +4,8 @@ Codex permission and session collector.
 Usage:
     python codex.py --evidence-root ./audit-run [--dry-run]
 
-Reads ~/.codex/sessions JSONL rollouts for approval requests and approved prefixes.
+Reads ~/.codex/sessions JSONL rollouts (plain .jsonl and the Codex app's
+compressed .jsonl.zst) for approval requests and approved prefixes.
 Checks config.toml and auth.json for presence (not token values).
 """
 
@@ -12,12 +13,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import tomllib
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+import compressed
 import paths
 from codex_permissions import collect_permissions
 from common import (
@@ -25,7 +29,6 @@ from common import (
     classify_rule,
     compute_scope_hash,
     finish_collector,
-    iter_jsonl,
     make_envelope,
     make_finding,
     make_rule,
@@ -36,7 +39,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 COLLECTOR = "codex"
 
@@ -533,7 +536,49 @@ def detect_auth_method(auth_json: Path) -> str:
     return "present"
 
 
-def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
+def desktop_activity(localappdata: Path | None = None) -> dict:
+    """Codex Desktop (Microsoft Store app) presence and last-opened date.
+
+    Installed = a %LOCALAPPDATA%\\Packages\\OpenAI.Codex_* folder exists. Last
+    opened = newest mtime of its codex-desktop-*.log files. Stat only: log
+    contents are never read and no path reaches evidence. "Opened" is not
+    "used": session activity is reported separately as last_used.
+    """
+    if localappdata is None:
+        env_value = os.environ.get("LOCALAPPDATA")
+        if sys.platform != "win32" or not env_value:
+            return {"desktop_installed": False, "desktop_last_opened": ""}
+        localappdata = Path(env_value)
+    try:
+        packages = [p for p in (localappdata / "Packages").glob("OpenAI.Codex_*") if p.is_dir()]
+    except OSError:
+        packages = []
+    logs: list[Path] = []
+    for pkg in packages:
+        log_root = pkg / "LocalCache" / "Local" / "Codex" / "Logs"
+        try:
+            logs.extend(p for p in log_root.rglob("codex-desktop-*.log") if p.is_file())
+        except OSError:
+            continue
+    date, _ = newest_activity([(p, "desktop_logs") for p in logs])
+    return {"desktop_installed": bool(packages), "desktop_last_opened": date}
+
+
+def newest_activity(candidates: list[tuple[Path, str]]) -> tuple[str, str]:
+    """(YYYY-MM-DD, label) of the newest existing candidate by mtime. Stat only."""
+    newest = None
+    source = ""
+    for path, label in candidates:
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            continue
+        if newest is None or stamp > newest:
+            newest, source = stamp, label
+    return (datetime.fromtimestamp(newest).strftime("%Y-%m-%d") if newest is not None else "", source)
+
+
+def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None, localappdata: Path | None = None) -> dict:
     codex_sessions = tp.codex_sessions
     config_toml = tp.codex_config
     auth_json = tp.codex_auth
@@ -547,9 +592,10 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
         scope_hash,
         platform_detected=platform_detected,
     )
+    desktop = desktop_activity(localappdata)
 
     if not platform_detected:
-        envelope["summary"] = {"session_files": 0, "rules": 0}
+        envelope["summary"] = {"session_files": 0, "rules": 0, **desktop}
         return envelope
 
     rules: list[dict] = []
@@ -557,6 +603,24 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
     seen_rules: set[str] = set()
     approval_count = 0
     session_files = 0
+    # Plain .jsonl and compressed .jsonl.zst rollouts (plain wins when both
+    # exist). Without a zstd backend compressed files are still counted and
+    # their mtimes still feed last_used; a coverage finding names the gap.
+    rollout_files = compressed.jsonl_files(codex_sessions)
+    backend = compressed.zstd_backend()
+    compressed_count = sum(1 for p in rollout_files if compressed.is_compressed(p))
+    unreadable = compressed_count if backend is None else 0
+    # Last used: newest mtime across rollouts, session_index.jsonl and the
+    # state_*.sqlite databases. Stat only; none of these are opened here.
+    try:
+        state_dbs = list(tp.codex_home.glob("state_*.sqlite"))
+    except OSError:
+        state_dbs = []
+    last_used, last_used_source = newest_activity(
+        [(p, "sessions") for p in rollout_files]
+        + [(tp.codex_home / "session_index.jsonl", "session_index")]
+        + [(p, "state_db") for p in state_dbs]
+    )
     seen_prefix_blocks: set[str] = set()
 
     # Repeated session approval events collapse into one finding per id, with
@@ -584,10 +648,12 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
             if not agg["last"] or ts > agg["last"]:
                 agg["last"] = ts
 
-    if codex_sessions.exists():
-        for jsonl in codex_sessions.rglob("*.jsonl"):
+    if rollout_files:
+        for jsonl in rollout_files:
             session_files += 1
-            for line_no, obj in iter_jsonl(jsonl):
+            if compressed.is_compressed(jsonl) and backend is None:
+                continue
+            for line_no, obj in compressed.iter_jsonl(jsonl):
                 ts = parse_iso(obj.get("timestamp"))
                 payload = obj.get("payload", {})
 
@@ -680,6 +746,16 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
                             )
                         )
 
+    if unreadable:
+        findings.append(make_finding(
+            "codex.compressed_sessions_unreadable", "medium", "General Tooling",
+            f"{unreadable} compressed Codex session file(s) (.jsonl.zst) could not be read: "
+            f"this needs {compressed.UNAVAILABLE_HINT}. Approval requests and findings from "
+            "those sessions are missing from this report; re-run with Python 3.14+.",
+            evidence_count=unreadable,
+            tags=["coverage_gap"],
+        ))
+
     # Flush aggregated session events: one finding per id with evidence_count.
     for finding_id, agg in event_findings.items():
         findings.append(
@@ -758,6 +834,12 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
     envelope["findings"] = findings
     envelope["summary"] = {
         "session_files": session_files,
+        "session_files_compressed": compressed_count,
+        "session_files_unreadable": unreadable,
+        "zstd_backend": backend or "none",
+        "last_used": last_used,
+        "last_used_source": last_used_source,
+        **desktop,
         "rules": len(rules),
         "approval_requests": approval_count,
         "findings": len(findings),

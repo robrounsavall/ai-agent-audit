@@ -9,7 +9,20 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- Codex: read compressed `.jsonl.zst` session rollouts. The Codex app
+  compresses sessions older than seven days, and aiscan used to report
+  0 sessions and 0 approvals for them. Without a zstd backend (Python 3.14+
+  or an installed `zstandard`) the files are still counted and the medium
+  finding `codex.compressed_sessions_unreadable` reports the gap. The
+  chat-history, pii-scan and secrets-scan collectors read them too
+  (codex 1.3.0, pii-scan 1.4.0).
+
+### Added
+
+- Codex "last used" now comes from session, index and state-file dates, and
+  the report shows a separate "Codex Desktop app" last-opened row.
 
 ## [0.2.0] - 2026-10-15
 

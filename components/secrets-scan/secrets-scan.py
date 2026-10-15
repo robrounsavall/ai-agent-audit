@@ -27,6 +27,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import compressed
 from common import (
     add_base_args,
     compute_scope_hash,
@@ -364,22 +365,53 @@ def collect(
     file_counts: Counter[str] = Counter()
     scan_errors: list[str] = []
 
-    for target in targets:
-        if scanner_kind.startswith("betterleaks"):
-            major = 1 if scanner_kind == "betterleaks-v1" else 2
-            hits, error = run_betterleaks(target, scanner_bin, major)
-            if error:
-                scan_errors.append(error)
-        elif scanner_kind == "gitleaks":
-            hits = run_gitleaks(target, scanner_bin)
-        else:
-            hits = run_trufflehog(target, scanner_bin)
-        for hit in hits:
-            normalized = normalize_hit(scanner_kind, hit)
-            all_hits.append(normalized)
-            rule_counts[normalized["rule"]] += 1
-            if normalized["file"]:
-                file_counts[normalized["file"]] += 1
+    # Compressed Codex rollouts (*.jsonl.zst) are opaque to the scanners:
+    # stage decompressed copies under raw/tmp (never next to the originals),
+    # scan them, report the original .zst path, and always delete the copies.
+    # Repo roots are not walked for .zst (they are only in transcript dirs).
+    staging = raw_root / "tmp" / "secrets-scan-zst"
+    zst_sources = [t for t in targets if t not in existing_repo_roots]
+    staged = []
+    staged_map = {}
+    zst_unreadable = 0
+    try:
+        staged, staged_map, zst_unreadable = compressed.stage_compressed(zst_sources, staging)
+        for target in targets + staged:
+            if scanner_kind.startswith("betterleaks"):
+                major = 1 if scanner_kind == "betterleaks-v1" else 2
+                hits, error = run_betterleaks(target, scanner_bin, major)
+                if error:
+                    scan_errors.append(error)
+            elif scanner_kind == "gitleaks":
+                hits = run_gitleaks(target, scanner_bin)
+            else:
+                hits = run_trufflehog(target, scanner_bin)
+            for hit in hits:
+                normalized = normalize_hit(scanner_kind, hit)
+                reported_path = Path(normalized["file"])
+                if not reported_path.is_absolute():
+                    reported_path = Path(target) / reported_path
+                if target not in staged and compressed.is_under(reported_path, staging):
+                    continue  # staged copy seen via an enclosing target; counted once below
+                normalized["file"] = compressed.map_back(normalized["file"], staged_map, target)
+                all_hits.append(normalized)
+                rule_counts[normalized["rule"]] += 1
+                if normalized["file"]:
+                    file_counts[normalized["file"]] += 1
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    if zst_unreadable:
+        coverage_findings.append(
+            make_finding(
+                "secrets-scan.compressed_files_unreadable",
+                "medium",
+                "Secrets Exposure",
+                f"{zst_unreadable} compressed transcript file(s) (.jsonl.zst) were not "
+                f"scanned for secrets: this needs {compressed.UNAVAILABLE_HINT}",
+                evidence_count=zst_unreadable,
+                tags=["coverage_gap"],
+            )
+        )
 
     if raw_out_dir is not None:
         write_raw_outputs(raw_out_dir, all_hits, rule_counts, file_counts)
@@ -391,7 +423,7 @@ def collect(
                 "secrets-scan.scanner_error",
                 "medium",
                 "Secrets Exposure",
-                f"{scanner_name} did not finish on {len(scan_errors)} of {len(targets)} "
+                f"{scanner_name} did not finish on {len(scan_errors)} of {len(targets) + len(staged)} "
                 f"scan targets; hits from those targets are missing ({scan_errors[0]})",
                 tags=["env_read"],
             )
@@ -419,6 +451,8 @@ def collect(
         **({"scanner_mode": scanner_kind} if scanner_kind != scanner_name else {}),
         "hits": len(all_hits),
         "targets": len(targets),
+        "compressed_files_staged": len(staged_map),
+        "compressed_files_unreadable": zst_unreadable,
         **{f"rule_{k}": v for k, v in rule_counts.items()},
     }
     return envelope, True, all_hits
