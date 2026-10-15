@@ -40,14 +40,21 @@ from pathlib import Path
 from common import APPDATA, USERPROFILE, sha256_short
 
 # Override units and their config keys / env vars.
-OVERRIDE_KEYS = ("claude_home", "codex_home", "cursor_projects", "cursor_db", "grok_home")
+OVERRIDE_KEYS = (
+    "claude_home",
+    "codex_home",
+    "cursor_projects",
+    "cursor_db",
+    "grok_home",
+    "vscode_root",
+)
 ENV_VARS = {
     "claude_home": "CLAUDE_CONFIG_DIR",
     "codex_home": "CODEX_HOME",
     "grok_home": "GROK_HOME",
 }
 # Source label per override unit, set during resolution.
-_SOURCE_UNITS = ("claude", "codex", "cursor_projects", "cursor_db", "grok")
+_SOURCE_UNITS = ("claude", "codex", "cursor_projects", "cursor_db", "grok", "vscode")
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "paths.json"
 
@@ -79,7 +86,13 @@ class ToolPaths:
     # root was found or the file does not exist. No CLI/env override (SCHEMA
     # boundary: derived from cwd, never persisted).
     grok_project_config: Path | None
-    # Safe source label per override unit (claude|codex|cursor_projects|cursor_db|grok)
+    # VS Code (surface for Copilot Chat and other AI extensions); derives from root
+    vscode_root: Path = APPDATA / "Code"
+    vscode_settings: Path = APPDATA / "Code" / "User" / "settings.json"
+    vscode_global_storage: Path = APPDATA / "Code" / "User" / "globalStorage"
+    vscode_workspace_storage: Path = APPDATA / "Code" / "User" / "workspaceStorage"
+    vscode_logs: Path = APPDATA / "Code" / "logs"
+    # Safe source label per override unit (claude|codex|cursor_projects|cursor_db|grok|vscode)
     sources: dict[str, str] = field(default_factory=dict)
 
 
@@ -148,6 +161,8 @@ def _default_for(unit: str) -> Path:
         return APPDATA / "Cursor" / "User" / "globalStorage" / "state.vscdb"
     if unit == "grok_home":
         return USERPROFILE / ".grok"
+    if unit == "vscode_root":
+        return APPDATA / "Code"
     raise ValueError(unit)
 
 
@@ -195,6 +210,7 @@ def resolve_tool_paths(
     cursor_projects, cursor_proj_src = _pick("cursor_projects", cli, config, None)
     cursor_db, cursor_db_src = _pick("cursor_db", cli, config, None)
     grok_home, grok_src = _pick("grok_home", cli, config, os.environ.get("GROK_HOME"))
+    vscode_root, vscode_src = _pick("vscode_root", cli, config, None)
 
     paths = ToolPaths(
         claude_home=claude_home,
@@ -214,12 +230,18 @@ def resolve_tool_paths(
         grok_logs=grok_home / "logs",
         grok_auth=grok_home / "auth.json",
         grok_project_config=resolve_grok_project_config(),
+        vscode_root=vscode_root,
+        vscode_settings=vscode_root / "User" / "settings.json",
+        vscode_global_storage=vscode_root / "User" / "globalStorage",
+        vscode_workspace_storage=vscode_root / "User" / "workspaceStorage",
+        vscode_logs=vscode_root / "logs",
         sources={
             "claude": claude_src,
             "codex": codex_src,
             "cursor_projects": cursor_proj_src,
             "cursor_db": cursor_db_src,
             "grok": grok_src,
+            "vscode": vscode_src,
         },
     )
     _warn_missing_explicit_overrides(paths, cli, config)
@@ -240,6 +262,7 @@ def _warn_missing_explicit_overrides(paths: ToolPaths, cli: dict, config: dict) 
         "cursor_projects": paths.cursor_projects,
         "cursor_db": paths.cursor_db,
         "grok_home": paths.grok_home,
+        "vscode_root": paths.vscode_root,
     }
     for unit in explicit:
         target = unit_to_attr.get(unit)
@@ -277,6 +300,8 @@ _DATA_PATHS = {
     "cursor_appdata_mcp": ("cursor_appdata_mcp", "cursor_db", "mcp.json"),
     "shared_mcp": ("shared_mcp", "cursor_projects", "mcp.json"),
     "grok_sessions": ("grok_sessions", "grok", "summary.json"),
+    "vscode_settings": ("vscode_settings", "vscode", "settings.json"),
+    "vscode_chat_sessions": ("vscode_workspace_storage", "vscode", "*.jsonl"),
 }
 
 
@@ -328,6 +353,11 @@ def add_path_args(parser: argparse.ArgumentParser) -> None:
     )
     group.add_argument("--grok-home", default=None, help="Grok Build home dir (default ~/.grok)")
     group.add_argument(
+        "--vscode-root",
+        default=None,
+        help="VS Code data dir for Copilot/AI extension audit (default %%APPDATA%%/Code)",
+    )
+    group.add_argument(
         "--paths-config", default=None, help="JSON file overriding any of the five roots"
     )
 
@@ -340,6 +370,7 @@ def overrides_from_args(args: argparse.Namespace) -> dict:
         "cursor_projects": getattr(args, "cursor_projects", None),
         "cursor_db": getattr(args, "cursor_db", None),
         "grok_home": getattr(args, "grok_home", None),
+        "vscode_root": getattr(args, "vscode_root", None),
     }
 
 
@@ -363,4 +394,5 @@ def paths_to_cli_args(paths: ToolPaths) -> list[str]:
         "--cursor-projects", str(paths.cursor_projects),
         "--cursor-db", str(paths.cursor_db),
         "--grok-home", str(paths.grok_home),
+        "--vscode-root", str(paths.vscode_root),
     ]

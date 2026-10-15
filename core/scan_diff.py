@@ -123,6 +123,10 @@ _RULE_FIELDS = (
 )
 
 
+# copilot (collector 1.0.0) was replaced by the vscode surface collector.
+LEGACY_COLLECTOR_ALIASES = {"copilot": "vscode"}
+
+
 def load_scan(root: str | Path) -> dict[str, dict[str, Any]]:
     """Load collector envelopes from ``<root>/evidence``, skipping changes.json."""
     evidence = Path(root) / "evidence"
@@ -138,6 +142,12 @@ def load_scan(root: str | Path) -> dict[str, dict[str, Any]]:
         name = str(data.get("collector") or path.stem)
         if name == COLLECTOR:
             continue
+        legacy_target = LEGACY_COLLECTOR_ALIASES.get(name)
+        if legacy_target:
+            # A scan from before the vscode collector: compare it as vscode.
+            if legacy_target in envelopes or (evidence / f"{legacy_target}.json").exists():
+                continue
+            name = legacy_target
         envelopes[name] = data
     return envelopes
 

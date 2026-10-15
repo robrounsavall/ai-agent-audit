@@ -58,7 +58,7 @@ today?**
 | `cowork` | `%APPDATA%\Claude` (Claude desktop app) | Cowork session workspaces: transcripts, outputs, Office preview cache (if present), cloud bridging, claude.ai webview local-state presence |
 | `cursor` | Cursor `state.vscdb` + project data | permission posture, MCP configuration |
 | `codex` | `~/.codex` sessions + `config.toml` | approval events, trusted projects, sandbox/telemetry posture |
-| `copilot` | VS Code / JetBrains Copilot settings | enable state, exclusions, telemetry |
+| `vscode` | VS Code user + workspace settings, `.vscode/mcp.json`, extensions, chat-session metadata; JetBrains Copilot config | Copilot enable state/SKU, agent-mode auto-approve, MCP servers, workspace trust, AI extensions, chat-session counts (no prompt text). Replaces `copilot` |
 | `grok` | `~/.grok/config.toml` + session metadata | permission mode (always-approve/yolo), MCP servers |
 | `grok-bot` | `%APPDATA%\Grok Bot` presence, sizes, and mtimes | desktop app data, secrets-store and lockfile presence, newest activity. Local execution is reported unknown, not absent |
 | `chat-history` | all transcript sources | volume, retention, secret-hit indicators (content stays in local `raw/`) |
@@ -171,7 +171,7 @@ components/
   claude/             # collector + tests + fixtures + README
   cursor/
   codex/
-  copilot/
+  vscode/
   grok/               # Grok Build (~/.grok), not the Grok Bot desktop app
   grok-bot/           # Grok Bot desktop presence (AppData names, contents unread)
   chat-history/

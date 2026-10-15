@@ -83,7 +83,12 @@ SUPPORTED_MAJOR = 1
 # with load_changes_envelope and must not treat it as another tool.
 _NON_COLLECTOR_ENVELOPES = {"changes"}
 
-PLATFORM_COLLECTORS = ("claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot")
+PLATFORM_COLLECTORS = ("claude", "cowork", "cursor", "codex", "vscode", "grok", "grok-bot")
+
+# The copilot collector (v1.0.0) was replaced by the vscode surface collector.
+# Older evidence folders still carry copilot.json; load it under the new key so
+# earlier scans keep rendering and diffing.
+LEGACY_COLLECTOR_ALIASES = {"copilot": "vscode"}
 
 
 def _is_detected(env: dict[str, Any] | None) -> bool:
@@ -93,7 +98,7 @@ def _is_detected(env: dict[str, Any] | None) -> bool:
 def _visible_platform_collectors(envelopes: dict[str, dict[str, Any]]) -> tuple[str, ...]:
     return tuple(
         key for key in PLATFORM_COLLECTORS
-        if not (key == "copilot" and not _is_detected(envelopes.get(key)))
+        if not (key == "vscode" and not _is_detected(envelopes.get(key)))
     )
 
 
@@ -102,7 +107,7 @@ TOOL_LABELS = {
     "cowork": "Claude Cowork",
     "cursor": "Cursor",
     "codex": "Codex Desktop",
-    "copilot": "GitHub Copilot",
+    "vscode": "VS Code / Copilot",
     "grok": "Grok Build",
     "grok-bot": "Grok Bot",
     "chat-history": "Chat History",
@@ -119,7 +124,10 @@ COLLECTOR_PURPOSES = {
     "cowork": ("Cowork posture", "Claude desktop app session workspaces, preview cache, and cloud bridging"),
     "cursor": ("Cursor posture", "Cursor local state, durable rules, and approval events"),
     "codex": ("Codex posture", "Codex config, trusted projects, and MCP posture"),
-    "copilot": ("GitHub Copilot posture", "Copilot local settings detection"),
+    "vscode": (
+        "VS Code posture",
+        "Copilot settings, agent mode, MCP, AI extensions, and chat-session metadata",
+    ),
     "git-posture": ("Git posture", "Local repository hygiene checks"),
     "grok": ("Grok Build posture", "Grok Build config and session posture"),
     "grok-bot": (
@@ -653,6 +661,11 @@ def load_evidence(evidence_root: Path) -> dict[str, dict[str, Any]]:
         name = str(data.get("collector") or path.stem)
         if name in _NON_COLLECTOR_ENVELOPES:
             continue
+        legacy_target = LEGACY_COLLECTOR_ALIASES.get(name)
+        if legacy_target:
+            if legacy_target in envelopes or (evidence_dir / f"{legacy_target}.json").exists():
+                continue
+            name = legacy_target
         major = _parse_major(str(data.get("version", "")))
         if major is None or major != SUPPORTED_MAJOR:
             raise ValueError(
@@ -799,7 +812,9 @@ def _platform_chat_metric(chat_sum: dict[str, Any], platform_key: str, metric: s
         if cursor is None and composer is None:
             return None
         return int(cursor or 0) + int(composer or 0)
-    key = f"{platform_key}_{metric}"
+    # chat-history keeps the transcript source name (copilot) for VS Code chats.
+    chat_key = "copilot" if platform_key == "vscode" else platform_key
+    key = f"{chat_key}_{metric}"
     if key not in chat_sum:
         return None
     return int(chat_sum.get(key) or 0)
@@ -986,7 +1001,7 @@ def build_tools_table(
         detected = disc.get("detected")
         if detected is None:
             detected = bool(env and env.get("platform_detected"))
-        if key == "copilot" and not detected:
+        if key == "vscode" and not detected:
             continue
         version = disc.get("version") or (env or {}).get("summary", {}).get("version", "unknown")
         if version == "unknown" and env:
@@ -1012,7 +1027,7 @@ def build_tools_table(
                 extra = "local state found"
             elif key == "grok":
                 extra = "session metadata found"
-            elif key == "copilot":
+            elif key == "vscode":
                 extra = "settings found"
         rows.append(
             {
@@ -3122,7 +3137,7 @@ def render_collectors_table(
     rows = []
     for name in sorted(envelopes.keys()):
         env = envelopes[name]
-        if name == "copilot" and not _is_detected(env):
+        if name == "vscode" and not _is_detected(env):
             continue
         run = run_map.get(name)
         version = env.get("version", run.get("version", "unknown") if run else "unknown")

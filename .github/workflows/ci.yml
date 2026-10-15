@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 
 on:
   push:
@@ -14,10 +14,10 @@ jobs:
         component:
           - core
           - claude
+          - cowork
           - cursor
           - codex
-          - copilot
-          - cowork
+          - vscode
           - grok
           - grok-bot
           - chat-history

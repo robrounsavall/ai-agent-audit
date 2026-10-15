@@ -1,10 +1,10 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Run unit tests for one component (or core / integration).
 
 .PARAMETER Name
-    Component name: claude, cowork, cursor, codex, copilot, grok, grok-bot,
+    Component name: claude, cowork, cursor, codex, vscode, grok, grok-bot,
     chat-history, git-posture, secrets-scan, pii-scan, cloud-agents,
     telemetry-import, core, integration, all.
 
@@ -16,7 +16,7 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet(
-        "claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot",
+        "claude", "cowork", "cursor", "codex", "vscode", "grok", "grok-bot",
         "chat-history", "git-posture", "secrets-scan", "pii-scan",
         "cloud-agents", "telemetry-import", "core", "integration", "all"
     )]
@@ -67,7 +67,7 @@ $failed = 0
 
 if ($Name -eq "all") {
     $order = @(
-        "core", "claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot",
+        "core", "claude", "cowork", "cursor", "codex", "vscode", "grok", "grok-bot",
         "chat-history", "git-posture", "secrets-scan", "pii-scan",
         "cloud-agents", "telemetry-import", "integration"
     )

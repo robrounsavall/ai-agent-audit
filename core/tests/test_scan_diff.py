@@ -542,7 +542,9 @@ class TestSyntheticPrevious(unittest.TestCase):
         self.assertIn("data_to_zero", {item["kind"] for item in collectors["cursor"]["drift"]})
         self.assertIn("not_detected", {item["kind"] for item in collectors["cowork"]["drift"]})
         self.assertIn("version_changed", {item["kind"] for item in collectors["grok"]["drift"]})
-        self.assertEqual(collectors["copilot"]["platform"]["change"], "newly_detected")
+        # The sample still ships a legacy copilot.json; it loads as vscode.
+        self.assertNotIn("copilot", collectors)
+        self.assertEqual(collectors["vscode"]["platform"]["change"], "newly_detected")
         added = {item["id"] for item in collectors["claude"]["findings"]["added"]}
         self.assertIn("claude.permission.skip_dangerous_prompt", added)
         resolved = {item["id"] for item in collectors["claude"]["findings"]["resolved"]}
