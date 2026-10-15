@@ -162,8 +162,8 @@ class TestClickableEvidence(unittest.TestCase):
     def test_local_file_uri(self):
         uri = self.briefing.local_file_uri
         self.assertEqual(
-            uri("C:\\Users\\Robert Rounsavall\\.claude\\settings.json"),
-            "file:///C:/Users/Robert%20Rounsavall/.claude/settings.json",
+            uri("C:\\Users\\Test User\\.claude\\settings.json"),
+            "file:///C:/Users/Test%20User/.claude/settings.json",
         )
         self.assertEqual(
             uri("C:\\Users\\Test User\\proj#1\\100% done\\x.txt"),
@@ -175,10 +175,10 @@ class TestClickableEvidence(unittest.TestCase):
         )
         self.assertEqual(uri("D:\\café\\ü.txt"), "file:///D:/caf%C3%A9/%C3%BC.txt")
         self.assertEqual(
-            self.briefing.local_folder_uri("C:\\Users\\Robert Rounsavall\\.claude\\settings.json"),
-            "file:///C:/Users/Robert%20Rounsavall/.claude/",
+            self.briefing.local_folder_uri("C:\\Users\\Test User\\.claude\\settings.json"),
+            "file:///C:/Users/Test%20User/.claude/",
         )
-        self.assertEqual(uri("C:\\Users\\x", is_dir=True), "file:///C:/Users/x/")
+        self.assertEqual(uri("C:\\Users\\you", is_dir=True), "file:///C:/Users/you/")
         self.assertEqual(uri("/home/me/dir", is_dir=True), "file:///home/me/dir/")
         self.assertEqual(uri("/home/me/a b.txt"), "file:///home/me/a%20b.txt")
         self.assertIsNone(uri("relative\\path.txt"))
@@ -277,7 +277,7 @@ class TestClickableEvidence(unittest.TestCase):
 
     # 8
     def test_hostile_strings_are_escaped(self):
-        evil = 'C:\\Users\\x\\<script>alert(1)</script>"\'.env'
+        evil = 'C:\\Users\\you\\<script>alert(1)</script>"\'.env'
         self.root.joinpath("evidence", "codex.json").write_text(
             json.dumps(
                 _envelope(
@@ -416,7 +416,7 @@ class TestClickableEvidence(unittest.TestCase):
         self._set_codex(
             tags=[tok, "/var/private/stuff/x.env"],
             raw_evidence_ref="/var/private/" + tok,
-            file="C:\\Users\\bob\\" + tok,
+            file="C:\\Users\\you\\" + tok,
             owner=email,
             extra_note="mail " + email,
             **{"bad key " + tok: "dropped", "ok.key": "shown", "nest": {"a": 1}},
