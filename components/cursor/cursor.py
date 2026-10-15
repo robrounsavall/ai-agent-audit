@@ -19,9 +19,9 @@ from pathlib import Path
 
 import paths
 from common import (
-    USERPROFILE,
     add_base_args,
     compute_scope_hash,
+    default_repo_roots,
     finish_collector,
     make_envelope,
     make_finding,
@@ -51,14 +51,6 @@ KEYWORD_RE = re.compile(
 )
 LOCALHOST_RE = re.compile(r"localhost|127\.0\.0\.1|::1", re.I)
 
-DEFAULT_REPO_ROOTS = [
-    USERPROFILE / "repos",
-    USERPROFILE / "code",
-    USERPROFILE / "src",
-    USERPROFILE / "projects",
-    USERPROFILE / "source",
-]
-
 # Controlled settings_source labels — never full filesystem paths.
 MCP_SOURCE_LABELS = {
     "cursor_user": "user mcp.json",
@@ -66,10 +58,6 @@ MCP_SOURCE_LABELS = {
     "shared": "shared mcp.json",
     "project": "project mcp.json",
 }
-
-
-def default_repo_roots() -> list[Path]:
-    return [p for p in DEFAULT_REPO_ROOTS if p.exists()]
 
 
 def _parse_json_value(value):
@@ -619,7 +607,8 @@ def main() -> None:
         "--repo-roots",
         default=None,
         help="Comma-separated repo scan roots for project .cursor/mcp.json "
-        "(default: ~/repos,~/code,~/src,~/projects,~/source)",
+        "(default: common code dirs under the user profile, e.g. ~/repos, "
+        "~/projects, ~/cursor-projects; see common.DEFAULT_REPO_ROOT_NAMES)",
     )
     args = parser.parse_args()
     evidence_root = validate_evidence_root(args.evidence_root)
