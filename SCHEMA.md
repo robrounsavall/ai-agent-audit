@@ -196,7 +196,7 @@ before sharing it.
 | `copilot` | `%APPDATA%\Code\User\settings.json`, JetBrains config | NEW. Enable state, exclude rules, telemetry, SKU. |
 | `chat-history` | All 4 transcript sources | Writes raw markdown to `raw/chat-history/`. Evidence is counts + secret-hit findings only. |
 | `git-posture` | Repos under user-specified roots | `.env` in history, hook presence, branch protection (opt-in `gh`), large blobs. |
-| `secrets-scan` | `raw/chat-history/` + repo roots | gitleaks wrapper. Findings only, redacted samples. |
+| `secrets-scan` | `raw/chat-history/` + repo roots | Betterleaks, gitleaks, or trufflehog wrapper (first one found). `summary.scanner` names it; `summary.scanner_mode` is `betterleaks-v1` or `betterleaks-v2` for Betterleaks. Betterleaks validation is always forced off. Findings only, redacted samples. |
 | `cloud-agents` | Official Cloud Agents API, `GET https://api.cursor.com` only, with a user-supplied `CURSOR_API_KEY` | Opt-in. Not part of `aiscan all`. Does not read the Cursor IDE session token or call `cursor.com/api/dashboard`. Does not call `GET /v1/repositories` or the enterprise Admin API. |
 | `telemetry` | Local files only: OTLP JSON / JSON-lines (`--otel-file`) and Splunk JSON or CSV exports (`--splunk-export`) | Opt-in `aiscan telemetry`. Not part of `aiscan all`. Counts tool decisions and usage. Does not store prompts, commands, or secret values. `cost_cents` is copied from a Cursor dashboard usage export and is never estimated from tokens. |
 | `changes` | Derived. Not a collector. `python core/scan_diff.py` compares two evidence roots and writes `evidence/changes.json` | The briefing loader skips this file when it walks collector envelopes and passes it only to the changes section. |

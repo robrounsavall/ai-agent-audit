@@ -63,7 +63,7 @@ today?**
 | `grok-bot` | `%APPDATA%\Grok Bot` presence, sizes, and mtimes | desktop app data, secrets-store and lockfile presence, newest activity. Local execution is reported unknown, not absent |
 | `chat-history` | all transcript sources | volume, retention, secret-hit indicators (content stays in local `raw/`) |
 | `git-posture` | repos under `~/repos`, `~/code`, `~/src`, `~/projects`, `~/source` | `.env` in history, hooks, ignore posture, large blobs |
-| `secrets-scan` | chat corpus + repo roots | gitleaks findings with redacted samples |
+| `secrets-scan` | chat corpus + repo roots | Betterleaks or gitleaks findings with redacted samples |
 | `pii-scan` | chat corpus | regulated-data indicators: cards (Luhn), SSNs, IBANs, emails, phones, public IPs |
 | `cloud-agents` (not in `all`) | Cursor Cloud Agents API (`GET https://api.cursor.com` only) | agent status, repos, branches, PR URLs, latest run, token totals. No dollar cost, no conversation text by default |
 | `telemetry` (not in `all`) | Local OTLP and Splunk export files | Approval counts and usage. Cursor `cost_cents` is labeled as from the Cursor dashboard usage export. Dollars are never estimated from tokens |
@@ -80,8 +80,15 @@ Every collector runs on that alone — pure stdlib, no pip install. One
 collector depends on extra tooling and reports a finding instead of results
 when it is missing:
 
-**`secrets-scan`** shells out to [gitleaks](https://github.com/gitleaks/gitleaks).
-Install it and make sure it is on PATH:
+**`secrets-scan`** shells out to the first scanner it finds:
+[Betterleaks](https://github.com/betterleaks/betterleaks) (`BETTERLEAKS_PATH`
+or PATH), then [gitleaks](https://github.com/gitleaks/gitleaks), then
+trufflehog. aiscan never turns on Betterleaks credential validation: it forces
+validation and analysis off on the command line and removes `BETTERLEAKS_VALIDATE` /
+`BETTERLEAKS_ANALYZE` from the scanner's environment, so found secrets are
+never sent anywhere. `scripts\get-betterleaks.ps1` downloads a pinned,
+checksum-verified Betterleaks to `%LOCALAPPDATA%\aiscan\tools` (opt-in, no
+admin). Or install gitleaks and make sure it is on PATH:
 
 ```powershell
 winget install Gitleaks.Gitleaks

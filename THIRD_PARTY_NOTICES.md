@@ -5,6 +5,7 @@ packages, none of which are bundled in this repository:
 
 | Dependency | License | Used by | Bundled? |
 |---|---|---|---|
+| [Betterleaks](https://github.com/betterleaks/betterleaks) | MIT | `secrets-scan` collector (external binary; optional `scripts/get-betterleaks.ps1` download) | No |
 | [gitleaks](https://github.com/gitleaks/gitleaks) | MIT | `secrets-scan` collector (external binary on PATH) | No |
 | [trufflehog](https://github.com/trufflesecurity/trufflehog) | AGPL-3.0 | optional alternative scanner (external binary, never linked) | No |
 
