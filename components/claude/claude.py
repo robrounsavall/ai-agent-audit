@@ -5,7 +5,9 @@ Usage:
     python claude.py --evidence-root ./audit-run [--scope all] [--dry-run]
 
 Reads ~/.claude/settings.json, settings.local.json, and project-level
-.claude/settings.local.json files. Emits permission rules and security findings.
+.claude/settings.local.json files. Emits permission rules and security findings,
+including the effective start permission mode (permissions.defaultMode, or the
+implicit auto default) and the Claude Code version seen in transcripts.
 
 Also reads the Claude desktop app MCP registry (%APPDATA%/Claude/
 claude_desktop_config.json) and flags ~/.claude side artifacts that persist
@@ -17,6 +19,7 @@ command log).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -43,13 +46,25 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "claude"
 
 LOCALHOST_RE = re.compile(r"localhost|127\.0\.0\.1|::1", re.I)
 WILDCARD_BASH_RE = re.compile(r"^Bash\([^)]*\*[^)]*\)$", re.I)
 CURL_WGET_RE = re.compile(r"^Bash\((curl|wget)\s*[:*]", re.I)
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+")
+AUTO_DEFAULT_MIN_VERSION = (2, 1, 283)
+MODE_ALIASES = {
+    "manual": "default",
+    "default": "default",
+    "bypass": "bypassPermissions",
+    "bypasspermissions": "bypassPermissions",
+    "acceptedits": "acceptEdits",
+    "dontask": "dontAsk",
+    "auto": "auto",
+    "plan": "plan",
+}
 OTEL_KEYS = {
     "CLAUDE_CODE_ENABLE_TELEMETRY",
     "OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -189,6 +204,74 @@ def discover_settings(
     return found
 
 
+def permission_mode_from_settings(data: dict) -> tuple[str, str]:
+    """Return (normalized_mode, key_path) for the start permission mode."""
+    permissions = data.get("permissions")
+    candidates = []
+    if isinstance(permissions, dict):
+        candidates.append(("permissions.defaultMode", permissions.get("defaultMode")))
+    candidates.append(("defaultMode", data.get("defaultMode")))
+    candidates.append(("permissionMode", data.get("permissionMode")))
+    for key_path, raw in candidates:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        value = raw.strip()
+        return MODE_ALIASES.get(value.lower(), value), key_path
+    return "", ""
+
+
+def _raw_mode(data: dict, key_path: str) -> str:
+    if key_path == "permissions.defaultMode":
+        return str(data["permissions"]["defaultMode"]).strip()
+    return str(data.get(key_path, "")).strip()
+
+
+def _setting_disabled(data: dict, key: str) -> bool:
+    permissions = data.get("permissions")
+    if not isinstance(permissions, dict):
+        return False
+    value = permissions.get(key)
+    return isinstance(value, str) and value.strip().lower() == "disable"
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    match = VERSION_RE.match(value)
+    return tuple(int(p) for p in match.group(0).split(".")) if match else ()
+
+
+def detect_claude_code_version(claude_projects: Path) -> str:
+    """Highest Claude Code version recorded in the newest transcripts, or ""."""
+    try:
+        files = sorted(
+            claude_projects.rglob("*.jsonl"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:5]
+    except OSError:
+        return ""
+    best: tuple[int, ...] = ()
+    for path in files:
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for _ in range(50):
+                    line = handle.readline()
+                    if not line:
+                        break
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    version = record.get("version") if isinstance(record, dict) else None
+                    if isinstance(version, str) and VERSION_RE.match(version):
+                        found = _version_tuple(version)
+                        if found > best:
+                            best = found
+                        break
+        except OSError:
+            continue
+    return ".".join(str(p) for p in best)
+
+
 def extract_rules_from_settings(
     scope: str,
     scope_label: str,
@@ -251,16 +334,54 @@ def extract_rules_from_settings(
                         )
                     )
 
-    default_mode = data.get("defaultMode") or data.get("permissionMode") or ""
-    if str(default_mode).lower() in ("bypasspermissions", "bypass"):
+    mode, mode_key = permission_mode_from_settings(data)
+    raw_mode = _raw_mode(data, mode_key) if mode_key else ""
+    is_local = scope == "project" or source_path.name == "settings.local.json"
+    if mode in ("auto", "bypassPermissions") and is_local:
+        findings.append(
+            make_finding(
+                "claude.permission.mode_not_applied",
+                "low",
+                "Shell Execution",
+                "Claude auto/bypass mode set in project or local settings, which Claude Code ignores",
+                sample_redacted=(
+                    f"{mode_key}={raw_mode}; file={source_path.name}; "
+                    "ignored by Claude Code 2.1.257+ (older versions may honor bypass)"
+                ),
+                tags=["mode_not_applied"],
+            )
+        )
+    elif mode == "bypassPermissions":
         findings.append(
             make_finding(
                 "claude.permission.bypass_mode",
                 "critical",
                 "Shell Execution",
                 "Claude default permission mode bypasses prompts",
-                sample_redacted=f"defaultMode={default_mode}",
+                sample_redacted=f"{mode_key}={raw_mode}",
                 tags=["unbounded_glob"],
+            )
+        )
+    elif mode == "auto":
+        findings.append(
+            make_finding(
+                "claude.permission.auto_mode",
+                "medium",
+                "Shell Execution",
+                "Claude default permission mode is auto: actions run without prompts after a classifier check",
+                sample_redacted=f"{mode_key}=auto",
+                tags=["auto_mode"],
+            )
+        )
+    elif mode == "acceptEdits":
+        findings.append(
+            make_finding(
+                "claude.permission.accept_edits_mode",
+                "low",
+                "Data Access",
+                "Claude default permission mode auto-accepts file edits",
+                sample_redacted=f"{mode_key}=acceptEdits",
+                tags=["auto_accept_edits"],
             )
         )
 
@@ -454,11 +575,21 @@ def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
     all_findings: list[dict] = []
     seen_finding_ids: set[str] = set()
     settings_envs: list[tuple[str, dict]] = []
+    user_mode = ""
+    user_mode_key = ""
+    auto_disabled = False
+    bypass_disabled = False
 
     for scope, scope_label, path in settings_files:
         data = load_json(path)
         if not data:
             continue
+        if scope == "user" and path.name == "settings.json":
+            user_mode, user_mode_key = permission_mode_from_settings(data)
+        auto_disabled = auto_disabled or _setting_disabled(data, "disableAutoMode")
+        bypass_disabled = bypass_disabled or _setting_disabled(
+            data, "disableBypassPermissionsMode"
+        )
         env = data.get("env", {})
         if isinstance(env, dict):
             settings_envs.append((f"{scope} {path.name}", env))
@@ -480,6 +611,90 @@ def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
         if finding["id"] not in seen_finding_ids:
             seen_finding_ids.add(finding["id"])
             all_findings.append(finding)
+
+    def drop_as_not_applied(finding_id: str, note: str) -> None:
+        nonlocal all_findings
+        if finding_id not in seen_finding_ids:
+            return
+        all_findings = [f for f in all_findings if f["id"] != finding_id]
+        seen_finding_ids.discard(finding_id)
+        if "claude.permission.mode_not_applied" in seen_finding_ids:
+            for existing in all_findings:
+                if existing["id"] == "claude.permission.mode_not_applied":
+                    prior = existing.get("sample_redacted") or ""
+                    existing["sample_redacted"] = f"{prior}; {note}" if prior else note
+                    break
+            return
+        seen_finding_ids.add("claude.permission.mode_not_applied")
+        all_findings.append(
+            make_finding(
+                "claude.permission.mode_not_applied",
+                "low",
+                "Shell Execution",
+                "Claude auto/bypass mode is set but disabled, so Claude Code does not apply it",
+                sample_redacted=note,
+                tags=["mode_not_applied"],
+            )
+        )
+
+    if bypass_disabled:
+        drop_as_not_applied(
+            "claude.permission.bypass_mode",
+            "bypassPermissions disabled by permissions.disableBypassPermissionsMode",
+        )
+    if auto_disabled:
+        drop_as_not_applied(
+            "claude.permission.auto_mode",
+            "auto disabled by permissions.disableAutoMode",
+        )
+
+    version = detect_claude_code_version(tp.claude_projects)
+    user_in_scope = scope_matches(scope_filter, "user")
+    if user_in_scope and not user_mode and not auto_disabled:
+        sample = (
+            "permissions.defaultMode=unset; implicit default=auto "
+            f"(Claude Code 2.1.283+); version={version or 'unknown'}"
+        )
+        old_version = bool(version) and _version_tuple(version) < AUTO_DEFAULT_MIN_VERSION
+        if old_version:
+            title = (
+                "No Claude permission mode is set, so interactive sessions may start in auto mode "
+                "(default on Pro/Max/Team plans before 2.1.283)"
+            )
+        else:
+            title = (
+                "No Claude permission mode is set, so interactive sessions start in auto mode "
+                "(no routine prompts; a classifier reviews actions)"
+            )
+        seen_finding_ids.add("claude.permission.auto_mode_default")
+        all_findings.append(
+            make_finding(
+                "claude.permission.auto_mode_default",
+                "medium",
+                "Shell Execution",
+                title,
+                sample_redacted=sample,
+                tags=["auto_mode"],
+            )
+        )
+
+    if not user_in_scope:
+        mode_label, mode_source = "", "not scanned (scope)"
+    elif user_mode:
+        mode_label = user_mode
+        if user_mode == "auto" and auto_disabled:
+            mode_label = "default (auto disabled)"
+        elif user_mode == "bypassPermissions" and bypass_disabled:
+            mode_label = "default (bypass disabled)"
+        mode_source = (
+            "settings.json permissions.defaultMode"
+            if user_mode_key == "permissions.defaultMode"
+            else f"settings.json {user_mode_key} (legacy)"
+        )
+    elif auto_disabled:
+        mode_label, mode_source = "default (auto disabled)", "built-in default"
+    else:
+        mode_label, mode_source = "auto (implicit default)", "built-in default"
 
     otel = claude_otel_summary(settings_envs)
     if otel["enabled"]:
@@ -512,6 +727,11 @@ def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
         "otel_service_name": str(otel.get("service_name") or ""),
         "otel_headers_configured": bool(otel.get("headers_configured")),
         "otel_sources": otel.get("sources") or [],
+        "permission_mode": mode_label,
+        "permission_mode_source": mode_source,
+        "claude_code_version": version,
+        "auto_mode_disabled": auto_disabled,
+        "bypass_mode_disabled": bypass_disabled,
     }
     return envelope
 

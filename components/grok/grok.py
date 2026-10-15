@@ -22,10 +22,10 @@ from pathlib import Path
 
 import paths
 from common import (
-    USERPROFILE,
     add_base_args,
     classify_rule,
     compute_scope_hash,
+    default_repo_roots,
     finish_collector,
     load_json,
     make_envelope,
@@ -56,18 +56,6 @@ MCP_EVENT_TYPES = frozenset(
         "mcp_server_error",
     }
 )
-
-DEFAULT_REPO_ROOTS = [
-    USERPROFILE / "repos",
-    USERPROFILE / "code",
-    USERPROFILE / "src",
-    USERPROFILE / "projects",
-    USERPROFILE / "source",
-]
-
-
-def default_repo_roots() -> list[Path]:
-    return [p for p in DEFAULT_REPO_ROOTS if p.exists()]
 
 
 def _is_localhost(url: str) -> bool:
@@ -671,7 +659,8 @@ def main() -> None:
         "--repo-roots",
         default=None,
         help="Comma-separated repo scan roots for project .grok/config.toml "
-        "(default: ~/repos,~/code,~/src,~/projects,~/source)",
+        "(default: common code dirs under the user profile, e.g. ~/repos, "
+        "~/projects, ~/cursor-projects; see common.DEFAULT_REPO_ROOT_NAMES)",
     )
     args = parser.parse_args()
     evidence_root = validate_evidence_root(args.evidence_root)
