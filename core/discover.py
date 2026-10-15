@@ -15,13 +15,14 @@ Three modes (mutually compatible; default is console):
                          No raw paths in the written file.
 
 Capability preflight (shown at top of console report):
-  gitleaks/trufflehog on PATH?  Secrets scan available?
+  betterleaks/gitleaks/trufflehog on PATH?  Secrets scan available?
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -38,9 +39,15 @@ __version__ = "1.0.0"
 # --------------------------------------------------------------------------- #
 
 def _check_secrets_scanner() -> tuple[bool, str]:
-    """Return (available, label). Checks gitleaks then trufflehog."""
-    for tool in ("gitleaks", "trufflehog"):
-        if shutil.which(tool):
+    """Return (available, label). Same order as secrets-scan: betterleaks,
+    gitleaks, then trufflehog (an explicit *_PATH variable counts)."""
+    for tool, env_var in (
+        ("betterleaks", "BETTERLEAKS_PATH"),
+        ("gitleaks", "GITLEAKS_PATH"),
+        ("trufflehog", "TRUFFLEHOG_PATH"),
+    ):
+        explicit = os.environ.get(env_var)
+        if (explicit and os.path.isfile(explicit)) or shutil.which(tool):
             return True, f"{tool} found"
     return False, "NOT available"
 

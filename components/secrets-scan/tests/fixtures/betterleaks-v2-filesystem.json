@@ -1,0 +1,63 @@
+{
+ "schema_version": "1",
+ "findings": [
+  {
+   "rule_id": "github-pat",
+   "rule_hash": "fa244a9a14a505f0a218c334c7164d3ebb2b39623b1fe71a2276b0a1a4f8837b",
+   "description": "Uncovered a GitHub Personal Access Token, potentially leading to unauthorized repository access and sensitive content exposure.",
+   "confidence": "high",
+   "match": {
+    "full": "ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE",
+    "value": "ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE",
+    "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "attributes": {
+    "resource": "fs.content"
+   },
+   "location": {
+    "path": "fixture/config.env",
+    "start_line": 2,
+    "end_line": 2,
+    "start_column": 14,
+    "end_column": 53
+   }
+  }
+ ],
+ "scan": {
+  "state": "complete",
+  "source": {
+   "type": "filesystem",
+   "targets": [
+    "fixture"
+   ]
+  },
+  "started": "2026-10-15T22:42:00Z",
+  "finished": "2026-10-15T22:42:01Z",
+  "betterleaks_version": "2.0.0-rc.2",
+  "config_hash": "86c537923c8763b0e1bfd5bc74280d33fabbdec98b629a4e9581f44d3bd4fad1",
+  "bytes_scanned": 76,
+  "num_findings": 1,
+  "confidence_counts": {
+   "high": 1,
+   "medium": 0,
+   "low": 0,
+   "none": 0,
+   "other": 0
+  },
+  "severity_counts": {
+   "high": 0,
+   "medium": 0,
+   "unknown": 0,
+   "none": 1
+  },
+  "status_counts": {
+   "valid": 0,
+   "invalid": 0,
+   "revoked": 0,
+   "needs_validation": 0,
+   "unknown": 0,
+   "error": 0,
+   "none": 1
+  }
+ }
+}

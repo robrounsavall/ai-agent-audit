@@ -126,7 +126,7 @@ COLLECTOR_PURPOSES = {
         "Grok Bot posture",
         "Grok Bot desktop presence, secrets-store and lockfile signals",
     ),
-    "secrets-scan": ("Secrets scan", "gitleaks scan over chat exports and repo roots"),
+    "secrets-scan": ("Secrets scan", "Secret scanner run over chat exports and repo roots"),
     "discovery": ("Discovery", "Local tool path and capability discovery"),
     "pii-scan": ("PII scan", "Regulated-data scan: cards, SSNs, IBANs, emails, phones, public IPs"),
     "cloud-agents": (
@@ -134,6 +134,20 @@ COLLECTOR_PURPOSES = {
         "Opt-in read-only inventory via the official Cloud Agents API (api.cursor.com)",
     ),
 }
+
+SCANNER_LABELS = {"betterleaks": "Betterleaks", "gitleaks": "gitleaks", "trufflehog": "trufflehog"}
+
+
+def secrets_scan_purpose(env: dict[str, Any] | None) -> str:
+    """Collection-scope text for secrets-scan, naming the scanner that ran."""
+    scanner = str(((env or {}).get("summary") or {}).get("scanner") or "")
+    if scanner == "none":
+        return "No secret scanner was installed; chat exports and repo roots were not scanned"
+    label = SCANNER_LABELS.get(scanner, scanner)
+    if not label:
+        return COLLECTOR_PURPOSES["secrets-scan"][1]
+    return f"{label} scan over chat exports and repo roots"
+
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
@@ -401,13 +415,16 @@ def likely_placeholder_reason(finding: dict[str, Any]) -> str | None:
             return "redacted sample matches a repeated example username and password"
 
     # generic-api-key sometimes matches the scanner's own name. The windows
-    # are what redact_sample keeps of gitleaks, trufflehog, or the two names
-    # written together (gitleaks...trufflehog -> gitl...ehog).
+    # are what redact_sample keeps of betterleaks, gitleaks, trufflehog, or two
+    # names written together (gitleaks...trufflehog -> gitl...ehog).
     if rule_name in {"generic-api-key", "generic"} or kind in {"generic-api-key", "generic"}:
-        if compact in {"gitl...ehog", "gitl...eaks", "truf...ehog", "truf...eaks"}:
-            return "redacted sample matches the literal scanner name gitleaks or trufflehog"
-        if compact in {"gitleaks", "trufflehog"}:
-            return "sample is the literal scanner name gitleaks or trufflehog"
+        if compact in {
+            "gitl...ehog", "gitl...eaks", "truf...ehog", "truf...eaks",
+            "bett...eaks", "bett...ehog",
+        }:
+            return "redacted sample matches a literal scanner name (betterleaks, gitleaks, or trufflehog)"
+        if compact in {"betterleaks", "gitleaks", "trufflehog"}:
+            return "sample is a literal scanner name (betterleaks, gitleaks, or trufflehog)"
         prefix = compact.split("...", 1)[0]
         if prefix in {"gpl-", "lgpl", "agpl", "gfdl"} or prefix.startswith(("gpl-", "lgpl", "agpl", "gfdl")):
             return "redacted sample starts with a license name (GPL, LGPL, AGPL, or GFDL)"
@@ -1333,7 +1350,7 @@ def render_cover_terminal(
     if env:
         s = env.get("summary") or {}
         hits = int(s.get("hits") or 0)
-        scanner = str(s.get("scanner") or "gitleaks")
+        scanner = str(s.get("scanner") or "unknown scanner")
         rows.append(("ok", "secrets", f"{scanner} · {hits} hits"))
 
     max_name = max((len(name) for _, name, _ in rows), default=0) + 1
@@ -3149,6 +3166,8 @@ def render_collectors_table(
         elif status == "error":
             status_label = "error"
         label, purpose = COLLECTOR_PURPOSES.get(name, (name, "Collector run"))
+        if name == "secrets-scan":
+            purpose = secrets_scan_purpose(env)
         rows.append(
             {
                 "html_lead": (

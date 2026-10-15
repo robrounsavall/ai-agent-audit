@@ -84,7 +84,7 @@ teams have no inventory of any of it. aiscan answers the first question:
 | `grok-bot` | `%APPDATA%\Grok Bot` presence, sizes, and mtimes | desktop app data, secrets-store and lockfile presence, newest activity. Local execution is reported unknown, not absent |
 | `chat-history` | all transcript sources | volume, retention, secret-hit indicators (content stays in local `raw/`) |
 | `git-posture` | repos under `-RepoRoots`, or by default whichever of `~/repos`, `~/code`, `~/src`, `~/projects`, `~/source`, `~/dev`, `~/git`, `~/work`, `~/workspace`, `~/cursor-projects`, `~/Documents/GitHub`, `~/Documents/repos` exist | `.env` in history, hooks, ignore posture, large blobs |
-| `secrets-scan` | chat corpus + repo roots | gitleaks (or trufflehog) findings with redacted samples. Needs one of them installed, see [Prerequisites](#prerequisites) |
+| `secrets-scan` | chat corpus + repo roots | Betterleaks, gitleaks, or trufflehog findings with redacted samples. Needs one of them installed, see [Prerequisites](#prerequisites) |
 | `pii-scan` | chat corpus | regulated-data indicators: cards (Luhn), SSNs, IBANs, emails, phones, public IPs |
 | `cloud-agents` (not in `all`) | Cursor Cloud Agents API (`GET https://api.cursor.com` only) | agent status, repos, branches, PR URLs, latest run, token totals. No dollar cost, no conversation text by default |
 | `telemetry` (not in `all`) | Local OTLP and Splunk export files | Approval counts and usage. Cursor `cost_cents` is labeled as from the Cursor dashboard usage export. Dollars are never estimated from tokens |
@@ -105,14 +105,20 @@ Required:
 
 Every collector runs on that alone: pure stdlib, no pip install.
 
-**`secrets-scan` needs a secret scanner.** It uses
-[gitleaks](https://github.com/gitleaks/gitleaks), or
-[trufflehog](https://github.com/trufflesecurity/trufflehog) if gitleaks is not
-found. It looks for `GITLEAKS_PATH` (or `TRUFFLEHOG_PATH`) first, then the
-tool on PATH. If neither is installed, the scan still runs: every other
+**`secrets-scan` needs a secret scanner.** It shells out to the first one it
+finds: [Betterleaks](https://github.com/betterleaks/betterleaks)
+(`BETTERLEAKS_PATH` or PATH), then [gitleaks](https://github.com/gitleaks/gitleaks)
+(`GITLEAKS_PATH` or PATH), then
+[trufflehog](https://github.com/trufflesecurity/trufflehog) (`TRUFFLEHOG_PATH`
+or PATH). aiscan never turns on Betterleaks credential validation: it forces
+validation and analysis off on the command line and removes `BETTERLEAKS_VALIDATE` /
+`BETTERLEAKS_ANALYZE` from the scanner's environment, so found secrets are
+never sent anywhere. If none is installed, the scan still runs: every other
 collector works as usual, secret scanning is skipped, and the report gets a
-medium finding, "Neither gitleaks nor trufflehog found on PATH." aiscan does
-not install either tool for you. To add gitleaks:
+medium finding, "No secrets scanner found." `scripts\get-betterleaks.ps1`
+downloads a pinned, checksum-verified Betterleaks to
+`%LOCALAPPDATA%\aiscan\tools` (opt-in, no admin). Or install gitleaks and make
+sure it is on PATH:
 
 ```powershell
 winget install Gitleaks.Gitleaks
