@@ -5,7 +5,7 @@
 
 .PARAMETER Name
     Component name: claude, cowork, cursor, codex, copilot, grok, grok-bot,
-    chat-history, git-posture, secrets-scan, pii-scan, cloud-agents,
+    accounts, chat-history, git-posture, secrets-scan, pii-scan, cloud-agents,
     telemetry-import, core, integration, all.
 
 .EXAMPLE
@@ -17,7 +17,7 @@ param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet(
         "claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot",
-        "chat-history", "git-posture", "secrets-scan", "pii-scan",
+        "accounts", "chat-history", "git-posture", "secrets-scan", "pii-scan",
         "cloud-agents", "telemetry-import", "core", "integration", "all"
     )]
     [string]$Name
@@ -68,7 +68,7 @@ $failed = 0
 if ($Name -eq "all") {
     $order = @(
         "core", "claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot",
-        "chat-history", "git-posture", "secrets-scan", "pii-scan",
+        "accounts", "chat-history", "git-posture", "secrets-scan", "pii-scan",
         "cloud-agents", "telemetry-import", "integration"
     )
     foreach ($n in $order) {

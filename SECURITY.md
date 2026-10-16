@@ -20,8 +20,13 @@ mask.
   `all`. It sends HTTPS GET requests only to `https://api.cursor.com`
   using a user-supplied `CURSOR_API_KEY`, which is never printed or written.
   It does not read the Cursor IDE session token or call dashboard APIs.
-- Credential stores (`auth.json` and equivalents) are checked for presence and
-  key names only. Token values are never read into output.
+- The `accounts` collector reads plain identifiers (email, username,
+  organization, plan) and auth method from local config. Token, API key,
+  password, and cookie values are never written. Credential stores are not
+  decrypted. Claude `.credentials.json` is presence-only. Cursor `state.vscdb`
+  is copied, then only the cached email and membership keys are queried.
+  Codex `id_token` is decoded locally for email and plan; the token string
+  is discarded.
 - Raw transcript content only ever lands in the local `raw/` directory on your
   machine. The `evidence/` layer carries counts, hashes, and redacted samples
   per [SCHEMA.md](SCHEMA.md).

@@ -193,6 +193,7 @@ before sharing it.
 | `codex` | `~/.codex/sessions/**/*.jsonl` (session prefixes + aggregated approval events) and `~/.codex/config.toml` (durable posture: trust, sandbox, approval, MCP, apps, telemetry, hooks) plus auth presence | Session parsing/redaction hardened; user-level config.toml parsed. Trusted-project `.codex/config.toml` layers remain additional coverage. |
 | `grok` | `~/.grok/config.toml` (durable posture: `[ui].permission_mode`/`yolo`, `[mcp_servers.*]`, `[permission].allow`, `[subagents]`, `[memory]`) plus `<git-root>/.grok/config.toml` project layer; `~/.grok/sessions/**/summary.json` (metadata-only: session count, model distribution, message counts) and sibling `chat_history.jsonl`/`updates.jsonl`/`events.jsonl` (count/size only, never content in evidence) plus auth presence | `~/.grok/config.toml` uses the same `[mcp_servers.<name>]` TOML shape as Codex. `permission_mode = "always-approve"` or `yolo = true` is the headline critical finding. This collector is Grok Build, not Cursor's Grok Bot desktop app. |
 | `grok-bot` | `%APPDATA%\Grok Bot` top-level names from a real install (presence, size, count, mtime only): `sand-secrets.json`, `box-secrets-push-state.v1.json`, `lockfile`, `desktop-status.json`, `Preferences`, `gateway-descriptor.json`, `Local State`, `window-state.json`, plus Chromium dirs (`Local Storage`, `Session Storage`, `Network`, `Cache`, …) and `sand-client-persistence`. Nothing under that directory is opened. | Cursor's Grok Bot desktop client. `local_execution` is `unknown` (`not_determinable_offline`): those names do not show whether local execution is on. No `rules` rows. Secrets-store and lockfile findings are presence only. |
+| `accounts` | Plain identity fields only. See the accounts section below. | Signed-in identity per tool. No token, API key, password, or cookie values. No network. |
 | `copilot` | `%APPDATA%\Code\User\settings.json`, JetBrains config | NEW. Enable state, exclude rules, telemetry, SKU. |
 | `chat-history` | All 4 transcript sources | Writes raw markdown to `raw/chat-history/`. Evidence is counts + secret-hit findings only. |
 | `git-posture` | Repos under user-specified roots | `.env` in history, hook presence, branch protection (opt-in `gh`), large blobs. |
@@ -271,6 +272,67 @@ Prompt text, tool parameters, and secret-shaped attributes are dropped before an
 `summary.comparison` is `first_scan` when no earlier scan was found, and `diff` otherwise. Count fields include `findings_added`, `findings_resolved`, `new_high_or_critical`, `drift_warnings`, `mcp_servers_added`, `allow_rules_added`, and `counters_moved`. Per-collector before/after counters live under `changes.collectors`. The file does not contain filesystem paths or transcript text.
 
 A collector that previously had data and now reports none is a drift warning, not a clean result. Long-term trends (token lines over months, and so on) belong in Splunk, not in a pile of HTML files. See [docs/scan-history.md](docs/scan-history.md) and [docs/report-v2.md](docs/report-v2.md).
+
+## Account identities (`accounts`)
+
+`evidence/accounts.json` is produced by `aiscan all` and by `aiscan accounts`. It uses the envelope above plus an `accounts` array and a `limits` array. `summary` stays numeric. Identifiers live only in `accounts[]` and in finding samples.
+
+| Field | Take-home? | Notes |
+|---|---|---|
+| `accounts` | YES, after review | One object per tool, API-key row, or MCP server that has auth configured. |
+| `limits` | YES | Fixed sentences describing what this collector does not read. |
+
+`summary`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `tools_reported` | int | Rows in `accounts`. |
+| `signed_in` | int | Rows whose `signed_in` is `yes`. |
+| `unknown` | int | Rows whose `signed_in` is `unknown`. |
+| `not_signed_in` | int | Rows whose `signed_in` is `no`. |
+| `distinct_accounts` | int | Distinct account identifiers, compared case-insensitively. MCP rows are not included. |
+| `api_key_rows` | int | Rows whose auth method is an API key, env var, or header. |
+| `subscription_rows` | int | Rows whose auth method is `oauth`. |
+| `findings` | int | Finding count. |
+
+Each `accounts[]` object:
+
+| Field | Notes |
+|---|---|
+| `tool` | `claude-code`, `codex`, `cursor`, `copilot`, `grok`, `grok-bot`, `git`, `gh`, or `mcp:<server>`. |
+| `signed_in` | `yes`, `no`, or `unknown`. |
+| `account` | Email or username. Empty when only an API key is present. |
+| `organization` | Organization, team, or GitHub host when stored in plain config. |
+| `plan` | Plan or membership tier when stored in plain config (`pro`, `supergrok`, …). |
+| `auth_method` | `oauth`, `api_key`, `git_config`, `config`, `not_present`, `unreadable`, `unknown`, or an MCP method list such as `env:NAME`, `header:Authorization`, `url_userinfo`, `args:authorization`. |
+| `source` | Home-relative path (`~/.codex/auth.json`, `%APPDATA%/...`), a file name when the path is outside the profile, or `env:NAME`. Never an absolute path. |
+| `last_sign_in` | ISO-8601 when a timestamp field exists. For Codex this is `last_refresh` in `auth.json`. Empty when the tool does not store one. |
+
+`-Redact` / `AISCAN_REDACT=1` replaces emails in `account`, `organization`, `plan`, `source`, `last_sign_in`, `auth_method`, and finding samples with `<email>` before the file is written. The briefing does the same when it renders an already-written file with redaction on.
+
+What each tool reads, and what is deliberately not read:
+
+| Tool | Read | Not read |
+|---|---|---|
+| Claude Code | `~/.claude.json` `oauthAccount` (`emailAddress`, `organizationName`, plan/billing fields). `primaryApiKey` and `settings.json` `env` contribute **presence and the variable name only**. `.credentials.json` is presence only. | `.credentials.json` contents. Project history. Any key value. |
+| Codex | `~/.codex/auth.json`. Email and plan are decoded from the `id_token` JWT payload (`email`, `https://api.openai.com/auth` `chatgpt_plan_type`). `last_refresh` is the last sign-in field. `OPENAI_API_KEY` is presence only. | `access_token`, `refresh_token`, the `id_token` string, API key values, and every other claim (account id, user id, name). |
+| Cursor | A **copy** of `state.vscdb`. Query keys: `cursorAuth/cachedEmail`, `cursorAuth/stripeMembershipType`, `cursorAuth/cachedSignUpType`, `cursorAuth/stripeSubscriptionStatus`. The original file is not opened. | Every other key, including access and refresh tokens. |
+| Copilot | Top-level JSON in the Copilot globalStorage directory (email, `organizationLogin`, `sku`) and a short `copilot-user` file. | Files whose names contain `token`, `secret`, or `cookie`. |
+| Grok CLI | `~/.grok/auth.json`, `user-settings.json`, `user_settings.json`, `user-settings.toml`. Allowlisted keys only (email, username, org, plan, last sign-in). | Token and API key values. Session transcripts. |
+| Grok Bot | `desktop-status.json`, `Preferences`, `Local State`. Allowlisted keys only. | Cookies, Local Storage, Session Storage, Network, Cache, `sand-secrets.json`, `box-secrets-push-state.v1.json`. |
+| GitHub CLI | `hosts.yml` lines whose key is `user`. | `oauth_token` and every other key. |
+| git | Global config `[user]` `email` and `name`. | Credential helpers, `include` files, other sections. |
+| MCP | Auth method: env var **names**, header **names**, whether a URL has userinfo, whether an arg mentions Authorization. | Header values, env values, URLs, commands. |
+| Environment | Whether `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, or `CURSOR_API_KEY` is set to a non-empty string. | The values. |
+
+No network calls. No cookie decryption. No credential-store decryption.
+
+Findings:
+
+| id | When |
+|---|---|
+| `accounts.identity.multiple` | Two or more distinct account identifiers across tools (medium, Identity & SSO). |
+| `accounts.auth.api_key_and_subscription` | At least one API-key-style row and one `oauth` row. Medium when the same tool has both, otherwise low. |
 
 ## Versioning
 

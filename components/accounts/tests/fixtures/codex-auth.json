@@ -1,0 +1,14 @@
+{
+  "auth_mode": "chatgpt",
+  "OPENAI_API_KEY": "SENTINEL_CODEX_API",
+  "tokens": {
+    "id_token": "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJlbWFpbCI6ImNvZGV4LXVzZXJAZXhhbXBsZS5jb20iLCJuYW1lIjoiQ29kZXggVXNlciIsImh0dHBzOi8vYXBpLm9wZW5haS5jb20vYXV0aCI6eyJjaGF0Z3B0X3BsYW5fdHlwZSI6InBybyIsImNoYXRncHRfYWNjb3VudF9pZCI6ImFjY3RfZGVtbyIsImNoYXRncHRfdXNlcl9pZCI6InVzZXItZGVtbyJ9LCJodHRwczovL2FwaS5vcGVuYWkuY29tL3Byb2ZpbGUiOnsiZW1haWwiOiJjb2RleC11c2VyQGV4YW1wbGUuY29tIn19.c2ln",
+    "access_token": "SENTINEL_CODEX_ACCESS",
+    "refresh_token": "SENTINEL_CODEX_REFRESH",
+    "account_id": "acct_demo"
+  },
+  "last_refresh": "2026-04-01T12:30:00Z",
+  "notes": {
+    "email": "do-not-read@example.com"
+  }
+}
