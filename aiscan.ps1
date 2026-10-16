@@ -17,11 +17,13 @@
 
 .PARAMETER Collector
     One of: claude cowork cursor codex copilot chat-history git-posture
-    secrets-scan pii-scan grok grok-bot cloud-agents telemetry discover all.
-    Defaults to 'all' when omitted.
+    secrets-scan pii-scan grok grok-bot accounts cloud-agents telemetry
+    discover all. Defaults to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
-    'all' runs the 11 offline collectors and prints a combined summary.
+    'all' runs the 12 offline collectors and prints a combined summary.
+    'accounts' reports which identity each tool is signed in as. It stores
+    emails and plan names, never token or API key values.
     'cloud-agents' and 'telemetry' are not included in 'all'. cloud-agents
     reads CURSOR_API_KEY and never prints that key. telemetry reads export
     files you pass with -OtelFile and -SplunkExport.
@@ -137,7 +139,7 @@
 param(
     [Parameter(Mandatory = $false, Position = 0)]
     [ValidateSet("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
-        "git-posture", "secrets-scan", "pii-scan", "grok", "grok-bot",
+        "git-posture", "secrets-scan", "pii-scan", "grok", "grok-bot", "accounts",
         "cloud-agents", "telemetry", "discover", "all")]
     [string]$Collector = "all",
 
@@ -219,6 +221,7 @@ $ScriptFor = @{
     "pii-scan"     = "pii-scan\pii-scan.py"
     "grok"         = "grok\grok.py"
     "grok-bot"     = "grok-bot\grok-bot.py"
+    "accounts"     = "accounts\accounts.py"
     "cloud-agents" = "cloud-agents\cloud-agents.py"
     "telemetry"    = "telemetry-import\telemetry-import.py"
 }
@@ -230,7 +233,7 @@ $ScriptFor = @{
 # Collectors run by 'all', in order. pii-scan runs last so it can pick up the
 # chat-history export under raw/ from the same run.
 $StdlibOrder = @("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
-    "git-posture", "secrets-scan", "grok", "grok-bot", "pii-scan")
+    "git-posture", "secrets-scan", "grok", "grok-bot", "pii-scan", "accounts")
 
 # Resolve real tool-history paths via the shared discover.py so coverage
 # includes override locations. The --json output is SENSITIVE (raw filesystem
@@ -293,6 +296,10 @@ function Get-CollectorExtras {
             # Path overrides only; pii-scan resolves its own default targets
             # (raw\chat-history export + native chat locations) from these.
             $extra += $script:PathArgs
+        }
+        "accounts" {
+            $extra += $script:PathArgs
+            if ($RepoRoots) { $extra += @("--repo-roots", $RepoRoots) }
         }
         "cloud-agents" {
             if ($IncludeRunResult) { $extra += "--include-run-result" }
@@ -512,6 +519,26 @@ function Show-Peek {
     if ((& $hasProp $Result "rules") -and $null -ne $Result.rules) {
         $rules = @($Result.rules)
     }
+    # --- accounts ---
+    $accounts = @()
+    if ((& $hasProp $Result "accounts") -and $null -ne $Result.accounts) {
+        $accounts = @($Result.accounts)
+    }
+    if ($accounts.Count -gt 0) {
+        Write-Host ""
+        Write-Host ("Accounts ({0})" -f $accounts.Count) -ForegroundColor White
+        $accounts |
+            Select-Object `
+                @{ N = "Tool"; E = { $_.tool } },
+                @{ N = "SignedIn"; E = { $_.signed_in } },
+                @{ N = "Account"; E = { Limit-Str $_.account 48 } },
+                @{ N = "Org"; E = { Limit-Str $_.organization 24 } },
+                @{ N = "Plan"; E = { $_.plan } },
+                @{ N = "Auth"; E = { Limit-Str $_.auth_method 32 } },
+                @{ N = "Source"; E = { Limit-Str $_.source 48 } } |
+            Format-Table -AutoSize
+    }
+
     if ($rules.Count -gt 0) {
         Write-Host ""
         Write-Host ("Rules ({0})" -f $rules.Count) -ForegroundColor White

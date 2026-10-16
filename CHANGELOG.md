@@ -9,7 +9,23 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `accounts` collector, included in `aiscan all`. It reports which identity
+  each local AI tool is signed in as: tool, signed-in yes/no/unknown, email
+  or username, organization, plan, auth method, home-relative source path,
+  and last sign-in time when a timestamp is stored. Claude Code reads
+  `oauthAccount` in `~/.claude.json`. Codex decodes the `id_token` payload
+  in `~/.codex/auth.json` for email and plan and discards the token. Cursor
+  copies `state.vscdb` and reads only `cursorAuth/cachedEmail` and
+  `cursorAuth/stripeMembershipType` (plus two related auth keys). Grok CLI,
+  Copilot, Grok Bot plain config, `gh` `hosts.yml` user, and global git
+  `user.email` are included. MCP configs contribute auth method only (env
+  var or header name). `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`,
+  and `CURSOR_API_KEY` are presence-only. Findings: more than one distinct
+  account, and API-key auth alongside subscription auth. `-Redact` masks
+  emails as `<email>`. Token, API key, password, and cookie values are not
+  written. No network calls and no credential-store decryption.
 
 ## [0.2.0] - 2026-10-15
 

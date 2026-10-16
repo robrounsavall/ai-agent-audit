@@ -23,3 +23,5 @@ repository roots or parent folders to inspect. Managed `requirements.toml` and
 legacy `managed_config.toml` are checked in the platform's Codex admin directory.
 Desktop `.codex-global-state.json` contributes only permission modes and counts;
 thread identifiers, account data, and workspace paths are excluded.
+Signed-in email and plan are collected by the separate `accounts` collector,
+which decodes the `id_token` payload and does not store the token.

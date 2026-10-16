@@ -1,0 +1,106 @@
+{
+  "collector": "accounts",
+  "version": "1.0.0",
+  "ran_at": "2026-10-16T16:00:00.712164+00:00",
+  "host": "DEMO-ENDPOINT",
+  "platform_detected": true,
+  "scope_hash": "28a8aa22f0a1",
+  "summary": {
+    "tools_reported": 5,
+    "signed_in": 4,
+    "unknown": 1,
+    "not_signed_in": 0,
+    "distinct_accounts": 4,
+    "api_key_rows": 1,
+    "subscription_rows": 3,
+    "findings": 2
+  },
+  "findings": [
+    {
+      "id": "accounts.identity.multiple",
+      "severity": "medium",
+      "category": "Identity & SSO",
+      "title": "Agent tools are signed in as more than one account",
+      "evidence_count": 4,
+      "first_seen": "",
+      "last_seen": "",
+      "sample_redacted": "claude-code=claude.demo@example.com; cursor=cursor.demo@example.com; distinct=4",
+      "secret_redacted": false,
+      "tags": [
+        "identity"
+      ]
+    },
+    {
+      "id": "accounts.auth.api_key_and_subscription",
+      "severity": "low",
+      "category": "Identity & SSO",
+      "title": "API-key auth and subscription auth are both in use",
+      "evidence_count": 4,
+      "first_seen": "",
+      "last_seen": "",
+      "sample_redacted": "subscription: claude-code, cursor, codex; api_key: grok",
+      "secret_redacted": false,
+      "tags": [
+        "api_key",
+        "subscription"
+      ]
+    }
+  ],
+  "rules": [],
+  "raw_pointers": [],
+  "accounts": [
+    {
+      "tool": "claude-code",
+      "signed_in": "yes",
+      "account": "claude.demo@example.com",
+      "organization": "Demo Org",
+      "plan": "",
+      "auth_method": "oauth",
+      "source": "~/.claude.json",
+      "last_sign_in": ""
+    },
+    {
+      "tool": "cursor",
+      "signed_in": "yes",
+      "account": "cursor.demo@example.com",
+      "organization": "",
+      "plan": "pro",
+      "auth_method": "oauth",
+      "source": "%APPDATA%/Cursor/User/globalStorage/state.vscdb",
+      "last_sign_in": ""
+    },
+    {
+      "tool": "codex",
+      "signed_in": "yes",
+      "account": "codex.demo@example.com",
+      "organization": "",
+      "plan": "plus",
+      "auth_method": "oauth",
+      "source": "~/.codex/auth.json",
+      "last_sign_in": "2026-04-01T12:30:00+00:00"
+    },
+    {
+      "tool": "grok",
+      "signed_in": "unknown",
+      "account": "",
+      "organization": "",
+      "plan": "",
+      "auth_method": "api_key",
+      "source": "env:XAI_API_KEY",
+      "last_sign_in": ""
+    },
+    {
+      "tool": "git",
+      "signed_in": "yes",
+      "account": "git.demo@example.com",
+      "organization": "",
+      "plan": "",
+      "auth_method": "git_config",
+      "source": "~/.gitconfig",
+      "last_sign_in": ""
+    }
+  ],
+  "limits": [
+    "Token, API key, password, and cookie values are never written."
+  ]
+}

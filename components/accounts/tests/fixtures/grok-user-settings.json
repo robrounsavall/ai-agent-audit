@@ -1,0 +1,5 @@
+{
+  "plan": "supergrok",
+  "organization": "Example Grok Org",
+  "refresh_token": "SENTINEL_GROK_SETTINGS_TOKEN"
+}

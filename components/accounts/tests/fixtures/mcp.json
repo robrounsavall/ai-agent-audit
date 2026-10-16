@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "notes": {
+      "command": "npx",
+      "args": ["--header", "Authorization: Bearer SENTINEL_MCP_ARG"],
+      "env": {
+        "NOTES_API_KEY": "SENTINEL_MCP_ENV"
+      },
+      "headers": {
+        "Authorization": "Bearer SENTINEL_MCP_HEADER"
+      },
+      "url": "https://user:SENTINEL_MCP_URL@mcp.example.com/sse"
+    },
+    "local": {
+      "command": "node",
+      "args": ["server.js"]
+    }
+  }
+}

@@ -54,6 +54,7 @@ from common import (  # noqa: E402
 )
 from scan_diff import load_changes_envelope  # noqa: E402
 from sections.access_map import render_access_map_section  # noqa: E402
+from sections.accounts import render_accounts_block  # noqa: E402
 from sections.changes import render_changes_section  # noqa: E402
 from sections.telemetry import (  # noqa: E402
     has_approval_evidence,
@@ -120,6 +121,7 @@ TOOL_LABELS = {
     "pii-scan": "PII Scan",
     "telemetry": "Telemetry import",
     "cloud-agents": "Cursor Cloud Agents",
+    "accounts": "Account identities",
 }
 COLLECTOR_PURPOSES = {
     "chat-history": ("Chat transcripts", "Transcript export across detected AI tools"),
@@ -140,6 +142,10 @@ COLLECTOR_PURPOSES = {
     "cloud-agents": (
         "Cursor cloud agents",
         "Opt-in read-only inventory via the official Cloud Agents API (api.cursor.com)",
+    ),
+    "accounts": (
+        "Account identities",
+        "Signed-in account for each tool, from local config only",
     ),
 }
 
@@ -1052,7 +1058,7 @@ def build_tools_table(
             }
         )
 
-    for key in ("chat-history", "secrets-scan", "git-posture", "pii-scan", "telemetry", "cloud-agents"):
+    for key in ("chat-history", "secrets-scan", "git-posture", "pii-scan", "telemetry", "cloud-agents", "accounts"):
         env = envelopes.get(key)
         if not env:
             continue
@@ -1081,6 +1087,10 @@ def build_tools_table(
         elif key == "cloud-agents":
             n = int(summary.get("total_agents") or 0)
             extra = f"{n} cloud agents" if n else "no agents listed"
+        elif key == "accounts":
+            signed = int(summary.get("signed_in") or 0)
+            distinct = int(summary.get("distinct_accounts") or 0)
+            extra = f"{signed} signed in, {distinct} distinct"
         rows.append(
             {
                 "tool": TOOL_LABELS.get(key, key),
@@ -3997,8 +4007,9 @@ def build_html(
     <header class="sh">
       <div class="kicker"><span class="num">/04</span><span class="kicker-label">AGENTS AND COLLECTORS</span></div>
       <h2 class="h2">What each collector recorded.</h2>
-      <p class="sub">Presence, counts, and posture only. Prompts, transcript text, and secret values stay out of this page. Grok Bot is the desktop app, separate from Grok Build. Cloud agents are an opt-in inventory.</p>
+      <p class="sub">Presence, counts, and posture only. The account table names the signed-in identity for each tool. Prompts, transcript text, and secret values stay out of this page. Grok Bot is the desktop app, separate from Grok Build. Cloud agents are an opt-in inventory.</p>
     </header>
+    {render_accounts_block(envelopes.get("accounts"))}
     {render_cover_status(envelopes, runs_map, counts)}
     {posture_grid}
     <header class="sh" style="margin-top: 36px;">

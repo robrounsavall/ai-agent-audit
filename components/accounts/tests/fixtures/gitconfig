@@ -1,0 +1,5 @@
+[user]
+    email = git-user@example.com
+    name = Git User
+[http]
+    extraHeader = SENTINEL_GIT_HEADER

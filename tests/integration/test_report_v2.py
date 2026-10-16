@@ -139,6 +139,7 @@ class TestReportV2(unittest.TestCase):
         self.assertIsNotNone(match)
         body = match.group(1)
         self.assertIn("grok-bot", body)
+        self.assertIn("accounts", body)
         self.assertNotIn("cloud-agents", body)
         self.assertNotIn("telemetry", body)
         self.assertIn('"telemetry"', text)

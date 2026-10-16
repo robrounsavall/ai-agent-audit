@@ -1,0 +1,17 @@
+{
+  "oauthAccount": {
+    "accountUuid": "00000000-0000-4000-8000-000000000001",
+    "emailAddress": "claude-user@example.com",
+    "organizationName": "Example Org",
+    "organizationRole": "admin",
+    "displayName": "Claude User"
+  },
+  "primaryApiKey": "SENTINEL_CLAUDE_KEY",
+  "projects": {
+    "C:/secret-project": {
+      "history": [
+        {"display": "history-only@example.com"}
+      ]
+    }
+  }
+}

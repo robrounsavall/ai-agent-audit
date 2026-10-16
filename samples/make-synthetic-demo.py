@@ -303,6 +303,106 @@ def main() -> None:
     cloud["limits"] = cloud_limits
     write("cloud-agents", cloud)
 
+    # accounts: two synthetic identities plus an API key with no account
+    account_rows = [
+        {
+            "tool": "claude-code",
+            "signed_in": "yes",
+            "account": "claude.demo@example.com",
+            "organization": "Demo Org",
+            "plan": "",
+            "auth_method": "oauth",
+            "source": "~/.claude.json",
+            "last_sign_in": "",
+        },
+        {
+            "tool": "cursor",
+            "signed_in": "yes",
+            "account": "cursor.demo@example.com",
+            "organization": "",
+            "plan": "pro",
+            "auth_method": "oauth",
+            "source": "%APPDATA%/Cursor/User/globalStorage/state.vscdb",
+            "last_sign_in": "",
+        },
+        {
+            "tool": "codex",
+            "signed_in": "yes",
+            "account": "codex.demo@example.com",
+            "organization": "",
+            "plan": "plus",
+            "auth_method": "oauth",
+            "source": "~/.codex/auth.json",
+            "last_sign_in": "2026-04-01T12:30:00+00:00",
+        },
+        {
+            "tool": "grok",
+            "signed_in": "unknown",
+            "account": "",
+            "organization": "",
+            "plan": "",
+            "auth_method": "api_key",
+            "source": "env:XAI_API_KEY",
+            "last_sign_in": "",
+        },
+        {
+            "tool": "git",
+            "signed_in": "yes",
+            "account": "git.demo@example.com",
+            "organization": "",
+            "plan": "",
+            "auth_method": "git_config",
+            "source": "~/.gitconfig",
+            "last_sign_in": "",
+        },
+    ]
+    account_findings = [
+        {
+            "id": "accounts.identity.multiple",
+            "severity": "medium",
+            "category": "Identity & SSO",
+            "title": "Agent tools are signed in as more than one account",
+            "evidence_count": 4,
+            "first_seen": "",
+            "last_seen": "",
+            "sample_redacted": "claude-code=claude.demo@example.com; cursor=cursor.demo@example.com; distinct=4",
+            "secret_redacted": False,
+            "tags": ["identity"],
+        },
+        {
+            "id": "accounts.auth.api_key_and_subscription",
+            "severity": "low",
+            "category": "Identity & SSO",
+            "title": "API-key auth and subscription auth are both in use",
+            "evidence_count": 4,
+            "first_seen": "",
+            "last_seen": "",
+            "sample_redacted": "subscription: claude-code, cursor, codex; api_key: grok",
+            "secret_redacted": False,
+            "tags": ["api_key", "subscription"],
+        },
+    ]
+    accounts_env = envelope(
+        "accounts",
+        {
+            "tools_reported": len(account_rows),
+            "signed_in": 4,
+            "unknown": 1,
+            "not_signed_in": 0,
+            "distinct_accounts": 4,
+            "api_key_rows": 1,
+            "subscription_rows": 3,
+            "findings": 2,
+        },
+        account_findings,
+        [],
+    )
+    accounts_env["accounts"] = account_rows
+    accounts_env["limits"] = [
+        "Token, API key, password, and cookie values are never written.",
+    ]
+    write("accounts", accounts_env)
+
     # Write a tiny README for the bundle
     readme = HERE / "synthetic-demo" / "README.md"
     readme.write_text(
@@ -311,8 +411,12 @@ def main() -> None:
         "User = Test User, Host = DEMO-ENDPOINT.\n"
         "Use with:\n\n"
         "    python report\\build-briefing.py --evidence-root samples\\synthetic-demo --out demo-briefing.html\n\n"
+        "The report v2 draft (summary, tabs, changes versus samples\\synthetic-previous, "
+        "plus the sample telemetry export) is samples\\report-v2-draft.html. "
+        "Regenerate it with scripts\\build-draft-report.ps1.\n\n"
         "Contains no real paths, identities, or credentials.\n"
-        "cloud-agents.json is synthetic opt-in evidence for the Cloud Agents API inventory.\n",
+        "cloud-agents.json is synthetic opt-in evidence for the Cloud Agents API inventory.\n"
+        "accounts.json uses example.com addresses so the account table renders.\n",
         encoding="utf-8",
     )
     print(f"Wrote {readme}")

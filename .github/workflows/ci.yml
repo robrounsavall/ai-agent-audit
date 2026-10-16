@@ -20,6 +20,7 @@ jobs:
           - cowork
           - grok
           - grok-bot
+          - accounts
           - chat-history
           - git-posture
           - secrets-scan
