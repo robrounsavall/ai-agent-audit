@@ -159,9 +159,17 @@ machine with a lot of chat history, so give the command at least a
   default browser`. If that line is missing, tell the user the file name
   `briefing.html`. Don't open it with a remote or screenshot tool, and
   don't read the file.
-- The console prints a table with Collector, Detected and Findings for 11
+- The console prints a table with Collector, Detected and Findings for 12
   collectors: claude, cowork, cursor, codex, copilot, chat-history,
-  git-posture, secrets-scan, grok, grok-bot, pii-scan.
+  git-posture, secrets-scan, grok, grok-bot, pii-scan, accounts.
+  `accounts` records email, username, organization, and plan on purpose.
+  Those identifiers can appear in `evidence\accounts.json`, the briefing,
+  and `aiscan accounts` console output when `-Redact` is off. In chat,
+  summarize them (how many distinct identities, which tools disagree)
+  unless the user asked to see the identifiers. Do not quote them, and
+  do not paste tokens. This collector does not emit tokens. `-Redact`
+  stays off unless the user asked for it; when it is on, emails become
+  `<email>`.
   - `True` means that tool was found. `False` means the evidence file says
     it was not. `not detected` is the same idea: the collector exited 2
     and still wrote an evidence file. That is normal. The tool just isn't

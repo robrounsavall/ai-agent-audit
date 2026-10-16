@@ -1,0 +1,5 @@
+{
+  "email": "grok-user@example.com",
+  "token": "SENTINEL_GROK_TOKEN",
+  "access_token": "SENTINEL_GROK_ACCESS"
+}

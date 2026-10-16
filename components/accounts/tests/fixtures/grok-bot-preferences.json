@@ -1,0 +1,12 @@
+{
+  "profile": {
+    "info_cache": {
+      "Default": {
+        "user_name": "grok-bot@example.com"
+      }
+    }
+  },
+  "os_crypt": {
+    "encrypted_key": "SENTINEL_GROK_BOT_SECRET"
+  }
+}

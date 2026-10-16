@@ -11,14 +11,14 @@ Under the summary are tabs:
 | Findings | Findings by severity and category, plus the evidence index |
 | Access map | What each agent can do (shell, files, network, secrets, git, remote, approval), read only from the evidence |
 | Changes | What is different from the previous scan |
-| Agents / collectors | Per-tool detail, including Grok Bot and cloud agents when those envelopes are present |
+| Agents / collectors | Per-tool detail, including which account each tool is signed in as, plus Grok Bot and cloud agents when those envelopes are present |
 | Approvals | Tool-decision counts from a telemetry export |
 | Usage | Token totals, and cost only when the export carried cents |
 | Coverage gaps | Questions the evidence cannot answer |
 
 If a tab has no evidence, it says so in one line, for example `Not collected — run aiscan telemetry -OtelFile <file> -SplunkExport <file> to enable.` The page still opens. A missing file is not an error in the report.
 
-The page does not copy full transcripts or prompts. It does show finding samples. Those samples are unredacted unless the scan used `-Redact`, so they can include paths and secret-shaped text. Cowork still contributes counts, not file contents.
+The page does not copy full transcripts or prompts. It does show finding samples. Those samples are unredacted unless the scan used `-Redact`, so they can include paths and secret-shaped text. Cowork still contributes counts, not file contents. The agents tab includes an account table when `evidence/accounts.json` is present: email, username, organization, and plan from local config. Those identifiers are shown on a normal scan. They are masked when the briefing is built with `-Redact`. Token and API key values are not in the table.
 
 ## What changed since the last scan
 

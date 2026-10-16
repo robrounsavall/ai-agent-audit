@@ -11,6 +11,25 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Added
 
+- `accounts` collector, included in `aiscan all`. It reports which identity
+  each local AI tool is signed in as: tool, signed-in yes/no/unknown, email
+  or username, organization, plan, auth method, home-relative source path,
+  and last sign-in time when a timestamp is stored. Claude Code reads
+  `oauthAccount` in `~/.claude.json`. Codex decodes the `id_token` payload
+  in `~/.codex/auth.json` for email and plan, and takes the organization
+  from `organization_name`, `org_name`, or the default (or first)
+  `organizations` entry's title or name. Cursor copies `state.vscdb` and
+  reads only `cursorAuth/cachedEmail` and `cursorAuth/stripeMembershipType`
+  (plus two related auth keys). Grok CLI, Copilot, Grok Bot plain config,
+  `gh` `hosts.yml` user, and global git `user.email` are included. MCP
+  configs contribute auth method only (env var or header name).
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, and `CURSOR_API_KEY`
+  are presence-only. Findings: more than one distinct account, and API-key
+  auth alongside subscription auth. `-Redact` stays off unless it is passed.
+  With `-Redact`, emails are masked as `<email>`. Token, API key, password,
+  and cookie values are not written. No network calls and no
+  credential-store decryption. [RUN-AISCAN.md](RUN-AISCAN.md) tells an agent
+  to summarize those identifiers instead of quoting them.
 - [RUN-AISCAN.md](RUN-AISCAN.md), instructions an AI agent can follow to run
   one scan without reading transcripts or uploading results. The scan
   command in that file does not pass `-Redact`.
@@ -144,6 +163,12 @@ each collector's `__version__` and appear in the evidence envelopes.
   word. Telemetry endpoint, protocol, and service name are masked with the
   rest of the evidence. The briefing only uses a severity of critical, high,
   medium, or low in a pill's class.
+- The scrub gate treats a Windows hostname as uppercase `DESKTOP-` plus the
+  7-character suffix, so a file named `desktop-status.json` is not flagged.
+  The documented AWS example keys are allowed only as those exact values. A
+  realistic `DESKTOP-` hostname is still rejected.
+- `secrets-scan` does not walk a repository for compressed transcripts when
+  Windows spells that folder as both a short 8.3 name and a long name.
 
 ## [0.2.0] - 2026-10-15
 

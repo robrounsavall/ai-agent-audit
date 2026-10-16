@@ -20,6 +20,7 @@ jobs:
           - cowork
           - grok
           - grok-bot
+          - accounts
           - chat-history
           - git-posture
           - secrets-scan
@@ -78,7 +79,8 @@ jobs:
           # Class-based checks: real user-profile paths, real Windows hostnames,
           # and live-looking secrets must never land in the repo. Placeholder
           # identities (you, me, Test User, ...) and the SCHEMA.md example
-          # hostname are allowed.
+          # hostname are allowed. Documented AWS example keys are allowed only
+          # as those exact strings.
           $files = Get-ChildItem -Recurse . -File | Where-Object {
             $_.Extension -in ".py",".ps1",".md",".html",".json",".txt",".yml",".toml" -and
             $_.FullName -notmatch "\\\.git(hub)?\\"
@@ -86,13 +88,43 @@ jobs:
           $patterns = @(
             # C:\Users\<real name> in any slash/escaping style, except placeholders
             'C:(\\|/)+Users(\\|/)+(?!(you|me|yourname|example|Test[ %]?User|Test)\b)[A-Za-z]'
-            # Real-looking machine names (SCHEMA.md documents DESKTOP-XYZ as the example)
-            'DESKTOP-(?!XYZ\b)[A-Z0-9]{6,}'
             # Live token shapes that gitleaks-style fixtures should never use unmasked
             'AKIA[0-9A-Z]{16}'
+            'ASIA[0-9A-Z]{16}'
             'xox[baprs]-[0-9]{8,}'
           )
-          $hits = $files | Select-String -Pattern $patterns -AllMatches
-          # Test fixtures may use the placeholder profile; anything else fails.
-          if ($hits) { $hits | ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }; exit 1 }
+          # Exact values from the AWS docs (IAM access key, STS temporary key).
+          # A longer token that merely starts with one of these still fails.
+          $awsExamples = @(
+            'AKIAIOSFODNN7EXAMPLE'
+            'ASIAIOSFODNN7EXAMPLE'
+          )
+          # Windows generates DESKTOP- plus 7 uppercase alphanumerics.
+          # Case-sensitive, so the Grok Bot filename desktop-status.json does
+          # not match. SCHEMA.md's DESKTOP-XYZ example is shorter than 7.
+          $desktopPattern = 'DESKTOP-[A-Z0-9]{7}(?![A-Za-z0-9])'
+          $sampleHost = 'DESKTOP-' + 'ABC1234'
+          if ($sampleHost -cnotmatch $desktopPattern) {
+            Write-Host "scrub gate no longer catches a realistic hostname"
+            exit 1
+          }
+          if ('desktop-status.json' -cmatch $desktopPattern) {
+            Write-Host "scrub gate matched desktop-status.json"
+            exit 1
+          }
+          $hits = New-Object System.Collections.Generic.List[string]
+          foreach ($hit in @($files | Select-String -Pattern $patterns -AllMatches)) {
+            foreach ($match in @($hit.Matches)) {
+              $value = [string]$match.Value
+              if ($awsExamples -ccontains $value) {
+                $escaped = [regex]::Escape($value)
+                if ($hit.Line -cmatch "(?<![A-Z0-9])$escaped(?![A-Z0-9])") { continue }
+              }
+              $hits.Add("$($hit.Path):$($hit.LineNumber): $($hit.Line.Trim())")
+            }
+          }
+          foreach ($hit in @($files | Select-String -Pattern $desktopPattern -CaseSensitive -AllMatches)) {
+            $hits.Add("$($hit.Path):$($hit.LineNumber): $($hit.Line.Trim())")
+          }
+          if ($hits.Count -gt 0) { $hits | ForEach-Object { Write-Host $_ }; exit 1 }
           Write-Host "scrub clean"

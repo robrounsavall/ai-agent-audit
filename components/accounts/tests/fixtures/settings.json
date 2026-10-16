@@ -1,0 +1,6 @@
+{
+  "env": {
+    "ANTHROPIC_API_KEY": "SENTINEL_CLAUDE_SETTINGS_KEY",
+    "PATH": "/usr/bin"
+  }
+}
