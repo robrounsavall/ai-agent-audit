@@ -21,7 +21,7 @@ gaps. See [docs/report-v2.md](docs/report-v2.md).
 
 ## Quick start
 
-You need Windows 10/11, PowerShell 5.1+ and Python 3.10+ on PATH. See
+You need Windows 10/11, PowerShell 5.1+ and Python 3.11+ on PATH. See
 [Prerequisites](#prerequisites).
 
 **Option 1: run the latest release without cloning.** In PowerShell:
@@ -68,7 +68,7 @@ teams have no inventory of any of it. aiscan answers the first question:
 - **Transcripts stay local.** Raw chat content only ever lands in the local
   `raw/` directory. The `evidence/` layer carries counts, sizes, hashes, and
   redacted samples — the contract is [SCHEMA.md](SCHEMA.md).
-- Pure stdlib Python: every collector runs on stock Python 3.10+ with no
+- Pure stdlib Python: every collector runs on stock Python 3.11+ with no
   pip install. Small enough to audit before you run it.
 
 ## What it collects
@@ -101,9 +101,9 @@ not in v0.2.0.
 Required:
 
 - Windows 10/11, PowerShell 5.1+
-- Python 3.10+ on PATH
+- Python 3.11+ on PATH (collectors import `tomllib`, which is not in 3.10)
 
-Every collector runs on that alone: pure stdlib, no pip install.
+`aiscan.ps1` checks `python` before it scans and stops if that Python is older than 3.11. Every collector runs on that alone: pure stdlib, no pip install.
 
 **`secrets-scan` needs a secret scanner.** It shells out to the first one it
 finds: [Betterleaks](https://github.com/betterleaks/betterleaks)
@@ -140,7 +140,7 @@ installer, `get-aiscan.ps1`. The installer downloads the zip to
 `%LOCALAPPDATA%\aiscan\<version>`, checks the SHA256, extracts it, and runs
 `aiscan.ps1` with whatever arguments you give it. No admin rights, and no
 machine-wide execution policy change: only the child PowerShell that runs
-aiscan gets `-ExecutionPolicy Bypass`. Python 3.10+ (and gitleaks, for
+aiscan gets `-ExecutionPolicy Bypass`. Python 3.11+ (and gitleaks, for
 `secrets-scan`) are still needed, as above. Output goes wherever you point
 `-OutDir`, or to a throwaway temp folder if you don't.
 

@@ -11,7 +11,7 @@
     Cloud Agents API. telemetry reads local export files. A briefing run also
     writes evidence\changes.json from the previous scan before building HTML.
 
-    Every collector runs on stock Python with no install. secrets-scan needs
+    Every collector runs on stock Python 3.11+ with no install. secrets-scan needs
     a scanner: betterleaks.exe (BETTERLEAKS_PATH or PATH), gitleaks.exe, or
     trufflehog.exe. aiscan never turns on Betterleaks credential validation.
 
@@ -197,6 +197,33 @@ $CoreDir = Join-Path $ScriptDir "core"
 $ComponentsDir = Join-Path $ScriptDir "components"
 $Python = "python"
 
+# tomllib is stdlib only in Python 3.11+. Stop here so an older python fails
+# with a clear message instead of dying inside the first collector that imports it.
+# The -c script contains no double quotes: Windows PowerShell 5.1 drops those
+# when it rebuilds a native command line.
+if (-not (Get-Command -Name $Python -ErrorAction SilentlyContinue)) {
+    Write-Host "Python 3.11 or newer is required, and 'python' was not found on PATH." -ForegroundColor Red
+    exit 1
+}
+$versionText = & $Python -c "import sys; sys.stdout.write('%d.%d.%d' % (sys.version_info[0], sys.version_info[1], sys.version_info[2]))" 2>$null
+$versionText = "$versionText".Trim()
+$parsed = $versionText -match '^(\d+)\.(\d+)\.\d+$'
+$tooOld = $false
+if ($parsed) {
+    $pyMajor = [int]$Matches[1]
+    $pyMinor = [int]$Matches[2]
+    $tooOld = ($pyMajor -lt 3) -or (($pyMajor -eq 3) -and ($pyMinor -lt 11))
+}
+if ($LASTEXITCODE -ne 0 -or -not $parsed -or $tooOld) {
+    if ($tooOld) {
+        Write-Host "Python $versionText is too old. aiscan needs Python 3.11 or newer (it uses tomllib)." -ForegroundColor Red
+    }
+    else {
+        Write-Host "Python 3.11 or newer is required, but 'python' did not report a usable version." -ForegroundColor Red
+    }
+    exit 1
+}
+
 # Release zips carry a VERSION file (written by scripts/build-release-zip.sh).
 # A repo checkout has none and reports "dev".
 $VersionFile = Join-Path $ScriptDir "VERSION"
@@ -362,7 +389,12 @@ function Remove-PeekRoot {
     if ($Keep -or $OutDir -or $Here -or $Briefing) {
         Write-Host ""
         Write-Host "Evidence kept at: $Root" -ForegroundColor Cyan
-        Write-Host "(unredacted by default: real secrets / paths / transcript metadata - delete when done)" -ForegroundColor DarkGray
+        if ($Redact) {
+            Write-Host "(evidence and the briefing are redacted, but raw\ is not)" -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host "(unredacted by default: real secrets / paths / transcript metadata - delete when done)" -ForegroundColor DarkGray
+        }
     }
     else {
         Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
