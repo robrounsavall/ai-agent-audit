@@ -96,7 +96,7 @@
 
 .EXAMPLE
     .\aiscan.ps1
-    Runs every stdlib collector, unredacted, and prints a combined summary.
+    Runs every stdlib collector, unredacted unless -Redact, and prints a combined summary.
 
 .EXAMPLE
     .\aiscan.ps1 claude
@@ -205,7 +205,15 @@ if (-not (Get-Command -Name $Python -ErrorAction SilentlyContinue)) {
     Write-Host "Python 3.11 or newer is required, and 'python' was not found on PATH." -ForegroundColor Red
     exit 1
 }
+# A function or alias named python does not set $LASTEXITCODE. Under
+# Set-StrictMode an unset $LASTEXITCODE throws, and a stale code from an
+# earlier native command would be blamed on this probe. Zero it, keep what
+# the probe itself wrote, then clear it so later steps are not affected.
+$global:LASTEXITCODE = 0
 $versionText = & $Python -c "import sys; sys.stdout.write('%d.%d.%d' % (sys.version_info[0], sys.version_info[1], sys.version_info[2]))" 2>$null
+$pythonExit = $global:LASTEXITCODE
+if ($null -eq $pythonExit) { $pythonExit = 0 }
+$global:LASTEXITCODE = 0
 $versionText = "$versionText".Trim()
 $parsed = $versionText -match '^(\d+)\.(\d+)\.\d+$'
 $tooOld = $false
@@ -214,7 +222,7 @@ if ($parsed) {
     $pyMinor = [int]$Matches[2]
     $tooOld = ($pyMajor -lt 3) -or (($pyMajor -eq 3) -and ($pyMinor -lt 11))
 }
-if ($LASTEXITCODE -ne 0 -or -not $parsed -or $tooOld) {
+if ($pythonExit -ne 0 -or -not $parsed -or $tooOld) {
     if ($tooOld) {
         Write-Host "Python $versionText is too old. aiscan needs Python 3.11 or newer (it uses tomllib)." -ForegroundColor Red
     }
@@ -390,7 +398,9 @@ function Remove-PeekRoot {
         Write-Host ""
         Write-Host "Evidence kept at: $Root" -ForegroundColor Cyan
         if ($Redact) {
-            Write-Host "(evidence and the briefing are redacted, but raw\ is not)" -ForegroundColor DarkGray
+            # Only files written by this run are redacted. A reused -OutDir can
+            # still hold an older unredacted evidence file or briefing.
+            Write-Host "Redaction was on for this run: evidence and the briefing written now are redacted. raw\ is NOT redacted, keep it local. Files left from earlier runs in this folder are not re-redacted." -ForegroundColor DarkGray
         }
         else {
             Write-Host "(unredacted by default: real secrets / paths / transcript metadata - delete when done)" -ForegroundColor DarkGray
@@ -399,6 +409,14 @@ function Remove-PeekRoot {
     else {
         Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Read-EvidenceText {
+    param([string]$Path)
+    # Windows PowerShell 5.1 reads a BOM-less file with the ANSI code page.
+    # Collectors write UTF-8. -Encoding UTF8 is that code page on 5.1 and
+    # UTF-8 on PowerShell 7.
+    return Get-Content -LiteralPath $Path -Encoding UTF8 -Raw
 }
 
 # Writes evidence\changes.json by comparing this scan with the previous one.
@@ -593,7 +611,7 @@ if ($Collector -eq "all") {
         # argparse rejects bad args with exit 2), not "not detected".
         if (Test-Path -LiteralPath $jsonPath) {
             try {
-                $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+                $j = Read-EvidenceText -Path $jsonPath | ConvertFrom-Json
                 if ($j.PSObject.Properties.Name -contains "findings") { $findings = @($j.findings).Count }
                 if ($j.PSObject.Properties.Name -contains "platform_detected") { $detected = $j.platform_detected }
                 if ($code -eq 2) { $detected = "not detected" }
@@ -648,10 +666,10 @@ if (-not (Test-Path -LiteralPath $jsonPath)) {
 
 Write-Host ""
 if ($Json) {
-    Get-Content -LiteralPath $jsonPath -Raw
+    Read-EvidenceText -Path $jsonPath
 }
 else {
-    $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+    $j = Read-EvidenceText -Path $jsonPath | ConvertFrom-Json
     Show-Peek -Result $j
 }
 

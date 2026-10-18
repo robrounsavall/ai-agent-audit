@@ -103,7 +103,10 @@ Required:
 - Windows 10/11, PowerShell 5.1+
 - Python 3.11+ on PATH (collectors import `tomllib`, which is not in 3.10)
 
-`aiscan.ps1` checks `python` before it scans and stops if that Python is older than 3.11. Every collector runs on that alone: pure stdlib, no pip install.
+`aiscan.ps1` checks `python` before it scans and stops if that Python is
+older than 3.11.
+
+Every collector runs on that alone: pure stdlib, no pip install.
 
 **`secrets-scan` needs a secret scanner.** It shells out to the first one it
 finds: [Betterleaks](https://github.com/betterleaks/betterleaks)
