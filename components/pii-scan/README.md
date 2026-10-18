@@ -5,6 +5,10 @@ Stdlib scan of a chat corpus for regulated-data indicators: credit cards
 numbers (separators required), and public IP addresses (private/loopback are
 counted in the summary but are not findings). No models, no pip install.
 
+Published test card numbers (for example 4111… and 4242…) are counted
+separately as a low "test card numbers" finding. Other valid card numbers
+stay critical.
+
 v2 dropped Microsoft Presidio: its NER entities tagged code identifiers as
 people and places, and everything that survived triage was validatable with
 patterns and checksums.

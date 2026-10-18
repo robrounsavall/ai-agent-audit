@@ -9,7 +9,14 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- Codex reports compressed session logs (`.jsonl.zst`) it does not open.
+  The count is a low finding, "N compressed Codex session logs not scanned".
+- trufflehog is started with `--no-verification`, so a secrets scan does
+  not send secrets to provider APIs.
+- PII scan counts published test card numbers as a low "test card numbers"
+  finding. Other valid card numbers stay critical.
 
 ## [0.2.0] - 2026-10-15
 

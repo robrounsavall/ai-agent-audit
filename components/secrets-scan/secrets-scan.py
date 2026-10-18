@@ -203,8 +203,11 @@ def run_gitleaks(target: Path, gitleaks: str) -> list[dict]:
 
 
 def run_trufflehog(target: Path, trufflehog: str) -> list[dict]:
+    # --no-verification is the current trufflehog v3 flag (still present in
+    # 3.99) that sets Verify=false. Without it, trufflehog calls provider
+    # APIs. --results only filters printed hits and still verifies.
     proc = subprocess.run(
-        [trufflehog, "filesystem", str(target), "--json"],
+        [trufflehog, "filesystem", str(target), "--json", "--no-verification"],
         capture_output=True,
         text=True,
         encoding="utf-8",

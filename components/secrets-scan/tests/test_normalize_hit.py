@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
@@ -78,6 +81,22 @@ class TestCoverageFindings(unittest.TestCase):
             envelope = self._collect_no_scanner(raw_root, [])
             ids = [f["id"] for f in envelope["findings"]]
             self.assertNotIn("secrets-scan.chat_corpus_not_scanned", ids)
+
+
+class TestTrufflehogCommand(unittest.TestCase):
+    def test_disables_live_verification(self):
+        payload = json.dumps({"DetectorName": "GitHub", "Raw": "example"})
+        with mock.patch.object(
+            ss.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, payload + "\n", ""),
+        ) as run:
+            hits = ss.run_trufflehog(Path("target"), "trufflehog")
+        self.assertEqual(len(hits), 1)
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[0], "trufflehog")
+        self.assertEqual(cmd[1], "filesystem")
+        self.assertEqual(cmd[-2:], ["--json", "--no-verification"])
 
 
 if __name__ == "__main__":

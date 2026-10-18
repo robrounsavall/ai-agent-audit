@@ -5,6 +5,7 @@ Usage:
     python codex.py --evidence-root ./audit-run [--dry-run]
 
 Reads ~/.codex/sessions JSONL rollouts for approval requests and approved prefixes.
+Compressed rollouts (*.jsonl.zst) are counted in a low finding and not opened.
 Checks config.toml and auth.json for presence (not token values).
 """
 
@@ -584,7 +585,13 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
             if not agg["last"] or ts > agg["last"]:
                 agg["last"] = ts
 
+    # Codex archives old rollouts as .jsonl.zst. The stdlib has no zstd
+    # decoder, so those files are counted and left unread.
+    compressed_session_files = 0
     if codex_sessions.exists():
+        compressed_session_files = sum(
+            1 for path in codex_sessions.rglob("*.jsonl.zst") if path.is_file()
+        )
         for jsonl in codex_sessions.rglob("*.jsonl"):
             session_files += 1
             for line_no, obj in iter_jsonl(jsonl):
@@ -696,6 +703,19 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
             )
         )
 
+    if compressed_session_files:
+        noun = "log" if compressed_session_files == 1 else "logs"
+        findings.append(
+            make_finding(
+                "codex.sessions.compressed_not_scanned",
+                "low",
+                "General Tooling",
+                f"{compressed_session_files} compressed Codex session {noun} not scanned",
+                evidence_count=compressed_session_files,
+                tags=["coverage_gap"],
+            )
+        )
+
     # Parse config.toml if present
     config_toml_parsed = False
     trusted_projects = 0
@@ -758,6 +778,7 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
     envelope["findings"] = findings
     envelope["summary"] = {
         "session_files": session_files,
+        "compressed_session_files": compressed_session_files,
         "rules": len(rules),
         "approval_requests": approval_count,
         "findings": len(findings),

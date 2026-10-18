@@ -14,6 +14,8 @@ was exactly the validatable, structured set below — all detectable in stdlib.
 
 Entities:
     CREDIT_CARD     IIN prefix + Luhn checksum          critical
+                    published test PANs are split out
+                    as "test card numbers"              low
     US_SSN          ddd-dd-dddd + issuance rules        critical
     IBAN_CODE       pattern + mod-97 checksum           critical
     EMAIL_ADDRESS   pattern                             medium
@@ -75,11 +77,18 @@ TEXT_EXTENSIONS = {
 
 SEVERITY_BY_ENTITY = {
     "CREDIT_CARD": "critical",
+    "TEST_CARD": "low",
     "US_SSN": "critical",
     "IBAN_CODE": "critical",
     "EMAIL_ADDRESS": "medium",
     "PHONE_NUMBER": "medium",
     "IP_ADDRESS": "medium",
+}
+
+# Finding titles use the entity name, except test cards, which are named in
+# plain language so they are not read as live PANs.
+_FINDING_LABELS = {
+    "TEST_CARD": "test card numbers",
 }
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -108,13 +117,51 @@ _CC_PREFIX_RE = re.compile(
 )
 
 
+def _card_digits(raw: str) -> str:
+    return re.sub(r"[ -]", "", raw)
+
+
 def credit_card_ok(raw: str) -> bool:
-    digits = re.sub(r"[ -]", "", raw)
+    digits = _card_digits(raw)
     if not 13 <= len(digits) <= 19:
         return False
     if len(set(digits)) == 1:
         return False
     return bool(_CC_PREFIX_RE.match(digits)) and luhn_ok(digits)
+
+
+# Published test PANs (Visa, Mastercard, Amex, Discover, JCB). They pass the
+# IIN + Luhn checks above, so they are counted apart from other cards. This
+# is the short set that shows up in docs and fixtures, including Stripe's
+# basic per-brand success cards. It is not the full Stripe regional or
+# decline catalog; those still rate critical. Diners Club and UnionPay test
+# numbers are omitted because this scanner's IIN list does not match them.
+TEST_PANS = frozenset({
+    "4111111111111111",
+    "4012888888881881",
+    "4222222222222",
+    "4242424242424242",
+    "4000056655665556",
+    "5555555555554444",
+    "2223003122003222",
+    "5200828282828210",
+    "5105105105105100",
+    "5500000000000004",
+    "378282246310005",
+    "371449635398431",
+    "340000000000009",
+    "6011111111111117",
+    "6011000990139424",
+    "6011000000000004",
+    "6011981111111113",
+    "6555900000604105",
+    "3566002020360505",
+    "3530111333300000",
+})
+
+
+def is_test_pan(raw: str) -> bool:
+    return _card_digits(raw) in TEST_PANS
 
 
 def ssn_ok(raw: str) -> bool:
@@ -235,10 +282,13 @@ def scan_file(path: Path, entities: list[str]) -> tuple[list[dict], int]:
                     if entity == "IP_ADDRESS" and private_ip(value):
                         private_ips += 1
                     continue
+                recorded = entity
+                if entity == "CREDIT_CARD" and is_test_pan(value):
+                    recorded = "TEST_CARD"
                 hits.append(
                     {
                         "file": str(path),
-                        "entity": entity,
+                        "entity": recorded,
                         "score": score,
                         "line": line_no,
                         "sample": value,
@@ -403,12 +453,13 @@ def collect(
     for entity, count in entity_counts.most_common():
         sample_hit = next((h for h in all_hits if h["entity"] == entity), None)
         sample = redact_sample(sample_hit["sample"], entity) if sample_hit else ""
+        label = _FINDING_LABELS.get(entity, entity)
         findings.append(
             make_finding(
                 f"pii_scan.{entity.lower()}",
                 severity_for(entity),
                 "PII Exposure",
-                f"{entity} detected ({count} hit(s) across {len(per_entity_files[entity])} file(s))",
+                f"{label} detected ({count} hit(s) across {len(per_entity_files[entity])} file(s))",
                 evidence_count=count,
                 sample_redacted=sample,
                 secret_redacted=entity.startswith("SECRET_"),

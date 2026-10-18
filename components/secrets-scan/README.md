@@ -1,6 +1,6 @@
 # Secrets-scan collector
 
-Runs gitleaks (preferred) or trufflehog over chat corpus and repo roots; redacted findings only in evidence.
+Runs gitleaks (preferred) or trufflehog over chat corpus and repo roots; redacted findings only in evidence. trufflehog is passed `--no-verification` so it does not check secrets against live services.
 
 | | |
 |---|---|

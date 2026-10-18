@@ -2,6 +2,8 @@
 
 Inventories Codex Desktop approval events, trusted projects, sandbox/telemetry posture from `~/.codex`.
 
+Compressed session logs (`*.jsonl.zst`) are counted in a low finding and not opened. Reading them would need a compression library, and aiscan stays on the Python standard library.
+
 | | |
 |---|---|
 | Evidence | `evidence/codex.json` |
