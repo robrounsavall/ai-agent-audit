@@ -34,7 +34,9 @@ stage="$dist/$name"
 rm -rf "$stage" "$dist/$name.zip" "$dist/$name.zip.sha256"
 mkdir -p "$stage"
 
-files=(aiscan.ps1 paths.example.json README.md LICENSE SECURITY.md SCHEMA.md THIRD_PARTY_NOTICES.md VERSION)
+# VERSION is not copied here. The printf below is the only copy in the zip,
+# so a byte-order mark in the repo file cannot ride along.
+files=(aiscan.ps1 paths.example.json README.md LICENSE SECURITY.md SCHEMA.md THIRD_PARTY_NOTICES.md)
 dirs=(components core report scripts tools)
 
 for f in "${files[@]}"; do cp "$f" "$stage/"; done

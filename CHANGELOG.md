@@ -26,10 +26,18 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Fixed
 
-- The process exits 2 when a collector errors or its evidence does not parse,
-  and 3 when the only failure is the briefing. A normal run, including
-  "platform not detected", still exits 0.
-- A successful browser open prints `Opened briefing in default browser`.
+- The process exits 2 when a collector errors, writes no evidence file, or
+  writes a file that is not a readable envelope. It exits 3 when the only
+  failure is the briefing. A normal run, including "platform not detected",
+  still exits 0.
+- A previous envelope in the output folder is removed before that collector
+  runs, so a new failure cannot be read as "not detected".
+- `Opened briefing in default browser` is printed only when the browser
+  launch succeeds.
+- Throwaway output folders include a unique id, so two runs started in the
+  same second do not share a directory.
+- A byte-order mark in `VERSION` is ignored, and the release zip writes that
+  file once.
 
 ## [0.2.0] - 2026-10-15
 

@@ -97,7 +97,15 @@
 .PARAMETER AgentMode
     Print paths relative to the scan folder and omit the closing
     "Evidence kept at" line. The summary table and error lines stay.
-    For agent runs that must not repeat absolute paths.
+    For agent runs that must not repeat absolute paths. Messages this
+    script prints are scrubbed. Stderr from a collector process is not,
+    and can still contain a path.
+
+.NOTES
+    Exit codes: 0 the scan finished, including "platform not detected".
+    1 usage error (-Here and -OutDir together). 2 a collector failed,
+    wrote nothing, or wrote evidence that is not a readable envelope.
+    3 every collector was fine and only the briefing failed to generate.
 
 .EXAMPLE
     .\aiscan.ps1
@@ -321,15 +329,57 @@ function Get-CollectorExtras {
     return $extra
 }
 
+# Drop a previous run's envelope before this collector starts. A reused
+# -OutDir must not keep an old file when the new run fails to write one.
+function Clear-CollectorEvidence {
+    param(
+        [string]$Name,
+        [string]$EvidenceRoot
+    )
+    $script:StaleEvidenceRemained = $false
+    $evidenceFile = Join-Path $EvidenceRoot "evidence\$Name.json"
+    if (-not (Test-Path -LiteralPath $evidenceFile)) { return }
+    Remove-Item -LiteralPath $evidenceFile -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $evidenceFile) {
+        $script:StaleEvidenceRemained = $true
+        Write-Host "Could not clear previous evidence for $Name." -ForegroundColor Red
+    }
+}
+
+# A readable envelope is a JSON object with findings and platform_detected.
+# null, an array, or any other JSON is not evidence.
+function Read-EvidenceEnvelope {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+        if ($null -eq $raw -or "$raw".Trim() -eq "") { return $null }
+        $parsedJson = $raw | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        return $null
+    }
+    if ($null -eq $parsedJson) { return $null }
+    if ($parsedJson -is [System.Array]) { return $null }
+    $names = @($parsedJson.PSObject.Properties.Name)
+    if (($names -notcontains "findings") -or ($names -notcontains "platform_detected")) {
+        return $null
+    }
+    return $parsedJson
+}
+
 # Runs one collector against $EvidenceRoot. Returns the exit code.
 function Invoke-OneCollector {
     param(
         [string]$Name,
         [string]$EvidenceRoot
     )
+    Clear-CollectorEvidence -Name $Name -EvidenceRoot $EvidenceRoot
+    if ($script:StaleEvidenceRemained) { return 1 }
     $scriptPath = Join-Path $ComponentsDir $ScriptFor[$Name]
     if (-not (Test-Path -LiteralPath $scriptPath)) {
-        Write-Host "Collector script missing: $scriptPath" -ForegroundColor Yellow
+        $shown = Format-AiscanPath -Path $scriptPath -Root $ScriptDir
+        Write-Host "Collector script missing: $shown" -ForegroundColor Yellow
         return 1
     }
 
@@ -359,7 +409,7 @@ function Get-AiscanVersion {
     }
     $versionFile = Join-Path $ScriptDir "VERSION"
     if (Test-Path -LiteralPath $versionFile) {
-        $line = "$(Get-Content -LiteralPath $versionFile -TotalCount 1)".Trim()
+        $line = "$(Get-Content -LiteralPath $versionFile -TotalCount 1)".Trim().TrimStart([char]0xFEFF)
         if ($line) { return $line }
     }
     return "dev"
@@ -419,10 +469,30 @@ function Format-AiscanPath {
     return $Path
 }
 
-# Banner version, also stamped on every evidence envelope via AISCAN_VERSION.
-# Resolved after the helper functions exist (PowerShell does not hoist them).
-$AiscanVersion = Get-AiscanVersion
-$env:AISCAN_VERSION = $AiscanVersion
+# Replace scan-folder and repo-folder prefixes inside a message. Used for
+# exception text, where the path is in the middle of the sentence.
+function Format-AiscanText {
+    param(
+        [string]$Text,
+        [string[]]$Roots
+    )
+    if (-not $AgentMode -or -not $Text) { return $Text }
+    $out = $Text
+    foreach ($base in @($Roots)) {
+        if (-not $base) { continue }
+        try {
+            $full = [System.IO.Path]::GetFullPath($base).TrimEnd('\', '/')
+        }
+        catch { continue }
+        if (-not $full -or $full.Length -lt 3) { continue }
+        $out = $out.Replace($full, ".")
+        $slash = $full.Replace('\', '/')
+        if ($slash -ne $full) { $out = $out.Replace($slash, ".") }
+        $back = $full.Replace('/', '\')
+        if ($back -ne $full) { $out = $out.Replace($back, ".") }
+    }
+    return $out
+}
 
 function New-PeekRoot {
     # -Here/-OutDir make the root persistent (same evidence/raw layout);
@@ -434,7 +504,11 @@ function New-PeekRoot {
         (Get-Location).ProviderPath
     }
     else {
-        Join-Path $env:TEMP "aiscan-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        # Seconds alone collide when two runs start together. -Force would
+        # then let them share the folder, and one cleanup would delete the other.
+        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $nonce = [guid]::NewGuid().ToString("N").Substring(0, 8)
+        Join-Path $env:TEMP "aiscan-$stamp-$nonce"
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $root "evidence") | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $root "raw") | Out-Null
@@ -516,7 +590,8 @@ function Invoke-AiscanBriefing {
         $code = $LASTEXITCODE
     }
     catch {
-        Write-Host "Briefing generation threw: $_" -ForegroundColor Yellow
+        $detail = Format-AiscanText -Text "$_" -Roots @($Root, $ScriptDir)
+        Write-Host "Briefing generation threw: $detail" -ForegroundColor Yellow
         return
     }
     if ($code -ne 0) {
@@ -525,11 +600,14 @@ function Invoke-AiscanBriefing {
     }
     Write-Host ("Briefing written: {0}" -f (Format-AiscanPath -Path $briefingOut -Root $Root)) -ForegroundColor Green
     try {
-        Start-Process -FilePath $briefingOut
+        # Continue would swallow a non-terminating Start-Process error and
+        # still print the success line. Stop makes that error hit the catch.
+        Start-Process -FilePath $briefingOut -ErrorAction Stop
         Write-Host "Opened briefing in default browser" -ForegroundColor Green
     }
     catch {
-        Write-Host "Could not open briefing automatically: $_" -ForegroundColor Yellow
+        $detail = Format-AiscanText -Text "$_" -Roots @($Root, $ScriptDir)
+        Write-Host "Could not open briefing automatically: $detail" -ForegroundColor Yellow
     }
     $script:AiscanBriefingFailed = $false
 }
@@ -635,6 +713,11 @@ if ($Collector -eq "discover") {
     exit $LASTEXITCODE
 }
 
+# Banner version, also stamped on every evidence envelope via AISCAN_VERSION.
+# After discover returns, so a path listing does not spawn git.
+$AiscanVersion = Get-AiscanVersion
+$env:AISCAN_VERSION = $AiscanVersion
+
 # Resolve real history paths once (skipped for the 'discover' command above).
 # Feeds the shared path overrides into every collector.
 Resolve-Discovery
@@ -652,24 +735,34 @@ if ($Collector -eq "all") {
         $jsonPath = Join-Path $root "evidence\$name.json"
         $findings = "-"
         $detected = "-"
-        $hasEvidence = Test-Path -LiteralPath $jsonPath
+        $hasEvidence = $false
         $parsed = $false
         # Collectors write their evidence envelope even when the platform is not
         # detected (exit 2). Exit 2 WITHOUT an envelope is a real failure (e.g.
-        # argparse rejects bad args with exit 2), not "not detected".
-        if ($hasEvidence) {
-            try {
-                $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
-                $parsed = $true
-                if ($j.PSObject.Properties.Name -contains "findings") { $findings = @($j.findings).Count }
-                if ($j.PSObject.Properties.Name -contains "platform_detected") { $detected = $j.platform_detected }
-                if ($code -eq 2) { $detected = "not detected" }
-                elseif ($code -ne 0) { $detected = "error (exit $code)" }
-            }
-            catch { $detected = "parse error" }
-        }
-        elseif ($code -ne 0) {
+        # argparse rejects bad args with exit 2), not "not detected". A file
+        # left from an earlier run was removed before this collector started.
+        if ($script:StaleEvidenceRemained) {
             $detected = "error (exit $code)"
+        }
+        else {
+            $hasEvidence = Test-Path -LiteralPath $jsonPath
+            if ($hasEvidence) {
+                $j = Read-EvidenceEnvelope -Path $jsonPath
+                if ($null -ne $j) {
+                    $parsed = $true
+                    if ($j.PSObject.Properties.Name -contains "findings") { $findings = @($j.findings).Count }
+                    if ($j.PSObject.Properties.Name -contains "platform_detected") { $detected = $j.platform_detected }
+                    if ($code -eq 2) { $detected = "not detected" }
+                    elseif ($code -ne 0) { $detected = "error (exit $code)" }
+                }
+                else { $detected = "parse error" }
+            }
+            elseif ($code -ne 0) {
+                $detected = "error (exit $code)"
+            }
+            else {
+                $detected = "error (no evidence)"
+            }
         }
         $statusRows += (New-CollectorStatusRow -ExitCode $code -HasEvidence $hasEvidence -Parsed $parsed)
         $rows += [PSCustomObject]@{ Collector = $name; Detected = $detected; Findings = $findings }
@@ -690,34 +783,38 @@ $root = New-PeekRoot
 $code = Invoke-OneCollector -Name $Collector -EvidenceRoot $root
 if ($null -eq $code) { $code = 1 }
 $jsonPath = Join-Path $root "evidence\$Collector.json"
-$hasEvidence = Test-Path -LiteralPath $jsonPath
+$hasEvidence = $false
 $parsed = $false
 $j = $null
-if ($hasEvidence) {
-    try {
-        $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
-        $parsed = $true
-    }
-    catch {
-        Write-Host ""
-        Write-Host "$Collector evidence could not be parsed." -ForegroundColor Red
+if (-not $script:StaleEvidenceRemained) {
+    $hasEvidence = Test-Path -LiteralPath $jsonPath
+    if ($hasEvidence) {
+        $j = Read-EvidenceEnvelope -Path $jsonPath
+        if ($null -ne $j) { $parsed = $true }
     }
 }
 
 # Exit 2 with a readable envelope means "platform not detected". Exit 2
-# without one is a real failure (argparse errors also exit 2).
-if ($parsed -and $code -eq 2) {
+# without one is a real failure (argparse errors also exit 2). No file at
+# all is a failure too, including exit 0: the collector wrote nothing.
+if ($script:StaleEvidenceRemained) {
+    Write-Host ""
+    Write-Host "$Collector failed (exit $code)." -ForegroundColor Red
+}
+elseif ($parsed -and $code -eq 2) {
     Write-Host ""
     Write-Host "${Collector}: platform not detected (tool not installed, no local data, or no telemetry export)." -ForegroundColor Yellow
 }
-elseif (-not $parsed -and $hasEvidence) {
-    # The parse message above is the collector failure.
+elseif ($hasEvidence -and -not $parsed) {
+    Write-Host ""
+    Write-Host "$Collector evidence could not be parsed." -ForegroundColor Red
 }
 elseif ($code -ne 0) {
     Write-Host ""
     Write-Host "$Collector failed (exit $code)." -ForegroundColor Red
 }
 elseif (-not $hasEvidence) {
+    Write-Host ""
     Write-Host "$Collector produced no evidence file." -ForegroundColor Yellow
 }
 
@@ -733,6 +830,9 @@ if ($parsed -and $code -eq 0) {
 
 $script:AiscanBriefingFailed = $false
 # A hard failure or a parse error skips the briefing; those already exit 2.
+if ($Briefing -and -not $parsed) {
+    Write-Host "Briefing skipped because $Collector did not write a readable evidence file." -ForegroundColor Yellow
+}
 if ($Briefing -and $parsed -and ($code -eq 0 -or $code -eq 2)) {
     Invoke-ScanDiff -Root $root
     Invoke-AiscanBriefing -Root $root

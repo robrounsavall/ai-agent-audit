@@ -52,6 +52,12 @@ class TestToolVersion(unittest.TestCase):
             (root / "VERSION").write_text("4.5.6\n", encoding="utf-8")
             self.assertEqual(tool_version.tool_version(root, use_env=False), "4.5.6")
 
+    def test_version_file_bom_is_stripped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "VERSION").write_bytes(b"\xef\xbb\xbf4.5.6\n")
+            self.assertEqual(tool_version.tool_version(root, use_env=False), "4.5.6")
+
     def test_dev_when_nothing_is_available(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(tool_version.tool_version(Path(tmp), use_env=False), "dev")
@@ -98,6 +104,12 @@ class TestToolVersion(unittest.TestCase):
             described = tool_version.tool_version(root, use_env=False)
             self.assertNotEqual(described, "9.9.9")
             self.assertRegex(described, r"^[0-9a-f]+$")
+
+    def test_release_script_writes_version_once(self):
+        text = (REPO / "scripts" / "build-release-zip.sh").read_text(encoding="utf-8")
+        files_line = next(line for line in text.splitlines() if line.startswith("files=("))
+        self.assertNotIn("VERSION", files_line)
+        self.assertIn("printf '%s\\n' \"$version\" > \"$stage/VERSION\"", text)
 
     def test_cli_ignores_aiscan_version_env(self):
         env = os.environ.copy()

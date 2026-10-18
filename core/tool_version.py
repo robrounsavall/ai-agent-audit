@@ -60,7 +60,8 @@ def read_version_file(root: Path) -> str | None:
     if not path.is_file():
         return None
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        # utf-8-sig drops a Windows editor BOM so it cannot leak into envelopes.
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return None
     if not lines:

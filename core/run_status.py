@@ -6,8 +6,9 @@ and calls this file:
     python core/run_status.py 0,1,1 2,1,1 --briefing 0
 
 Exit 2 with a readable evidence file is "platform not detected", which is a
-normal result. Any other non-zero collector exit, or an evidence file that
-does not parse, is a collector failure. The process then exits:
+normal result. A collector that writes no evidence file is a failure even
+when its process exit is 0. So is a file that is not a readable envelope,
+and any other non-zero collector exit. The process then exits:
 
 - 2 when any collector failed
 - 3 when collectors were fine and only the briefing failed
@@ -22,12 +23,14 @@ import sys
 def collector_failed(exit_code: int, has_evidence: bool, parsed: bool) -> bool:
     """True when this collector should fail the scan.
 
-    A parse failure counts even if the process exit was 0. Exit 2 plus a
-    parsed envelope does not: collectors use that for "not detected".
+    No evidence file is a failure even when the process exit was 0: the
+    collector wrote nothing. A file that is not a readable envelope is a
+    failure too. Exit 2 plus a parsed envelope is not: collectors use that
+    for "not detected".
     """
-    if has_evidence and not parsed:
+    if not has_evidence or not parsed:
         return True
-    if exit_code == 2 and has_evidence and parsed:
+    if exit_code == 2:
         return False
     return exit_code != 0
 

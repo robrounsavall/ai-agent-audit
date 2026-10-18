@@ -44,8 +44,8 @@ class TestCollectorFailed(unittest.TestCase):
     def test_clean_collector_is_success(self):
         self.assertFalse(run_status.collector_failed(0, True, True))
 
-    def test_exit_0_with_no_file_is_not_a_collector_error(self):
-        self.assertFalse(run_status.collector_failed(0, False, False))
+    def test_exit_0_with_no_file_is_a_collector_error(self):
+        self.assertTrue(run_status.collector_failed(0, False, False))
 
 
 class TestScanExitCode(unittest.TestCase):
@@ -86,8 +86,12 @@ class TestScanExitCode(unittest.TestCase):
         )
 
     def test_not_detected_rows_alone_are_0(self):
-        rows = [(2, True, True), (0, True, True), (0, False, False)]
+        rows = [(2, True, True), (0, True, True)]
         self.assertFalse(run_status.rows_failed(rows))
+
+    def test_a_missing_file_among_clean_rows_is_a_failure(self):
+        rows = [(2, True, True), (0, False, False)]
+        self.assertTrue(run_status.rows_failed(rows))
 
 
 class TestRunStatusCli(unittest.TestCase):
@@ -110,6 +114,16 @@ class TestRunStatusCli(unittest.TestCase):
         proc = _cli("1,0,0", "--briefing", "0")
         self.assertEqual(proc.stdout.strip(), "2")
 
+    def test_cli_exit_0_with_no_file_is_2(self):
+        proc = _cli("0,0,0", "--briefing", "0")
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "2")
+
+    def test_cli_missing_evidence_wins_over_a_briefing_failure(self):
+        proc = _cli("0,0,0", "--briefing", "1")
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "2")
+
     def test_cli_rejects_a_bad_row(self):
         proc = _cli("nope", "--briefing", "0")
         self.assertEqual(proc.returncode, 2)
@@ -120,9 +134,13 @@ class TestRunStatusCli(unittest.TestCase):
         self.assertIn("[switch]$AgentMode", text)
         self.assertIn("run_status.py", text)
         self.assertIn("Opened briefing in default browser", text)
+        self.assertIn("Start-Process -FilePath $briefingOut -ErrorAction Stop", text)
         self.assertIn("Evidence kept at:", text)
         self.assertIn("-not $AgentMode", text)
-        self.assertIn('New-CollectorStatusRow', text)
+        self.assertIn("New-CollectorStatusRow", text)
+        self.assertIn("Read-EvidenceEnvelope", text)
+        self.assertIn("Clear-CollectorEvidence", text)
+        self.assertIn('[guid]::NewGuid().ToString("N")', text)
 
 
 if __name__ == "__main__":
