@@ -181,6 +181,11 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 # Writes evidence\changes.json against the previous sibling scan first.
 .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Briefing
 
+# Safe summary of a scan you already have. Prints collector, detection,
+# and finding severity / title / category / evidence count only.
+# No -OutDir uses the newest folder under %LOCALAPPDATA%\aiscan-results.
+.\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
+
 # Same, with an explicit previous scan folder
 .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Previous C:\scans\2026-10-01 -Briefing
 

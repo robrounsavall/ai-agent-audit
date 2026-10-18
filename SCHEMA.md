@@ -200,6 +200,7 @@ before sharing it.
 | `cloud-agents` | Official Cloud Agents API, `GET https://api.cursor.com` only, with a user-supplied `CURSOR_API_KEY` | Opt-in. Not part of `aiscan all`. Does not read the Cursor IDE session token or call `cursor.com/api/dashboard`. Does not call `GET /v1/repositories` or the enterprise Admin API. |
 | `telemetry` | Local files only: OTLP JSON / JSON-lines (`--otel-file`) and Splunk JSON or CSV exports (`--splunk-export`) | Opt-in `aiscan telemetry`. Not part of `aiscan all`. Counts tool decisions and usage. Does not store prompts, commands, or secret values. `cost_cents` is copied from a Cursor dashboard usage export and is never estimated from tokens. |
 | `changes` | Derived. Not a collector. `python core/scan_diff.py` compares two evidence roots and writes `evidence/changes.json` | The briefing loader skips this file when it walks collector envelopes and passes it only to the changes section. |
+| `agent-summary` | Derived. Not a collector. `aiscan summary` (and every scan) writes `evidence/agent-summary.json` | Safe fields only: collector, detection, and finding severity, title, category, and evidence count. The briefing loader skips this file and `run-status.json`. |
 
 ## Cloud agent inventory (`cloud-agents`)
 
@@ -271,6 +272,19 @@ Prompt text, tool parameters, and secret-shaped attributes are dropped before an
 `summary.comparison` is `first_scan` when no earlier scan was found, and `diff` otherwise. Count fields include `findings_added`, `findings_resolved`, `new_high_or_critical`, `drift_warnings`, `mcp_servers_added`, `allow_rules_added`, and `counters_moved`. Per-collector before/after counters live under `changes.collectors`. The file does not contain filesystem paths or transcript text.
 
 A collector that previously had data and now reports none is a drift warning, not a clean result. Long-term trends (token lines over months, and so on) belong in Splunk, not in a pile of HTML files. See [docs/scan-history.md](docs/scan-history.md) and [docs/report-v2.md](docs/report-v2.md).
+
+## Agent summary (`agent-summary`)
+
+`evidence/agent-summary.json` is not a collector envelope. `aiscan summary` prints the same JSON, and every scan writes the file. It is the only scan output an agent should read.
+
+| List | Fields |
+|---|---|
+| `collectors` | `collector`, `platform_detected`, `detection_status` |
+| `findings` | `collector`, `severity`, `title`, `category`, `evidence_count` |
+| `collector_errors` | `collector`, `platform_detected`, `detection_status` |
+| `coverage_caveats` | same fields as `findings` |
+
+Findings are sorted by severity (critical, high, medium, low), then by `evidence_count` descending. Titles break remaining ties. `detection_status` is one of `detected`, `not detected`, `parse error`, `not collected`, or `error (exit N)`. When an envelope parsed, that status follows `platform_detected`. `collector_errors` is only a missing or unreadable envelope. Coverage caveats are the findings that describe a gap (missing scanner, nothing to scan, a `coverage` tag); those findings stay in `findings` too. Paths, samples, rules, and raw pointers are not copied. `evidence/run-status.json` stores exit codes for a later summary and is not a collector envelope either. The briefing loader skips both files.
 
 ## Versioning
 

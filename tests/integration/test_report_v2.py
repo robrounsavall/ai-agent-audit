@@ -117,6 +117,31 @@ class TestReportV2(unittest.TestCase):
             )
             self.assertNotIn('id="cloud-agents"', html)
 
+    def test_agent_summary_files_are_not_collectors(self):
+        briefing = _load_briefing()
+        with self._root() as raw:
+            root = Path(raw)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            (evidence / "codex.json").write_text(
+                json.dumps(_envelope("codex")),
+                encoding="utf-8",
+            )
+            (evidence / "agent-summary.json").write_text(json.dumps({
+                "findings": [{
+                    "collector": "codex",
+                    "severity": "critical",
+                    "title": "SENTINEL_AGENT_SUMMARY",
+                    "category": "General Tooling",
+                    "evidence_count": 1,
+                }],
+            }), encoding="utf-8")
+            (evidence / "run-status.json").write_text("{not json", encoding="utf-8")
+            loaded = briefing.load_evidence(root)
+            self.assertEqual(set(loaded), {"codex"})
+            html = briefing.build_html(root, customer="Example", operator="Test")
+            self.assertNotIn("SENTINEL_AGENT_SUMMARY", html)
+
     def test_missing_changes_file_is_a_note(self):
         briefing = _load_briefing()
         with self._root() as raw:
@@ -141,7 +166,11 @@ class TestReportV2(unittest.TestCase):
         self.assertIn("grok-bot", body)
         self.assertNotIn("cloud-agents", body)
         self.assertNotIn("telemetry", body)
+        self.assertNotIn("summary", body)
         self.assertIn('"telemetry"', text)
+        self.assertIn('"summary"', text)
+        self.assertIn("agent_summary.py", text)
+        self.assertIn("OUTDIR_ID=", text)
         self.assertIn("scan_diff.py", text)
 
     def _root(self):

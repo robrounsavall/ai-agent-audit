@@ -9,7 +9,14 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `aiscan summary` prints a safe summary of a finished scan: collector,
+  detection status, and each finding's severity, title, category, and
+  evidence count. Paths, samples, rules, and raw pointers are left out.
+  Every run also writes `evidence\agent-summary.json` and prints
+  `OUTDIR_ID=<folder name>`. With no `-OutDir`, `summary` reads the newest
+  folder under `%LOCALAPPDATA%\aiscan-results`.
 
 ## [0.2.0] - 2026-10-15
 

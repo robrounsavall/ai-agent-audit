@@ -21,6 +21,10 @@
     Defaults to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
+    'summary' reads a finished scan and prints a safe summary (collector,
+    detection, and finding severity, title, category, and evidence count).
+    It does not run collectors. Omit -OutDir to use the newest folder under
+    %LOCALAPPDATA%\aiscan-results.
     'all' runs the 11 offline collectors and prints a combined summary.
     'cloud-agents' and 'telemetry' are not included in 'all'. cloud-agents
     reads CURSOR_API_KEY and never prints that key. telemetry reads export
@@ -132,13 +136,18 @@
 .EXAMPLE
     .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Previous C:\scans\2026-10-01 -Briefing
     Offline collectors, then a changes envelope versus the previous scan, then the HTML briefing.
+
+.EXAMPLE
+    .\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
+    Safe summary of a scan that already finished. No -OutDir selects the newest
+    folder under %LOCALAPPDATA%\aiscan-results.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false, Position = 0)]
     [ValidateSet("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
         "git-posture", "secrets-scan", "pii-scan", "grok", "grok-bot",
-        "cloud-agents", "telemetry", "discover", "all")]
+        "cloud-agents", "telemetry", "discover", "all", "summary")]
     [string]$Collector = "all",
 
     [switch]$Json,
@@ -352,6 +361,12 @@ function New-PeekRoot {
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $root "evidence") | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $root "raw") | Out-Null
+    # Leaf name only. A later shell rebuilds $env:LOCALAPPDATA\aiscan-results\<id>
+    # when the scan was started with that layout. The full path is not printed here.
+    $outLeaf = Split-Path -Leaf $root
+    if ($outLeaf) {
+        Write-Host "OUTDIR_ID=$outLeaf"
+    }
     return $root
 }
 
@@ -535,13 +550,123 @@ function Show-Peek {
     Write-Host ""
 }
 
+# One collector's console row. Exit 2 with an envelope is "not detected",
+# matching the table this script has always printed. The safe summary reads
+# platform_detected from the envelope instead of this label.
+function Get-CollectorResult {
+    param(
+        [string]$Name,
+        [int]$ExitCode,
+        [string]$EvidenceRoot
+    )
+    $jsonPath = Join-Path $EvidenceRoot "evidence\$Name.json"
+    $findings = "-"
+    $detected = "-"
+    if (Test-Path -LiteralPath $jsonPath) {
+        try {
+            $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+            if ($j.PSObject.Properties.Name -contains "findings") { $findings = @($j.findings).Count }
+            if ($j.PSObject.Properties.Name -contains "platform_detected") { $detected = $j.platform_detected }
+            if ($ExitCode -eq 2) { $detected = "not detected" }
+        }
+        catch { $detected = "parse error" }
+    }
+    elseif ($ExitCode -ne 0) {
+        $detected = "error (exit $ExitCode)"
+    }
+    return [PSCustomObject]@{
+        Collector = $Name
+        Detected  = $detected
+        Findings  = $findings
+        ExitCode  = $ExitCode
+    }
+}
+
+function Format-CollectorStatusToken {
+    param($Row)
+    $status = $Row.Detected
+    if ($status -is [bool]) {
+        if ($status) { $status = "detected" } else { $status = "not detected" }
+    }
+    else {
+        $status = "$status"
+        if ($status -eq "True") { $status = "detected" }
+        elseif ($status -eq "False") { $status = "not detected" }
+    }
+    return ("{0}|{1}|{2}" -f $Row.Collector, [int]$Row.ExitCode, $status)
+}
+
+# Writes evidence\agent-summary.json. Failures warn and fall through; the
+# scan result is already on disk. Stdout is swallowed so the console table
+# stays the collector summary. --no-id because New-PeekRoot already printed
+# OUTDIR_ID.
+function Write-AgentSummary {
+    param(
+        [string]$Root,
+        [array]$Rows
+    )
+    $summaryScript = Join-Path $CoreDir "agent_summary.py"
+    if (-not (Test-Path -LiteralPath $summaryScript)) {
+        Write-Host "agent_summary.py not found; skipping agent summary." -ForegroundColor Yellow
+        return
+    }
+    $sumArgs = @($summaryScript, "--evidence-root", $Root, "--write", "--no-id")
+    foreach ($row in @($Rows)) {
+        if (-not $row) { continue }
+        $sumArgs += @("--collector-status", (Format-CollectorStatusToken -Row $row))
+    }
+    & $Python @sumArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Agent summary was not written." -ForegroundColor Yellow
+    }
+}
+
 # --- discover: read-only, no temp dir ---
 if ($Collector -eq "discover") {
     & $Python (Join-Path $CoreDir "discover.py")
     exit $LASTEXITCODE
 }
 
-# Resolve real history paths once (skipped for the 'discover' command above).
+# --- summary: safe fields only, no collectors ---
+if ($Collector -eq "summary") {
+    $summaryScript = Join-Path $CoreDir "agent_summary.py"
+    if (-not (Test-Path -LiteralPath $summaryScript)) {
+        Write-Host "agent_summary.py not found." -ForegroundColor Red
+        exit 1
+    }
+    # --no-id: this script prints OUTDIR_ID with Write-Host. Python stays quiet
+    # on success so Windows PowerShell 5.1 does not treat a status line as an error.
+    $sumArgs = @($summaryScript, "--write", "--no-id")
+    if ($OutDir) {
+        $sumArgs += @("--evidence-root", $OutDir)
+        $outLeaf = Split-Path -Leaf $OutDir
+    }
+    elseif ($Here) {
+        $herePath = (Get-Location).ProviderPath
+        $sumArgs += @("--evidence-root", $herePath)
+        $outLeaf = Split-Path -Leaf $herePath
+    }
+    else {
+        if (-not $env:LOCALAPPDATA) {
+            Write-Host "LOCALAPPDATA is not set. Pass -OutDir to choose the scan folder." -ForegroundColor Red
+            exit 1
+        }
+        $resultsRoot = Join-Path $env:LOCALAPPDATA "aiscan-results"
+        $picked = & $Python @($summaryScript, "--results-root", $resultsRoot, "--print-id")
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $outLeaf = "$picked".Trim()
+        if (-not $outLeaf) {
+            Write-Host "No scan folders found." -ForegroundColor Red
+            exit 1
+        }
+        $sumArgs += @("--evidence-root", (Join-Path $resultsRoot $outLeaf))
+    }
+    if ($outLeaf) { Write-Host "OUTDIR_ID=$outLeaf" }
+    & $Python @sumArgs
+    exit $LASTEXITCODE
+}
+
+# Resolve real history paths once (skipped for 'discover' and 'summary').
 # Feeds the shared path overrides into every collector.
 Resolve-Discovery
 
@@ -550,31 +675,25 @@ if ($Collector -eq "all") {
     $root = New-PeekRoot
     Write-Host "aiscan $AiscanVersion" -ForegroundColor DarkGray
     $rows = @()
+    $statuses = @()
     foreach ($name in $StdlibOrder) {
         Write-Host "Running $name..." -ForegroundColor Cyan
         $code = Invoke-OneCollector -Name $name -EvidenceRoot $root
-        $jsonPath = Join-Path $root "evidence\$name.json"
-        $findings = "-"
-        $detected = "-"
+        if ($null -eq $code) { $code = 1 }
         # Collectors write their evidence envelope even when the platform is not
         # detected (exit 2). Exit 2 WITHOUT an envelope is a real failure (e.g.
         # argparse rejects bad args with exit 2), not "not detected".
-        if (Test-Path -LiteralPath $jsonPath) {
-            try {
-                $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
-                if ($j.PSObject.Properties.Name -contains "findings") { $findings = @($j.findings).Count }
-                if ($j.PSObject.Properties.Name -contains "platform_detected") { $detected = $j.platform_detected }
-                if ($code -eq 2) { $detected = "not detected" }
-            }
-            catch { $detected = "parse error" }
+        $result = Get-CollectorResult -Name $name -ExitCode $code -EvidenceRoot $root
+        $statuses += $result
+        $rows += [PSCustomObject]@{
+            Collector = $result.Collector
+            Detected  = $result.Detected
+            Findings  = $result.Findings
         }
-        elseif ($code -ne 0) {
-            $detected = "error (exit $code)"
-        }
-        $rows += [PSCustomObject]@{ Collector = $name; Detected = $detected; Findings = $findings }
     }
     Write-Host ""
     $rows | Format-Table -AutoSize
+    Write-AgentSummary -Root $root -Rows $statuses
     if ($Briefing) {
         Invoke-ScanDiff -Root $root
         Invoke-AiscanBriefing -Root $root
@@ -586,6 +705,9 @@ if ($Collector -eq "all") {
 # --- single collector ---
 $root = New-PeekRoot
 $code = Invoke-OneCollector -Name $Collector -EvidenceRoot $root
+if ($null -eq $code) { $code = 1 }
+$result = Get-CollectorResult -Name $Collector -ExitCode $code -EvidenceRoot $root
+Write-AgentSummary -Root $root -Rows @($result)
 
 # Exit 2 with an evidence envelope means "platform not detected". Exit 2
 # without one is a real failure (argparse errors also exit 2).

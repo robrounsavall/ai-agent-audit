@@ -89,7 +89,9 @@ SUPPORTED_MAJOR = 1
 
 # changes.json is a derived envelope, not a collector. The briefing reads it
 # with load_changes_envelope and must not treat it as another tool.
-_NON_COLLECTOR_ENVELOPES = {"changes"}
+# agent-summary.json and run-status.json are the safe agent rollup. They are
+# not versioned collector envelopes and must not fail the schema check.
+_NON_COLLECTOR_ENVELOPES = {"changes", "agent-summary", "run-status"}
 
 PLATFORM_COLLECTORS = ("claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot")
 

@@ -33,6 +33,7 @@ printf '%s\n' "$version" > "$stage/VERSION"
 
 # Fail if aiscan.ps1's runtime entry points are missing.
 for need in core/common.py core/paths.py core/discover.py core/scan_diff.py \
+            core/agent_summary.py \
             report/build-briefing.py report/templates/briefing.css; do
   [[ -f "$stage/$need" ]] || { echo "missing from zip: $need" >&2; exit 1; }
 done
