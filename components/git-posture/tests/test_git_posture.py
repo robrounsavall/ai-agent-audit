@@ -7,6 +7,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
@@ -47,6 +48,77 @@ class TestCheckGitignore(unittest.TestCase):
             has_env, missing = gp.check_gitignore(repo)
             self.assertFalse(has_env)
             self.assertTrue(any(".env" in m for m in missing))
+
+
+def _git(repo: Path, *args: str) -> None:
+    env = os.environ.copy()
+    env["GIT_AUTHOR_NAME"] = "Test"
+    env["GIT_AUTHOR_EMAIL"] = "test@example.com"
+    env["GIT_COMMITTER_NAME"] = "Test"
+    env["GIT_COMMITTER_EMAIL"] = "test@example.com"
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+def _commit_repo(path: Path, filename: str) -> None:
+    path.mkdir(parents=True)
+    _git(path, "init")
+    _git(path, "config", "user.email", "test@example.com")
+    _git(path, "config", "user.name", "Test")
+    (path / filename).write_text("A=1\n", encoding="utf-8")
+    _git(path, "add", "-f", "--", filename)
+    _git(path, "commit", "-m", "add file")
+
+
+class TestDuplicateTitles(unittest.TestCase):
+    def test_count_label_plural(self):
+        self.assertEqual(gp._count_label(1, "repo"), "1 repo")
+        self.assertEqual(gp._count_label(2, "repo"), "2 repos")
+
+    def test_same_check_is_one_finding_per_title(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _commit_repo(root / "with-env", ".env")
+            _commit_repo(root / "with-env-local", ".env.local")
+            _commit_repo(root / "clean", "readme.txt")
+            hook = root / "clean" / ".git" / "hooks" / "pre-commit"
+            hook.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            with unittest.mock.patch.object(
+                gp, "check_large_blobs", return_value=[("weights.bin", 11 * 1024 * 1024)]
+            ), unittest.mock.patch.object(gp, "check_branch_protection", return_value=False):
+                envelope = gp.collect([root], allow_gh=True)
+
+        findings = envelope["findings"]
+        titles = [item["title"] for item in findings]
+        self.assertEqual(len(titles), len(set(titles)))
+
+        env_hit = next(item for item in findings if item["id"] == "git.env.in_history")
+        self.assertEqual(env_hit["evidence_count"], 2)
+        self.assertEqual(env_hit["severity"], "critical")
+        self.assertIn("2 repos", env_hit["title"])
+        self.assertIn("with-env", env_hit["sample_redacted"])
+        self.assertIn("with-env-local", env_hit["sample_redacted"])
+        self.assertNotIn("clean", env_hit["sample_redacted"])
+
+        hooks = next(item for item in findings if item["id"] == "git.hooks.missing")
+        self.assertEqual(hooks["evidence_count"], 2)
+        self.assertIn("2 repos", hooks["title"])
+
+        protection = next(item for item in findings if item["id"] == "git.branch.no_protection")
+        self.assertEqual(protection["evidence_count"], 3)
+        self.assertIn("3 repos", protection["title"])
+
+        blobs = next(item for item in findings if item["id"] == "git.blob.large")
+        self.assertEqual(len([item for item in findings if item["id"] == "git.blob.large"]), 1)
+        self.assertEqual(blobs["evidence_count"], 3)
+        self.assertIn("3 blobs", blobs["title"])
+        self.assertEqual(envelope["summary"]["env_in_history"], 2)
+        self.assertEqual(envelope["summary"]["no_pre_commit"], 2)
+        self.assertEqual(envelope["summary"]["large_blobs"], 3)
 
 
 class TestNotDetectedFindings(unittest.TestCase):

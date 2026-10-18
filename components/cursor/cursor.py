@@ -28,6 +28,7 @@ from common import (
     make_envelope,
     make_finding,
     make_rule,
+    merge_duplicate_findings,
     nested_text,
     secret_types_in,
     validate_evidence_root,
@@ -592,7 +593,7 @@ def collect(
             )
         )
 
-    envelope["findings"] = findings
+    envelope["findings"] = merge_duplicate_findings(findings)
     envelope["summary"] = {
         "durable_rules": len(non_mcp_rules),
         "mcp_rules": sum(1 for r in rules if r.get("rule_type") == "mcp_tool"),

@@ -300,6 +300,17 @@ class TestSideFiles(Base):
         self.assertNotIn("secret allow text", dump)
         self.assertNotIn(SECRET_TOKEN, dump)
 
+    def test_same_project_sandbox_title_merges(self):
+        other = self.repos / "proj2"
+        (other / ".git").mkdir(parents=True)
+        for repo in (self.repo, other):
+            write(repo / ".cursor" / "sandbox.json", {"type": "insecure_none"})
+        env = self.run_collect()
+        rows = by_id(env["findings"], "cursor.sandbox.disabled")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["evidence_count"], 2)
+        self.assertIn("project sandbox.json", rows[0]["title"])
+
     def test_camelcase_permissions_and_bad_sandbox(self):
         write(self.home / "permissions.json", {"allowInstructions": ["x"], "blockInstructions": []})
         write(self.home / "sandbox.json", "[1,")

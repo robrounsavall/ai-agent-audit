@@ -12,6 +12,10 @@ Betterleaks can check found credentials against live provider APIs
 aiscan never turns that on: the command line forces both off, and the
 environment variables that could turn them on are removed from the child
 process. The scan stays local.
+
+Evidence is one finding per rule and severity. evidence_count is the number
+of hits, and the title includes how many files were involved. Per-hit detail
+stays in raw/secrets-scan/findings.csv.
 """
 
 from __future__ import annotations
@@ -39,7 +43,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 COLLECTOR = "secrets-scan"
 
@@ -106,6 +110,201 @@ def find_scanner() -> tuple[str, str] | None:
 def scanner_family(scanner: str) -> str:
     """Name reported in the evidence summary and finding titles."""
     return "betterleaks" if scanner.startswith("betterleaks") else scanner
+
+
+# Severity is an exact rule id, not a substring of the name. "aws" inside an
+# unrelated rule stays at the default. Keys are rule_key() form (lowercase,
+# spaces and underscores as hyphens). Trufflehog names have no hyphens
+# ("PrivateKey"); those match the compact form of the same entry.
+DEFAULT_SECRET_SEVERITY = "high"
+
+_CRITICAL_SECRET_RULES = (
+    # Cloud accounts
+    "aws",
+    "aws-access-token",
+    "aws-session-key",
+    "awssessionkey",
+    "aws-amazon-bedrock-api-key-long-lived",
+    "aws-amazon-bedrock-api-key-short-lived",
+    "gcp",
+    "gcp-api-key",
+    "gcpapplicationdefaultcredentials",
+    "azure",
+    "azure-ad-client-secret",
+    "alibaba-access-key-id",
+    "alibaba-secret-key",
+    "digitalocean",
+    "digitalocean-access-token",
+    "digitalocean-pat",
+    "digitalocean-refresh-token",
+    "heroku",
+    "heroku-api-key",
+    "heroku-api-key-v2",
+    "yandex-access-token",
+    "yandex-api-key",
+    "yandex-aws-access-token",
+    # Source hosts and package registries
+    "github",
+    "github-app-token",
+    "github-fine-grained-pat",
+    "github-oauth",
+    "github-pat",
+    "github-refresh-token",
+    "gitlab",
+    "gitlab-pat",
+    "gitlab-pat-routable",
+    "gitlab-deploy-token",
+    "gitlab-oauth-app-secret",
+    "gitlab-runner-authentication-token",
+    "gitlab-runner-authentication-token-routable",
+    "bitbucket",
+    "bitbucket-client-secret",
+    "npm",
+    "npm-access-token",
+    "pypi",
+    "pypi-upload-token",
+    "rubygems-api-token",
+    # Private keys and password-manager secrets
+    "private-key",
+    "privatekey",
+    "age",
+    "age-secret-key",
+    "pkcs12-file",
+    "1password-secret-key",
+    "1password-service-account-token",
+    # Identity, vault, and payments
+    "vault",
+    "vault-service-token",
+    "vault-batch-token",
+    "hashicorp-tf-api-token",
+    "okta",
+    "okta-access-token",
+    "stripe",
+    "stripe-access-token",
+    "square",
+    "square-access-token",
+    "shopify",
+    "shopify-access-token",
+    "shopify-custom-access-token",
+    "shopify-private-app-access-token",
+    "shopify-shared-secret",
+    # Org chat, mail, and AI-provider credentials
+    "slack",
+    "slack-app-token",
+    "slack-bot-token",
+    "slack-user-token",
+    "slack-config-access-token",
+    "slack-config-refresh-token",
+    "slack-legacy-bot-token",
+    "slack-legacy-token",
+    "slack-legacy-workspace-token",
+    "discord",
+    "discord-api-token",
+    "discord-client-secret",
+    "sendgrid",
+    "sendgrid-api-token",
+    "twilio",
+    "twilio-api-key",
+    "openai",
+    "openai-api-key",
+    "anthropic",
+    "anthropic-api-key",
+    "anthropic-admin-api-key",
+    "huggingface",
+    "huggingface-access-token",
+    "huggingface-organization-api-token",
+    "databricks",
+    "databricks-api-token",
+    "cloudflare",
+    "cloudflare-api-key",
+    "cloudflare-global-api-key",
+    "cloudflare-origin-ca-key",
+)
+
+
+def rule_key(rule: str) -> str:
+    """Normalize a scanner rule id for lookup and grouping."""
+    text = str(rule or "").strip().lower().replace("_", " ")
+    text = re.sub(r"\s+", "-", text)
+    text = re.sub(r"-+", "-", text).strip("-")
+    return text
+
+
+def _compact_rule_key(key: str) -> str:
+    return key.replace("-", "")
+
+
+_CRITICAL_KEYS = frozenset(rule_key(rule) for rule in _CRITICAL_SECRET_RULES)
+_CRITICAL_COMPACT = frozenset(_compact_rule_key(key) for key in _CRITICAL_KEYS)
+
+
+def severity_for_rule(rule: str) -> str:
+    """Critical for listed high-impact rules; every other rule is high."""
+    key = rule_key(rule)
+    if key and (key in _CRITICAL_KEYS or _compact_rule_key(key) in _CRITICAL_COMPACT):
+        return "critical"
+    return DEFAULT_SECRET_SEVERITY
+
+
+def secret_finding_id(rule: str) -> str:
+    slug = (rule_key(rule) or "unknown")[:40]
+    return f"secrets_scan.{slug}"
+
+
+def group_secret_hits(hits: list[dict], scanner_name: str) -> list[dict]:
+    """One finding per rule and severity.
+
+    evidence_count is the number of hits. The title carries the distinct file
+    count in the same shape pii-scan uses. Per-hit rows stay in findings.csv.
+    """
+    groups: dict[tuple[str, str], dict] = {}
+    for hit in hits:
+        rule = str(hit.get("rule") or "unknown")
+        severity = severity_for_rule(rule)
+        key = (rule_key(rule) or "unknown", severity)
+        bucket = groups.get(key)
+        if bucket is None:
+            bucket = {
+                "rule": rule,
+                "severity": severity,
+                "count": 0,
+                "files": set(),
+                "sample_secret": "",
+                "sample_rule": rule,
+            }
+            groups[key] = bucket
+        bucket["count"] += 1
+        file_path = str(hit.get("file") or "").strip()
+        if file_path:
+            bucket["files"].add(file_path)
+        if not bucket["sample_secret"] and hit.get("secret"):
+            bucket["sample_secret"] = str(hit["secret"])
+            bucket["sample_rule"] = rule
+
+    findings: list[dict] = []
+    ordered = sorted(groups.values(), key=lambda item: (-item["count"], str(item["rule"]).lower()))
+    for bucket in ordered:
+        rule = str(bucket["rule"])
+        count = int(bucket["count"])
+        file_count = len(bucket["files"])
+        secret = str(bucket["sample_secret"] or "")
+        findings.append(
+            make_finding(
+                secret_finding_id(rule),
+                bucket["severity"],
+                "Secrets Exposure",
+                (
+                    f"Secret detected by {scanner_name}: {rule} "
+                    f"({count} hit(s) across {file_count} file(s))"
+                ),
+                evidence_count=count,
+                sample_redacted=redact_sample(secret, bucket["sample_rule"]) if secret else rule,
+                secret_redacted=True,
+                tags=["gh_token_present" if "github" in rule.lower() else "env_read"],
+                raw_evidence_ref="raw/secrets-scan/findings.csv",
+            )
+        )
+    return findings
 
 
 def betterleaks_env(base: dict[str, str] | None = None) -> dict[str, str]:
@@ -396,22 +595,8 @@ def collect(
                 tags=["env_read"],
             )
         )
-    for hit in all_hits:
-        secret = hit.get("secret", "")
-        rule = hit.get("rule", "unknown")
-        severity = "critical" if any(t in rule.lower() for t in ("aws", "github", "private key")) else "high"
-        findings.append(
-            make_finding(
-                f"secrets_scan.{rule.lower().replace(' ', '_')[:40]}",
-                severity,
-                "Secrets Exposure",
-                f"Secret detected by {scanner_name}: {rule}",
-                sample_redacted=redact_sample(secret, rule) if secret else rule,
-                secret_redacted=True,
-                tags=["gh_token_present" if "github" in rule.lower() else "env_read"],
-                raw_evidence_ref="raw/secrets-scan/findings.csv",
-            )
-        )
+    # One row per rule. The CSV written above still has one row per hit.
+    findings.extend(group_secret_hits(all_hits, scanner_name))
 
     envelope["findings"] = findings
     envelope["summary"] = {

@@ -227,7 +227,8 @@ def _display_redaction_tokens(value: Any) -> str:
 
 _TRAILING_COUNT_RE = re.compile(r"^(?P<body>.+?):\s*(?P<count>\d+)\s*$")
 _SECRET_TITLE_RE = re.compile(
-    r"^Secret detected by (?P<scanner>[A-Za-z0-9_.-]+):\s*(?P<rule>.+)$"
+    r"^Secret detected by (?P<scanner>[A-Za-z0-9_.-]+):\s*(?P<rule>.+?)"
+    r"(?: \((?P<hits>\d+) hit\(s\) across (?P<files>\d+) file\(s\)\))?$"
 )
 _REDACTED_SAMPLE_RE = re.compile(r"^(?P<body>.*?)\s+\((?P<kind>[^)]+)\)\s*$")
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -363,15 +364,29 @@ def _display_finding_title(finding: dict[str, Any]) -> str:
     return title
 
 
-def _secret_title_parts(title: str) -> tuple[str, str] | None:
+def _secret_title_base(title: str) -> str:
     base = str(title or "")
     marker = f" · {_PLACEHOLDER_LABEL}"
     if base.endswith(marker):
         base = base[: -len(marker)]
-    match = _SECRET_TITLE_RE.match(base.strip())
+    return base.strip()
+
+
+def _secret_title_match(title: str) -> re.Match[str] | None:
+    return _SECRET_TITLE_RE.match(_secret_title_base(title))
+
+
+def _secret_title_parts(title: str) -> tuple[str, str] | None:
+    match = _secret_title_match(title)
     if not match:
         return None
     return match.group("scanner").strip().lower(), match.group("rule").strip()
+
+
+def _secret_title_grouped(title: str) -> bool:
+    """True when the collector already rolled this rule into one finding."""
+    match = _secret_title_match(title)
+    return bool(match and match.group("hits"))
 
 
 def _redacted_sample_parts(sample: str) -> tuple[str, str]:
@@ -555,10 +570,15 @@ def present_findings(
         parts = _secret_title_parts(str(row.get("title") or ""))
         if parts:
             row["_scanner"], row["_rule"] = parts
+        if _secret_title_grouped(str(row.get("title") or "")):
+            row["_rule_grouped"] = True
         canon = canonical_secret_severity(row)
         if canon:
             row["severity"] = canon
-        reason = likely_placeholder_reason(row)
+        # A grouped rule carries one sample for every hit. One placeholder-looking
+        # sample must not downgrade the whole rule. A single hit still can.
+        grouped_many = bool(row.get("_rule_grouped")) and int(row.get("evidence_count") or 1) > 1
+        reason = None if grouped_many else likely_placeholder_reason(row)
         if reason:
             row["severity"] = "low"
             row["_placeholder_reason"] = reason
@@ -1905,11 +1925,17 @@ class EvidenceContext:
                 add({"path": str(path).strip(), "line": ""})
         rule = str(finding.get("_rule") or "").lower()
         if rule and rule in self._secrets:
-            members = finding.get("_member_samples") or [finding.get("sample_redacted") or ""]
-            wanted = {_sample_compact(str(m)) for m in members}
-            for compact, loc in self._secrets[rule]:
-                if compact in wanted:
+            # Collector-grouped rules are one row for every hit of that rule, so
+            # the card lists every file in the CSV, not only the sample's file.
+            if finding.get("_rule_grouped"):
+                for _compact, loc in self._secrets[rule]:
                     add(dict(loc))
+            else:
+                members = finding.get("_member_samples") or [finding.get("sample_redacted") or ""]
+                wanted = {_sample_compact(str(m)) for m in members}
+                for compact, loc in self._secrets[rule]:
+                    if compact in wanted:
+                        add(dict(loc))
         fid = str(finding.get("id") or "").lower()
         if fid.startswith("pii_scan."):
             candidates = [fid[len("pii_scan."):]]

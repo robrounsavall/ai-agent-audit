@@ -479,12 +479,64 @@ def redact_sample(secret: str, secret_type: str = "generic") -> str:
     return f"{secret[:4]}...{secret[-4:]} ({secret_type})"
 
 
+def merge_duplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse rows that share a severity and a title.
+
+    evidence_count is the sum. A repeated title otherwise shows up as several
+    findings and swamps the severity counts. Different titles stay separate.
+    """
+    merged: list[dict[str, Any]] = []
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        key = (str(finding.get("severity") or ""), str(finding.get("title") or ""))
+        current = index.get(key)
+        if current is None:
+            current = dict(finding)
+            tags = finding.get("tags")
+            current["tags"] = list(tags) if isinstance(tags, list) else []
+            index[key] = current
+            merged.append(current)
+            continue
+        try:
+            extra = int(finding.get("evidence_count") or 1)
+        except (TypeError, ValueError):
+            extra = 1
+        try:
+            base = int(current.get("evidence_count") or 1)
+        except (TypeError, ValueError):
+            base = 1
+        current["evidence_count"] = base + extra
+        extra_sample = str(finding.get("sample_redacted") or "").strip()
+        have = str(current.get("sample_redacted") or "").strip()
+        parts = [part.strip() for part in have.split(", ") if part.strip()] if have else []
+        if extra_sample and extra_sample not in parts and len(parts) < 5:
+            current["sample_redacted"] = f"{have}, {extra_sample}" if have else extra_sample
+        for tag in finding.get("tags") or []:
+            if tag not in current["tags"]:
+                current["tags"].append(tag)
+        if finding.get("secret_redacted"):
+            current["secret_redacted"] = True
+        for field, pick in (("first_seen", min), ("last_seen", max)):
+            left = str(current.get(field) or "")
+            right = str(finding.get(field) or "")
+            if left and right:
+                current[field] = pick(left, right)
+            elif right and not left:
+                current[field] = right
+    return merged
+
+
 def finish_collector(
     envelope: dict[str, Any],
     evidence_root: Path,
     *,
     dry_run: bool = False,
 ) -> None:
+    findings = envelope.get("findings")
+    if isinstance(findings, list):
+        envelope["findings"] = merge_duplicate_findings(findings)
     if dry_run:
         print(json.dumps(envelope, indent=2, ensure_ascii=False))
         return

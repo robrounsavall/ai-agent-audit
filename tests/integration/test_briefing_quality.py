@@ -143,6 +143,62 @@ class TestSecretPresentation(unittest.TestCase):
             "Generic secrets across 1 file",
         )
 
+    def test_grouped_rule_title_keeps_the_rule_name(self):
+        presented, _stats = self.briefing.present_findings([
+            _secret(
+                "generic-api-key",
+                "ab12...cd34 (generic-api-key)",
+                title="Secret detected by gitleaks: generic-api-key (2 hit(s) across 2 file(s))",
+                evidence_count=2,
+            ),
+            _secret(
+                "generic-api-key",
+                "YOUR...HERE (generic-api-key)",
+                title="Secret detected by gitleaks: generic-api-key (4 hit(s) across 3 file(s))",
+                evidence_count=4,
+            ),
+        ])
+        by_count = {row["evidence_count"]: row for row in presented}
+        plain = by_count[2]
+        self.assertEqual(plain["_rule"], "generic-api-key")
+        self.assertTrue(plain["_rule_grouped"])
+        self.assertEqual(plain["severity"], "high")
+        self.assertIn("Generic API key", plain["title"])
+        self.assertNotIn("hit(s)", plain["title"])
+        # One placeholder-looking sample must not downgrade every hit of the rule.
+        grouped = by_count[4]
+        self.assertEqual(grouped["severity"], "high")
+        self.assertNotIn("likely test value", grouped["title"])
+        single, _stats = self.briefing.present_findings([
+            _secret("generic-api-key", "YOUR...HERE (generic-api-key)"),
+        ])
+        self.assertEqual(single[0]["severity"], "low")
+
+    def test_grouped_rule_lists_every_csv_file(self):
+        import csv
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            folder = root / "raw" / "secrets-scan"
+            folder.mkdir(parents=True)
+            with (folder / "findings.csv").open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["file", "line", "rule", "sample_redacted"])
+                writer.writerow(["demo/a.txt", "1", "generic-api-key", "ab12...cd34 (generic-api-key)"])
+                writer.writerow(["demo/b.txt", "2", "generic-api-key", "zzzz...9999 (generic-api-key)"])
+            presented, _stats = self.briefing.present_findings([
+                _secret(
+                    "generic-api-key",
+                    "ab12...cd34 (generic-api-key)",
+                    title="Secret detected by gitleaks: generic-api-key (2 hit(s) across 2 file(s))",
+                    evidence_count=2,
+                )
+            ])
+            ctx = self.briefing.EvidenceContext(root, False)
+            paths = {loc["path"] for loc in ctx.locations(presented[0])}
+        self.assertEqual(paths, {"demo/a.txt", "demo/b.txt"})
+
     def test_redundant_count_leaves_the_title(self):
         presented, _stats = self.briefing.present_findings([
             {

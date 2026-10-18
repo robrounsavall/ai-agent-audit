@@ -29,7 +29,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 COLLECTOR = "git-posture"
 LARGE_BLOB_BYTES = 10 * 1024 * 1024
@@ -202,6 +202,20 @@ def repo_display_name(repo: Path) -> str:
     return repo.name or "unknown"
 
 
+def _count_label(count: int, singular: str) -> str:
+    noun = singular if count == 1 else f"{singular}s"
+    return f"{count} {noun}"
+
+
+def _sample_list(labels: list[str], limit: int = 5) -> str:
+    shown = [label for label in labels if label][:limit]
+    text = ", ".join(shown)
+    extra = len(labels) - len(shown)
+    if extra > 0:
+        text += f" (+{extra} more)"
+    return text
+
+
 def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
     repos = find_git_repos(repo_roots)
     scope_hash = compute_scope_hash(str(r.resolve()) for r in repos)
@@ -234,11 +248,14 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
         return envelope
 
     rules: list[dict] = []
-    findings: list[dict] = []
     env_hits = 0
     no_hooks = 0
     no_protection = 0
     large_blob_count = 0
+    env_samples: list[str] = []
+    hook_samples: list[str] = []
+    protection_samples: list[str] = []
+    blob_samples: list[str] = []
 
     for repo in repos:
         repo_label = repo_display_name(repo)
@@ -278,52 +295,68 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
 
         if env_in_history:
             env_hits += 1
-            findings.append(
-                make_finding(
-                    "git.env.in_history",
-                    "critical",
-                    "Git Posture",
-                    ".env file found in git commit history",
-                    sample_redacted=repo_sample,
-                    tags=["env_read"],
-                )
-            )
+            env_samples.append(repo_sample)
         if not has_hooks:
             no_hooks += 1
-            findings.append(
-                make_finding(
-                    "git.hooks.missing",
-                    "medium",
-                    "Git Posture",
-                    "Repository has no pre-commit hooks configured",
-                    sample_redacted=repo_sample,
-                    tags=["pre_commit_missing"],
-                )
-            )
+            hook_samples.append(repo_sample)
         if allow_gh and protection is False:
             no_protection += 1
-            findings.append(
-                make_finding(
-                    "git.branch.no_protection",
-                    "medium",
-                    "Git Posture",
-                    "Default branch lacks GitHub branch protection",
-                    sample_redacted=repo_sample,
-                    tags=["gh_token_present"],
-                )
-            )
+            protection_samples.append(repo_sample)
         for blob_name, size in large_blobs:
             large_blob_count += 1
-            findings.append(
-                make_finding(
-                    "git.blob.large",
-                    "low",
-                    "Git Posture",
-                    f"Large blob ({size // (1024*1024)}MB) in repository history",
-                    sample_redacted=blob_name[:40],
-                    tags=["history_retention"],
-                )
+            blob_samples.append(f"{size // (1024 * 1024)}MB {blob_name[:40]}")
+
+    # One finding per check. Repeating the same title once per repo made the
+    # severity counts and the top of the report list the same issue many times.
+    findings: list[dict] = []
+    if env_hits:
+        findings.append(
+            make_finding(
+                "git.env.in_history",
+                "critical",
+                "Git Posture",
+                f".env file found in git commit history ({_count_label(env_hits, 'repo')})",
+                evidence_count=env_hits,
+                sample_redacted=_sample_list(env_samples),
+                tags=["env_read"],
             )
+        )
+    if no_hooks:
+        findings.append(
+            make_finding(
+                "git.hooks.missing",
+                "medium",
+                "Git Posture",
+                f"Repository has no pre-commit hooks configured ({_count_label(no_hooks, 'repo')})",
+                evidence_count=no_hooks,
+                sample_redacted=_sample_list(hook_samples),
+                tags=["pre_commit_missing"],
+            )
+        )
+    if no_protection:
+        findings.append(
+            make_finding(
+                "git.branch.no_protection",
+                "medium",
+                "Git Posture",
+                f"Default branch lacks GitHub branch protection ({_count_label(no_protection, 'repo')})",
+                evidence_count=no_protection,
+                sample_redacted=_sample_list(protection_samples),
+                tags=["gh_token_present"],
+            )
+        )
+    if large_blob_count:
+        findings.append(
+            make_finding(
+                "git.blob.large",
+                "low",
+                "Git Posture",
+                f"Large blob in repository history ({_count_label(large_blob_count, 'blob')})",
+                evidence_count=large_blob_count,
+                sample_redacted=_sample_list(blob_samples),
+                tags=["history_retention"],
+            )
+        )
 
     envelope["rules"] = rules
     envelope["findings"] = findings
