@@ -14,9 +14,13 @@ each collector's `__version__` and appear in the evidence envelopes.
 - `aiscan summary` prints a safe summary of a finished scan: collector,
   detection status, and each finding's severity, title, category, and
   evidence count. Paths, samples, rules, and raw pointers are left out.
-  Every run also writes `evidence\agent-summary.json` and prints
-  `OUTDIR_ID=<folder name>`. With no `-OutDir`, `summary` reads the newest
-  folder under `%LOCALAPPDATA%\aiscan-results`.
+  Titles and categories are masked even when the scan was unredacted.
+  Coverage gaps are listed only as caveats, not as ranked findings. A bad
+  evidence file is one collector error and does not stop the summary.
+  Every run also writes `evidence\agent-summary.json`. `OUTDIR_ID=<folder
+  name>` is printed only when that folder exists and will be kept. Running
+  `summary` again keeps stored collector exit codes. With no `-OutDir`,
+  `summary` reads the newest folder under `%LOCALAPPDATA%\aiscan-results`.
 
 ## [0.2.0] - 2026-10-15
 

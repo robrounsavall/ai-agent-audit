@@ -284,7 +284,13 @@ A collector that previously had data and now reports none is a drift warning, no
 | `collector_errors` | `collector`, `platform_detected`, `detection_status` |
 | `coverage_caveats` | same fields as `findings` |
 
-Findings are sorted by severity (critical, high, medium, low), then by `evidence_count` descending. Titles break remaining ties. `detection_status` is one of `detected`, `not detected`, `parse error`, `not collected`, or `error (exit N)`. When an envelope parsed, that status follows `platform_detected`. `collector_errors` is only a missing or unreadable envelope. Coverage caveats are the findings that describe a gap (missing scanner, nothing to scan, a `coverage` tag); those findings stay in `findings` too. Paths, samples, rules, and raw pointers are not copied. `evidence/run-status.json` stores exit codes for a later summary and is not a collector envelope either. The briefing loader skips both files.
+Findings are sorted by severity (`critical`, `high`, `medium`, `low`, then `unknown`), then real findings before any finding the collector tagged `test_data` (that tag is not copied), then by `evidence_count` descending. Remaining ties break on collector, category, then title. `evidence_count` is the count that collector recorded. Collectors do not share one unit. A severity outside that list is stored as `unknown` and still listed.
+
+`detection_status` is one of `detected`, `not detected`, `parse error`, `not collected`, or `error (exit N)`. A known exit other than 0 is a collector error even when an envelope was written, listed as `error (exit N)`. Exit 2 with a parsed envelope is not an error: collectors use that for "not detected", and the status then follows `platform_detected`. Exit 2 with no file is `error (exit 2)`. An unreadable envelope is `parse error`. When no exit code was stored, status follows `platform_detected`.
+
+Coverage caveats are findings that describe a gap (missing scanner, nothing to scan, a `coverage` tag or id). They appear only in `coverage_caveats`, not in `findings`. A secrets-scan envelope whose `summary.scanner` is `none`, and that has no coverage finding of its own, adds the caveat "No secrets scanner found".
+
+Titles and categories are always masked for paths and secrets, even when the scan itself was unredacted. Paths, samples, rules, and raw pointers are not copied. `evidence/run-status.json` stores exit codes for a later summary. Running `summary` again keeps those exit codes. It is not a collector envelope. The briefing loader skips both files.
 
 ## Versioning
 

@@ -171,6 +171,8 @@ class TestReportV2(unittest.TestCase):
         self.assertIn('"summary"', text)
         self.assertIn("agent_summary.py", text)
         self.assertIn("OUTDIR_ID=", text)
+        self.assertIn("function Write-OutDirId", text)
+        self.assertNotIn("--no-id", text)
         self.assertIn("scan_diff.py", text)
 
     def _root(self):

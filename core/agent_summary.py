@@ -4,11 +4,15 @@
 Agents read this instead of collector envelopes. The JSON has four lists:
 
 - ``collectors``: collector name, ``platform_detected``, detection status
-- ``findings``: collector, severity, title, category, evidence count,
-  sorted by severity (critical, high, medium, low) then evidence count
-  descending
-- ``collector_errors``: collectors that did not produce a readable envelope
+- ``findings``: collector, severity, title, category, evidence count.
+  Sorted by severity (critical, high, medium, low, then unknown), then
+  real findings before test data, then evidence count descending
+- ``collector_errors``: collectors that failed or did not produce a readable envelope
 - ``coverage_caveats``: findings that describe a gap in what was scanned
+
+Coverage findings are not repeated in ``findings``. Titles and categories
+are masked even when the original scan was unredacted. ``evidence_count``
+is whatever that collector counted; collectors do not share one unit.
 
 Paths, hostnames, samples, rules, raw pointers, and every other envelope
 field are dropped. Nothing here shells out, and the CLI is a script file
@@ -26,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -37,13 +42,6 @@ from typing import Any
 SUMMARY_FILENAME = "agent-summary.json"
 RUN_STATUS_FILENAME = "run-status.json"
 
-# Not collector envelopes. The briefing and scan diff skip these too.
-DERIVED_EVIDENCE_NAMES = frozenset({
-    "changes.json",
-    SUMMARY_FILENAME,
-    RUN_STATUS_FILENAME,
-})
-
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _STAMP = re.compile(r"^\d{8}-\d{6}$")
 _EXIT_IN_TEXT = re.compile(r"exit\s+(-?\d+)")
@@ -52,8 +50,7 @@ _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 _SEVERITIES = frozenset(_SEV_RANK)
 
 # Tags or ids collectors already use when a scan looked at less than it could.
-# The finding stays in ``findings`` as well; this set only copies it into
-# ``coverage_caveats``.
+# Those findings are listed only in ``coverage_caveats``, not in ``findings``.
 _COVERAGE_TAGS = frozenset({"coverage_gap", "coverage", "collection_gap"})
 _COVERAGE_IDS = frozenset({
     "secrets-scan.tool_unavailable",
@@ -121,10 +118,15 @@ def build_agent_summary(
     """Build the safe summary for one scan folder.
 
     ``statuses`` maps a collector name to ``exit_code`` and ``raw_status``
-    recorded while the collectors ran. A readable envelope wins over that
-    note: ``platform_detected`` is taken from the envelope, not from the
-    console line (an exit code of 2 is also how a missing secrets scanner
-    is reported). Status is used when the envelope is missing or unreadable.
+    recorded while the collectors ran. Pass the merged map (file plus any
+    new rows) so a later write keeps stored exit codes.
+
+    A known non-zero exit is a collector error, including when an envelope
+    was written. The exception is exit 2 with a parsed envelope: collectors
+    use that for "not detected", and status then follows
+    ``platform_detected``. Exit 2 with no file is still an error. When the
+    exit was not stored, status follows ``platform_detected``. See
+    ``_collector_failed``.
     """
     root = Path(evidence_root)
     evidence = root / "evidence"
@@ -147,56 +149,46 @@ def build_agent_summary(
         seen.add(name)
         envelope, file_bad = _read_envelope(path)
         row = merged.get(name) or {}
-        status = _detection_status(
-            envelope,
-            file_bad=file_bad,
-            exit_code=_exit_code(row.get("exit_code")),
-            raw_status=str(row.get("raw_status") or ""),
-        )
+        exit_code = _exit_code(row.get("exit_code"))
         if file_bad or envelope is None:
-            errors.append(_error_row(name, status))
+            errors.append(_error_row(name, "parse error"))
+            continue
+        if _collector_failed(exit_code, True, True):
+            errors.append(_error_row(name, f"error (exit {exit_code})", envelope))
+            _take_findings(name, envelope, findings, caveats)
             continue
         detected = envelope.get("platform_detected") is True
         collectors.append({
             "collector": name,
             "platform_detected": detected,
-            "detection_status": status,
+            "detection_status": "detected" if detected else "not detected",
         })
-        for finding in _finding_list(envelope):
-            safe = _safe_finding(name, finding)
-            if safe is None:
-                continue
-            findings.append(safe)
-            if _is_coverage(finding):
-                caveats.append(dict(safe))
-        if _scanner_missing(envelope) and not any(item["collector"] == name for item in caveats):
-            note = _no_scanner_finding(name)
-            findings.append(note)
-            caveats.append(dict(note))
+        _take_findings(name, envelope, findings, caveats)
 
     for name in sorted(merged):
         if name in seen or not _SAFE_NAME.fullmatch(name):
             continue
         row = merged[name]
-        status = _detection_status(
-            None,
-            file_bad=False,
-            exit_code=_exit_code(row.get("exit_code")),
-            raw_status=str(row.get("raw_status") or ""),
-        )
-        if status.startswith("error") or status == "parse error":
-            errors.append(_error_row(name, status))
-        else:
-            collectors.append({
-                "collector": name,
-                "platform_detected": False,
-                "detection_status": status,
-            })
+        exit_code = _exit_code(row.get("exit_code"))
+        raw_status = str(row.get("raw_status") or "")
+        if _collector_failed(exit_code, False, False):
+            errors.append(_error_row(name, f"error (exit {exit_code})"))
+            continue
+        status = _status_without_envelope(exit_code, raw_status)
+        collectors.append({
+            "collector": name,
+            "platform_detected": False,
+            "detection_status": status,
+        })
 
     collectors.sort(key=lambda item: item["collector"])
     findings.sort(key=_finding_sort_key)
     caveats.sort(key=_finding_sort_key)
     errors.sort(key=lambda item: item["collector"])
+    for row in findings:
+        row.pop("_test_data", None)
+    for row in caveats:
+        row.pop("_test_data", None)
     return {
         "collectors": collectors,
         "findings": findings,
@@ -212,7 +204,7 @@ def load_run_status(evidence_dir: Path) -> dict[str, dict[str, Any]]:
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return {}
     rows = data.get("collectors") if isinstance(data, dict) else None
     if not isinstance(rows, list):
@@ -281,11 +273,6 @@ def main(argv: list[str] | None = None) -> int:
         help="Also write evidence/agent-summary.json inside the scan folder.",
     )
     parser.add_argument(
-        "--no-id",
-        action="store_true",
-        help="Do not print OUTDIR_ID. The scan script prints that line itself.",
-    )
-    parser.add_argument(
         "--print-id",
         action="store_true",
         help="With --results-root, print only the chosen folder name and exit.",
@@ -340,19 +327,21 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         statuses[parsed["collector"]] = parsed
 
-    if not args.no_id:
-        _print_outdir_id(root.name)
+    # File rows fill in exit codes the command line did not repeat, then
+    # the command line wins. The same map is what gets written back.
+    merged = load_run_status(root / "evidence")
+    for name, row in statuses.items():
+        merged[name] = row
 
-    summary = build_agent_summary(root, statuses)
-    if args.write:
-        try:
-            write_summary_files(root, summary, statuses)
-        except OSError:
-            print("Could not write the agent summary.", file=sys.stderr)
-            return 1
-
+    summary = build_agent_summary(root, merged)
     json.dump(summary, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
+    sys.stdout.flush()
+    if args.write:
+        try:
+            write_summary_files(root, summary, merged)
+        except OSError:
+            print("Could not write the agent summary.", file=sys.stderr)
     return 0
 
 
@@ -361,8 +350,9 @@ def _evidence_files(evidence: Path) -> list[Path]:
         return []
     files: list[Path] = []
     try:
+        derived = _derived_filenames()
         for path in sorted(evidence.glob("*.json")):
-            if path.name in DERIVED_EVIDENCE_NAMES:
+            if path.name in derived or path.stem in _derived_stems():
                 continue
             files.append(path)
     except OSError:
@@ -374,7 +364,7 @@ def _read_envelope(path: Path) -> tuple[dict[str, Any] | None, bool]:
     """Return (envelope, file_bad). Missing is not bad; unreadable JSON is."""
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None, True
     if not isinstance(data, dict):
         return None, True
@@ -397,9 +387,10 @@ def _safe_finding(collector: str, finding: Any) -> dict[str, Any] | None:
     return {
         "collector": collector,
         "severity": severity.lower() if isinstance(severity, str) and severity.lower() in _SEVERITIES else "unknown",
-        "title": title if isinstance(title, str) else "",
-        "category": category if isinstance(category, str) else "",
+        "title": _mask_summary_text(title) if isinstance(title, str) else "",
+        "category": _mask_summary_text(category) if isinstance(category, str) else "",
         "evidence_count": _evidence_count(finding.get("evidence_count")),
+        "_test_data": _is_test_data(finding),
     }
 
 
@@ -409,7 +400,12 @@ def _evidence_count(value: Any) -> int:
     if isinstance(value, int):
         return value if value > 0 else 0
     if isinstance(value, float):
-        return int(value) if value > 0 else 0
+        if not math.isfinite(value) or value <= 0:
+            return 0
+        try:
+            return int(value)
+        except (OverflowError, ValueError):
+            return 0
     if isinstance(value, str):
         try:
             parsed = int(value.strip())
@@ -417,6 +413,27 @@ def _evidence_count(value: Any) -> int:
             return 0
         return parsed if parsed > 0 else 0
     return 0
+
+
+def _mask_summary_text(text: str) -> str:
+    """Mask paths and secrets even when the scan itself was unredacted.
+
+    ``sanitize_text`` no-ops unless AISCAN_REDACT is set. The summary is what
+    an agent reads, so this always runs the same two steps.
+    """
+    from common import mask_secrets, redact_paths
+
+    return mask_secrets(redact_paths(text))
+
+
+def _derived_stems() -> frozenset[str]:
+    from common import DERIVED_EVIDENCE_STEMS
+
+    return DERIVED_EVIDENCE_STEMS
+
+
+def _derived_filenames() -> frozenset[str]:
+    return frozenset(f"{stem}.json" for stem in _derived_stems())
 
 
 def _is_coverage(finding: dict[str, Any]) -> bool:
@@ -444,52 +461,79 @@ def _no_scanner_finding(collector: str) -> dict[str, Any]:
         "title": _NO_SCANNER_TITLE,
         "category": _NO_SCANNER_CATEGORY,
         "evidence_count": 0,
+        "_test_data": False,
     }
 
 
-def _error_row(collector: str, status: str) -> dict[str, Any]:
+def _take_findings(
+    collector: str,
+    envelope: dict[str, Any],
+    findings: list[dict[str, Any]],
+    caveats: list[dict[str, Any]],
+) -> None:
+    """Coverage gaps go only to caveats. Everything else is a ranked finding."""
+    for finding in _finding_list(envelope):
+        safe = _safe_finding(collector, finding)
+        if safe is None:
+            continue
+        if isinstance(finding, dict) and _is_coverage(finding):
+            caveats.append(safe)
+        else:
+            findings.append(safe)
+    if _scanner_missing(envelope) and not any(item["collector"] == collector for item in caveats):
+        caveats.append(_no_scanner_finding(collector))
+
+
+def _error_row(
+    collector: str,
+    status: str,
+    envelope: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    detected = False
+    if isinstance(envelope, dict):
+        detected = envelope.get("platform_detected") is True
     return {
         "collector": collector,
-        "platform_detected": False,
+        "platform_detected": detected,
         "detection_status": status,
     }
 
 
-def _detection_status(
-    envelope: dict[str, Any] | None,
-    *,
-    file_bad: bool,
-    exit_code: int | None,
-    raw_status: str,
-) -> str:
-    if file_bad:
-        return "parse error"
-    if envelope is not None:
-        if envelope.get("platform_detected") is True:
-            return "detected"
-        return "not detected"
+def _collector_failed(exit_code: int | None, has_evidence: bool, parsed: bool) -> bool:
+    """True when a stored exit code means this collector is an error.
+
+    After PR #23 merges, replace the body below with
+    ``return run_status.collector_failed(exit_code, has_evidence, parsed)``
+    for a known exit. Do not vendor that module into this branch.
+    ``None`` means this folder has no stored exit, so an older scan is not
+    marked failed just because the code is missing.
+    """
+    if exit_code is None:
+        return False
+    if has_evidence and not parsed:
+        return True
+    if exit_code == 2 and has_evidence and parsed:
+        return False
+    return exit_code != 0
+
+
+def _status_without_envelope(exit_code: int | None, raw_status: str) -> str:
+    """Status for a collector that left no file and whose exit is not a failure."""
     text = " ".join(raw_status.strip().lower().split())
     if text in {"parse error", "parse_error"}:
         return "parse error"
-    error_code = _error_exit(exit_code, text)
-    if error_code is not None:
-        return f"error (exit {error_code})"
-    if exit_code == 2 or text in {"not detected", "not_detected", "false"}:
+    if text.startswith("error"):
+        match = _EXIT_IN_TEXT.search(text)
+        if match:
+            return f"error (exit {int(match.group(1))})"
+        if exit_code not in (None, 0):
+            return f"error (exit {exit_code})"
+        return "error (exit 1)"
+    if text in {"not detected", "not_detected", "false"}:
         return "not detected"
     if text in {"detected", "true"}:
         return "detected"
     return "not collected"
-
-
-def _error_exit(exit_code: int | None, text: str) -> int | None:
-    if isinstance(exit_code, int) and exit_code not in (0, 2):
-        return exit_code
-    if text.startswith("error"):
-        match = _EXIT_IN_TEXT.search(text)
-        if match:
-            return int(match.group(1))
-        return 1
-    return None
 
 
 def _exit_code(value: Any) -> int | None:
@@ -505,13 +549,23 @@ def _exit_code(value: Any) -> int | None:
     return None
 
 
+def _is_test_data(finding: dict[str, Any]) -> bool:
+    tags = finding.get("tags")
+    if not isinstance(tags, list):
+        return False
+    return any(isinstance(tag, str) and tag.lower() == "test_data" for tag in tags)
+
+
 def _finding_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    # test_data sorts after real findings of the same severity, even when
+    # its count is higher. Equal rows then break on collector, category, title.
     return (
         _SEV_RANK.get(item["severity"], 9),
+        1 if item.get("_test_data") else 0,
         -item["evidence_count"],
-        item["title"],
         item["collector"],
         item["category"],
+        item["title"],
     )
 
 
@@ -551,12 +605,6 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
-
-
-def _print_outdir_id(name: str) -> None:
-    cleaned = name.replace("\r", "").replace("\n", "").strip()
-    if cleaned and cleaned not in {".", ".."}:
-        print(f"OUTDIR_ID={cleaned}", file=sys.stderr)
 
 
 if __name__ == "__main__":

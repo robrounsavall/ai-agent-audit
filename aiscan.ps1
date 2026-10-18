@@ -347,6 +347,21 @@ function Invoke-OneCollector {
     return $LASTEXITCODE
 }
 
+function Write-OutDirId {
+    param([string]$Root)
+    # Leaf name only, and only after the folder exists. A later shell rebuilds
+    # $env:LOCALAPPDATA\aiscan-results\<id>. The full path is not printed.
+    # Split-Path -Leaf of a drive root is the drive itself, which is not an id.
+    if (-not $Root) { return }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return }
+    $trimmed = $Root.TrimEnd('\', '/')
+    if (-not $trimmed) { return }
+    $leaf = Split-Path -Leaf $trimmed
+    if (-not $leaf) { return }
+    if ($leaf -match '^[A-Za-z]:\\?$') { return }
+    Write-Host "OUTDIR_ID=$leaf"
+}
+
 function New-PeekRoot {
     # -Here/-OutDir make the root persistent (same evidence/raw layout);
     # otherwise fall back to a throwaway temp directory, same as always.
@@ -361,11 +376,10 @@ function New-PeekRoot {
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $root "evidence") | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $root "raw") | Out-Null
-    # Leaf name only. A later shell rebuilds $env:LOCALAPPDATA\aiscan-results\<id>
-    # when the scan was started with that layout. The full path is not printed here.
-    $outLeaf = Split-Path -Leaf $root
-    if ($outLeaf) {
-        Write-Host "OUTDIR_ID=$outLeaf"
+    # Temp scans are deleted at the end. Print the id only when this folder
+    # will still be there for a later `aiscan summary`.
+    if ($Keep -or $OutDir -or $Here -or $Briefing) {
+        Write-OutDirId -Root $root
     }
     return $root
 }
@@ -598,8 +612,7 @@ function Format-CollectorStatusToken {
 
 # Writes evidence\agent-summary.json. Failures warn and fall through; the
 # scan result is already on disk. Stdout is swallowed so the console table
-# stays the collector summary. --no-id because New-PeekRoot already printed
-# OUTDIR_ID.
+# stays the collector summary. OUTDIR_ID comes from Write-OutDirId.
 function Write-AgentSummary {
     param(
         [string]$Root,
@@ -610,7 +623,7 @@ function Write-AgentSummary {
         Write-Host "agent_summary.py not found; skipping agent summary." -ForegroundColor Yellow
         return
     }
-    $sumArgs = @($summaryScript, "--evidence-root", $Root, "--write", "--no-id")
+    $sumArgs = @($summaryScript, "--evidence-root", $Root, "--write")
     foreach ($row in @($Rows)) {
         if (-not $row) { continue }
         $sumArgs += @("--collector-status", (Format-CollectorStatusToken -Row $row))
@@ -634,17 +647,25 @@ if ($Collector -eq "summary") {
         Write-Host "agent_summary.py not found." -ForegroundColor Red
         exit 1
     }
-    # --no-id: this script prints OUTDIR_ID with Write-Host. Python stays quiet
-    # on success so Windows PowerShell 5.1 does not treat a status line as an error.
-    $sumArgs = @($summaryScript, "--write", "--no-id")
+    # Python prints the JSON only. OUTDIR_ID is printed here, after the folder
+    # is known to exist, so a missing path does not get an id.
+    $sumArgs = @($summaryScript, "--write")
     if ($OutDir) {
+        if (-not (Test-Path -LiteralPath $OutDir -PathType Container)) {
+            Write-Host "Output folder not found." -ForegroundColor Red
+            exit 1
+        }
         $sumArgs += @("--evidence-root", $OutDir)
-        $outLeaf = Split-Path -Leaf $OutDir
+        Write-OutDirId -Root $OutDir
     }
     elseif ($Here) {
         $herePath = (Get-Location).ProviderPath
+        if (-not (Test-Path -LiteralPath $herePath -PathType Container)) {
+            Write-Host "Output folder not found." -ForegroundColor Red
+            exit 1
+        }
         $sumArgs += @("--evidence-root", $herePath)
-        $outLeaf = Split-Path -Leaf $herePath
+        Write-OutDirId -Root $herePath
     }
     else {
         if (-not $env:LOCALAPPDATA) {
@@ -659,9 +680,14 @@ if ($Collector -eq "summary") {
             Write-Host "No scan folders found." -ForegroundColor Red
             exit 1
         }
-        $sumArgs += @("--evidence-root", (Join-Path $resultsRoot $outLeaf))
+        $chosen = Join-Path $resultsRoot $outLeaf
+        if (-not (Test-Path -LiteralPath $chosen -PathType Container)) {
+            Write-Host "Output folder not found." -ForegroundColor Red
+            exit 1
+        }
+        $sumArgs += @("--evidence-root", $chosen)
+        Write-OutDirId -Root $chosen
     }
-    if ($outLeaf) { Write-Host "OUTDIR_ID=$outLeaf" }
     & $Python @sumArgs
     exit $LASTEXITCODE
 }

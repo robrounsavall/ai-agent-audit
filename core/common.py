@@ -21,6 +21,10 @@ from typing import Any, Iterable
 USERPROFILE = Path(os.environ.get("USERPROFILE", Path.home()))
 APPDATA = Path(os.environ.get("APPDATA", USERPROFILE / "AppData" / "Roaming"))
 
+# JSON under evidence/ that is not a collector envelope. The agent summary,
+# scan diff, and briefing all skip these stems.
+DERIVED_EVIDENCE_STEMS = frozenset({"changes", "agent-summary", "run-status"})
+
 # Common developer code roots checked by cursor, grok, git-posture and
 # secrets-scan when no --repo-roots is given. Directory names only; each is
 # used iff it exists.

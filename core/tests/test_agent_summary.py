@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import bootstrap  # noqa: E402,F401
 import agent_summary  # noqa: E402
@@ -233,6 +234,33 @@ class TestSortOrder(unittest.TestCase):
                 ("low", 100, "Low many", "claude"),
             ])
 
+    def test_test_data_sorts_last_and_collector_breaks_ties(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_envelope(root, "claude", findings=[
+                _finding("high", "Z real", "Shell Execution", 1, tags=["env_read"]),
+                _finding("high", "A fixture", "Shell Execution", 99, tags=["test_data"]),
+                _finding("high", "(10 items)", "Shell Execution", 2, tags=["env_read"]),
+                _finding("high", "(2 items)", "Shell Execution", 2, tags=["env_read"]),
+            ])
+            _write_envelope(root, "secrets-scan", findings=[
+                _finding("high", "A earlier title", "Shell Execution", 1, tags=["env_read"]),
+            ])
+            summary = agent_summary.build_agent_summary(root)
+            ranked = [
+                (row["collector"], row["evidence_count"], row["title"])
+                for row in summary["findings"]
+            ]
+            self.assertEqual(ranked, [
+                ("claude", 2, "(10 items)"),
+                ("claude", 2, "(2 items)"),
+                ("claude", 1, "Z real"),
+                ("secrets-scan", 1, "A earlier title"),
+                ("claude", 99, "A fixture"),
+            ])
+            self.assertNotIn("_test_data", json.dumps(summary))
+            self.assertNotIn("test_data", json.dumps(summary))
+
 
 class TestErrorsAndCaveats(unittest.TestCase):
     def test_parse_errors_missing_collectors_and_coverage_caveats(self):
@@ -313,13 +341,14 @@ class TestErrorsAndCaveats(unittest.TestCase):
                 "codex": "parse error",
                 "pii-scan": "parse error",
                 "cursor": "error (exit 1)",
+                "grok": "error (exit 2)",
             })
             detected = {row["collector"]: row["detection_status"] for row in summary["collectors"]}
             self.assertEqual(detected["claude"], "detected")
             self.assertEqual(detected["secrets-scan"], "detected")
             self.assertEqual(detected["git-posture"], "not detected")
             self.assertEqual(detected["copilot"], "not collected")
-            self.assertEqual(detected["grok"], "not detected")
+            self.assertNotIn("grok", detected)
             self.assertNotIn("cursor", detected)
             self.assertNotIn("codex", detected)
 
@@ -331,10 +360,11 @@ class TestErrorsAndCaveats(unittest.TestCase):
             ])
             self.assertNotIn("A real finding", caveat_titles)
             self.assertNotIn("Secret detected by gitleaks: example", caveat_titles)
-            # Caveats stay in the ranked findings too.
             finding_titles = [row["title"] for row in summary["findings"]]
             for title in caveat_titles:
-                self.assertIn(title, finding_titles)
+                self.assertNotIn(title, finding_titles)
+            self.assertIn("A real finding", finding_titles)
+            self.assertIn("Secret detected by gitleaks: example", finding_titles)
 
             for row in summary["collectors"] + summary["collector_errors"]:
                 self.assertTrue(_STATUS_RE.fullmatch(row["detection_status"]))
@@ -355,7 +385,7 @@ class TestErrorsAndCaveats(unittest.TestCase):
             self.assertEqual(caveat["title"], "No secrets scanner found")
             self.assertEqual(caveat["severity"], "medium")
             self.assertEqual(caveat["collector"], "secrets-scan")
-            self.assertEqual(summary["findings"], [caveat])
+            self.assertEqual(summary["findings"], [])
 
     def test_envelope_detection_wins_over_exit_code_2(self):
         # secrets-scan exits 2 when no scanner is installed, even if it
@@ -384,6 +414,10 @@ class TestErrorsAndCaveats(unittest.TestCase):
             self.assertEqual(row["detection_status"], "detected")
             self.assertEqual(summary["collector_errors"], [])
             self.assertEqual(summary["coverage_caveats"][0]["title"], "No secrets scanner found")
+            self.assertNotIn(
+                "No secrets scanner found",
+                [row["title"] for row in summary["findings"]],
+            )
 
     def test_run_status_file_is_used_when_no_tokens_are_passed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -403,6 +437,105 @@ class TestErrorsAndCaveats(unittest.TestCase):
                 "detection_status": "error (exit 3)",
             }])
             self.assertNotIn("not a name", json.dumps(summary))
+
+    def test_bad_bytes_are_a_collector_error_and_do_not_abort(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            (evidence / "codex.json").write_bytes(b"\xff\xfe not utf-8 {")
+            _write_envelope(root, "claude", findings=[
+                _finding("low", "Still here", "General Tooling", 1),
+            ])
+            summary = agent_summary.build_agent_summary(root)
+            errors = {row["collector"]: row["detection_status"] for row in summary["collector_errors"]}
+            self.assertEqual(errors["codex"], "parse error")
+            self.assertEqual(summary["findings"][0]["title"], "Still here")
+
+    def test_non_finite_evidence_count_does_not_abort(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            (evidence / "claude.json").write_text(
+                """{
+                  "collector": "claude",
+                  "platform_detected": true,
+                  "findings": [
+                    {
+                      "severity": "high",
+                      "title": "Huge count",
+                      "category": "General Tooling",
+                      "evidence_count": 1e309
+                    },
+                    {
+                      "severity": "low",
+                      "title": "After the huge count",
+                      "category": "General Tooling",
+                      "evidence_count": 2
+                    }
+                  ]
+                }""",
+                encoding="utf-8",
+            )
+            summary = agent_summary.build_agent_summary(root)
+            by_title = {row["title"]: row["evidence_count"] for row in summary["findings"]}
+            self.assertEqual(by_title["Huge count"], 0)
+            self.assertEqual(by_title["After the huge count"], 2)
+
+    def test_nonzero_exit_with_an_envelope_is_a_collector_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_envelope(
+                root,
+                "claude",
+                platform_detected=True,
+                findings=[
+                    _finding("high", "Partial finding", "Shell Execution", 2, id="claude.real"),
+                    _finding(
+                        "low",
+                        "Coverage only",
+                        "General Tooling",
+                        9,
+                        id="claude.coverage",
+                        tags=["coverage_gap"],
+                    ),
+                ],
+            )
+            summary = agent_summary.build_agent_summary(root, {
+                "claude": {"exit_code": 1, "raw_status": "detected"},
+            })
+            self.assertEqual(summary["collectors"], [])
+            self.assertEqual(summary["collector_errors"], [{
+                "collector": "claude",
+                "platform_detected": True,
+                "detection_status": "error (exit 1)",
+            }])
+            self.assertEqual([row["title"] for row in summary["findings"]], ["Partial finding"])
+            self.assertEqual([row["title"] for row in summary["coverage_caveats"]], ["Coverage only"])
+
+    def test_titles_and_categories_are_masked_even_when_redact_is_off(self):
+        old = os.environ.pop("AISCAN_REDACT", None)
+        try:
+            token = "ghp_" + ("a" * 20)
+            path = r"C:\build\agent\config.toml"
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                _write_envelope(root, "claude", findings=[
+                    _finding("high", f"Config at {path} uses {token}", path, 1),
+                ])
+                summary = agent_summary.build_agent_summary(root)
+            title = summary["findings"][0]["title"]
+            category = summary["findings"][0]["category"]
+            self.assertNotIn(path, title)
+            self.assertNotIn(token, title)
+            self.assertIn("****REDACTED:github_pat****", title)
+            self.assertIn("<path#", title)
+            self.assertNotIn(path, category)
+            self.assertTrue(category.startswith("<path#"))
+        finally:
+            if old is not None:
+                os.environ["AISCAN_REDACT"] = old
 
 
 class TestNewestFolder(unittest.TestCase):
@@ -466,7 +599,7 @@ class TestNewestFolder(unittest.TestCase):
 
 
 class TestCli(unittest.TestCase):
-    def test_stdout_is_json_and_id_goes_to_stderr(self):
+    def test_stdout_is_json_and_matches_the_written_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "20261018-153045"
             _write_envelope(root, "claude", findings=[
@@ -480,7 +613,7 @@ class TestCli(unittest.TestCase):
             summary = json.loads(out.getvalue())
             self.assertEqual(summary["findings"][0]["title"], "Kept title")
             self.assertNotIn("OUTDIR_ID", out.getvalue())
-            self.assertIn("OUTDIR_ID=20261018-153045", err.getvalue())
+            self.assertNotIn("OUTDIR_ID", err.getvalue())
             self.assertNotIn(str(root.parent), err.getvalue())
             written = json.loads((root / "evidence" / "agent-summary.json").read_text(encoding="utf-8"))
             self.assertEqual(written, summary)
@@ -509,18 +642,22 @@ class TestCli(unittest.TestCase):
             summary = json.loads(out.getvalue())
             self.assertEqual([row["title"] for row in summary["findings"]], ["New finding"])
             self.assertEqual(summary["collectors"][0]["collector"], "cursor")
-            self.assertIn("OUTDIR_ID=20261018-090000", err.getvalue())
+            self.assertNotIn("OUTDIR_ID", out.getvalue())
+            self.assertNotIn("OUTDIR_ID", err.getvalue())
             self.assertNotIn(str(parent), out.getvalue())
 
-    def test_no_id_flag_and_usage_errors_do_not_print_paths(self):
+    def test_usage_errors_do_not_print_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "scan"
             _write_envelope(root, "claude")
+            out = io.StringIO()
             err = io.StringIO()
-            with redirect_stdout(io.StringIO()), redirect_stderr(err):
-                code = agent_summary.main(["--evidence-root", str(root), "--no-id"])
+            with redirect_stdout(out), redirect_stderr(err):
+                code = agent_summary.main(["--evidence-root", str(root)])
             self.assertEqual(code, 0)
+            self.assertNotIn("OUTDIR_ID", out.getvalue())
             self.assertNotIn("OUTDIR_ID", err.getvalue())
+            self.assertFalse((root / "evidence" / "agent-summary.json").exists())
 
             err = io.StringIO()
             with redirect_stdout(io.StringIO()), redirect_stderr(err):
@@ -586,6 +723,59 @@ class TestCli(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertFalse((root / "evidence" / "agent-summary.json").exists())
             self.assertNotIn(str(root), err.getvalue())
+
+    def test_write_failure_still_prints_the_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "scan"
+            _write_envelope(root, "claude", findings=[
+                _finding("high", "Printed first", "Shell Execution", 1),
+            ])
+            out = io.StringIO()
+            err = io.StringIO()
+
+            def boom(evidence_root, summary, statuses=None):
+                self.assertIn("Printed first", out.getvalue())
+                raise OSError("read only")
+
+            with redirect_stdout(out), redirect_stderr(err), patch.object(
+                agent_summary, "write_summary_files", boom
+            ):
+                code = agent_summary.main(["--evidence-root", str(root), "--write"])
+            self.assertEqual(code, 0)
+            self.assertIn("Printed first", out.getvalue())
+            self.assertIn("Could not write the agent summary.", err.getvalue())
+            self.assertFalse((root / "evidence" / "agent-summary.json").exists())
+
+    def test_rerun_keeps_stored_exit_codes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_envelope(root, "claude", findings=[
+                _finding("low", "Still listed", "General Tooling", 1),
+            ])
+            evidence = root / "evidence"
+            (evidence / "run-status.json").write_text(json.dumps({
+                "collectors": [
+                    {"collector": "claude", "exit_code": 4, "detection_status": "error (exit 4)"},
+                    {"collector": "cursor", "exit_code": 5, "detection_status": "error (exit 5)"},
+                ],
+            }), encoding="utf-8")
+            out = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(io.StringIO()):
+                code = agent_summary.main([
+                    "--evidence-root", str(root),
+                    "--write",
+                    "--collector-status", "cursor|0|detected",
+                ])
+            self.assertEqual(code, 0)
+            summary = json.loads(out.getvalue())
+            errors = {row["collector"]: row["detection_status"] for row in summary["collector_errors"]}
+            self.assertEqual(errors["claude"], "error (exit 4)")
+            self.assertNotIn("cursor", errors)
+            stored = json.loads((evidence / "run-status.json").read_text(encoding="utf-8"))
+            codes = {row["collector"]: row.get("exit_code") for row in stored["collectors"]}
+            self.assertEqual(codes["claude"], 4)
+            self.assertEqual(codes["cursor"], 0)
+            self.assertIn("Still listed", [row["title"] for row in summary["findings"]])
 
 
 class TestDerivedFilesStayOutOfScanDiff(unittest.TestCase):

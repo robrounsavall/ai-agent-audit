@@ -183,7 +183,7 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 
 # Safe summary of a scan you already have. Prints collector, detection,
 # and finding severity / title / category / evidence count only.
-# No -OutDir uses the newest folder under %LOCALAPPDATA%\aiscan-results.
+# Titles are masked. No -OutDir uses the newest folder under %LOCALAPPDATA%\aiscan-results.
 .\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
 
 # Same, with an explicit previous scan folder

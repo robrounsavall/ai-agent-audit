@@ -69,6 +69,7 @@ from pathlib import Path
 from typing import Any
 
 from common import (
+    DERIVED_EVIDENCE_STEMS,
     hostname_short,
     load_json,
     make_envelope,
@@ -123,16 +124,6 @@ _RULE_FIELDS = (
 )
 
 
-# Written next to collector envelopes but not collectors. agent-summary.json
-# is the safe rollup; run-status.json records exit codes. Neither has a
-# ran_at that should move scan history.
-_DERIVED_EVIDENCE = frozenset({
-    CHANGES_FILENAME,
-    "agent-summary.json",
-    "run-status.json",
-})
-
-
 def load_scan(root: str | Path) -> dict[str, dict[str, Any]]:
     """Load collector envelopes from ``<root>/evidence``, skipping derived files."""
     evidence = Path(root) / "evidence"
@@ -140,7 +131,7 @@ def load_scan(root: str | Path) -> dict[str, dict[str, Any]]:
     if not evidence.is_dir():
         return envelopes
     for path in sorted(evidence.glob("*.json")):
-        if path.name in _DERIVED_EVIDENCE or path.stem == COLLECTOR:
+        if path.stem in DERIVED_EVIDENCE_STEMS or path.stem == COLLECTOR:
             continue
         data = load_json(path)
         if not isinstance(data, dict):
