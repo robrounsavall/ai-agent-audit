@@ -11,6 +11,7 @@ optional branch protection via gh CLI, and large blobs.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import re
 import shutil
 import subprocess
@@ -43,6 +44,21 @@ SECRET_GITIGNORE_PATTERNS = [
     "credentials.json",
     "secrets.json",
 ]
+
+# A filename each pattern must ignore. Matching is against gitignore rules,
+# not a substring of the file, so a comment or a "!pattern" line does not count.
+_GITIGNORE_PROBE_NAMES = {
+    ".env": ".env",
+    ".env.*": ".env.local",
+    "*.pem": "cert.pem",
+    "*.key": "cert.key",
+    "id_rsa": "id_rsa",
+    "credentials.json": "credentials.json",
+    "secrets.json": "secrets.json",
+}
+
+# Committed example files are not a live environment file.
+_ENV_EXAMPLE_SUFFIXES = (".example", ".sample", ".template", ".dist")
 
 
 def find_git_repos(roots: list[Path]) -> list[Path]:
@@ -82,6 +98,17 @@ def run_git(repo: Path, *args: str, timeout: int = 120) -> subprocess.CompletedP
         return None
 
 
+def _is_env_history_path(line: str) -> bool:
+    """True for a committed .env or .env.<name>, not an example or template."""
+    text = line.strip().replace("\\", "/")
+    if not text or text.endswith("/"):
+        return False
+    base = text.split("/")[-1]
+    if base != ".env" and not base.startswith(".env."):
+        return False
+    return not any(base.endswith(suffix) for suffix in _ENV_EXAMPLE_SUFFIXES)
+
+
 def check_env_in_history(repo: Path) -> bool:
     result = run_git(
         repo,
@@ -89,9 +116,8 @@ def check_env_in_history(repo: Path) -> bool:
     )
     if not result or result.returncode != 0:
         return False
-    env_re = re.compile(r"(^|/)\.env($|\.)")
     for line in result.stdout.splitlines():
-        if env_re.search(line.strip()):
+        if _is_env_history_path(line):
             return True
     return False
 
@@ -105,18 +131,51 @@ def check_pre_commit(repo: Path) -> bool:
     return False
 
 
+def _gitignore_rule_matches(pattern: str, name: str) -> bool:
+    """True when one gitignore pattern matches a basename."""
+    pat = pattern.strip()
+    if pat.endswith("/"):
+        pat = pat[:-1]
+    while pat.startswith("/"):
+        pat = pat[1:]
+    while pat.startswith("**/"):
+        pat = pat[3:]
+    if not pat:
+        return False
+    base = name.replace("\\", "/").split("/")[-1]
+    return fnmatch.fnmatch(base, pat)
+
+
+def _gitignore_covers(content: str, name: str) -> bool:
+    """Last matching rule wins. Comments and blank lines are not rules."""
+    covered = False
+    for raw in content.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        negated = line.startswith("!")
+        if negated:
+            line = line[1:].strip()
+            if not line:
+                continue
+        if _gitignore_rule_matches(line, name):
+            covered = not negated
+    return covered
+
+
 def check_gitignore(repo: Path) -> tuple[bool, list[str]]:
     gi = repo / ".gitignore"
     if not gi.exists():
-        return False, SECRET_GITIGNORE_PATTERNS
+        return False, list(SECRET_GITIGNORE_PATTERNS)
     try:
         content = gi.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return False, SECRET_GITIGNORE_PATTERNS
-    missing = []
-    for pattern in SECRET_GITIGNORE_PATTERNS:
-        if pattern not in content and pattern.replace("*", "") not in content:
-            missing.append(pattern)
+        return False, list(SECRET_GITIGNORE_PATTERNS)
+    missing = [
+        pattern
+        for pattern in SECRET_GITIGNORE_PATTERNS
+        if not _gitignore_covers(content, _GITIGNORE_PROBE_NAMES[pattern])
+    ]
     return len(missing) == 0, missing
 
 
@@ -208,9 +267,10 @@ def _count_label(count: int, singular: str) -> str:
 
 
 def _sample_list(labels: list[str], limit: int = 5) -> str:
-    shown = [label for label in labels if label][:limit]
+    filtered = [label for label in labels if label]
+    shown = filtered[:limit]
     text = ", ".join(shown)
-    extra = len(labels) - len(shown)
+    extra = len(filtered) - len(shown)
     if extra > 0:
         text += f" (+{extra} more)"
     return text
@@ -256,6 +316,7 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
     hook_samples: list[str] = []
     protection_samples: list[str] = []
     blob_samples: list[str] = []
+    largest_blob = 0
 
     for repo in repos:
         repo_label = repo_display_name(repo)
@@ -304,6 +365,8 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
             protection_samples.append(repo_sample)
         for blob_name, size in large_blobs:
             large_blob_count += 1
+            if size > largest_blob:
+                largest_blob = size
             blob_samples.append(f"{size // (1024 * 1024)}MB {blob_name[:40]}")
 
     # One finding per check. Repeating the same title once per repo made the
@@ -346,12 +409,16 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
             )
         )
     if large_blob_count:
+        largest_mb = largest_blob // (1024 * 1024)
         findings.append(
             make_finding(
                 "git.blob.large",
                 "low",
                 "Git Posture",
-                f"Large blob in repository history ({_count_label(large_blob_count, 'blob')})",
+                (
+                    f"Large blob in repository history "
+                    f"({_count_label(large_blob_count, 'blob')}, largest {largest_mb}MB)"
+                ),
                 evidence_count=large_blob_count,
                 sample_redacted=_sample_list(blob_samples),
                 tags=["history_retention"],

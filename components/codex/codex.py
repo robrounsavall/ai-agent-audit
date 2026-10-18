@@ -29,7 +29,6 @@ from common import (
     make_envelope,
     make_finding,
     make_rule,
-    merge_duplicate_findings,
     nested_text,
     parse_iso,
     secret_types_in,
@@ -756,7 +755,7 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
 
     auth_method = detect_auth_method(auth_json)
     envelope["rules"] = rules
-    envelope["findings"] = merge_duplicate_findings(findings)
+    envelope["findings"] = findings
     envelope["summary"] = {
         "session_files": session_files,
         "rules": len(rules),

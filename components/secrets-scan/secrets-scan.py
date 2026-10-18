@@ -36,10 +36,14 @@ from common import (
     compute_scope_hash,
     default_repo_roots,
     finish_collector,
+    format_secret_hit_title,
     make_envelope,
     make_finding,
     redact_sample,
     resolve_raw_root,
+    rule_key,
+    secret_placeholder_reason,
+    sha256_short,
     validate_evidence_root,
 )
 
@@ -222,14 +226,6 @@ _CRITICAL_SECRET_RULES = (
 )
 
 
-def rule_key(rule: str) -> str:
-    """Normalize a scanner rule id for lookup and grouping."""
-    text = str(rule or "").strip().lower().replace("_", " ")
-    text = re.sub(r"\s+", "-", text)
-    text = re.sub(r"-+", "-", text).strip("-")
-    return text
-
-
 def _compact_rule_key(key: str) -> str:
     return key.replace("-", "")
 
@@ -247,7 +243,18 @@ def severity_for_rule(rule: str) -> str:
 
 
 def secret_finding_id(rule: str) -> str:
-    slug = (rule_key(rule) or "unknown")[:40]
+    """Keep the pre-grouping id shape so a scan diff does not re-add every secret.
+
+    The old id was the rule lowercased, with spaces turned into underscores,
+    cut at 40 characters. Hyphens stayed hyphens. A rule longer than 40
+    characters used to share an id with any other rule that had the same
+    prefix; those ids now end with a short hash of the full rule.
+    """
+    text = str(rule or "").strip()
+    legacy = text.lower().replace(" ", "_") if text else "unknown"
+    slug = legacy[:40]
+    if len(legacy) > 40:
+        slug = f"{slug}_{sha256_short(rule_key(text) or legacy)}"
     return f"secrets_scan.{slug}"
 
 
@@ -269,6 +276,7 @@ def group_secret_hits(hits: list[dict], scanner_name: str) -> list[dict]:
                 "severity": severity,
                 "count": 0,
                 "files": set(),
+                "placeholder_count": 0,
                 "sample_secret": "",
                 "sample_rule": rule,
             }
@@ -277,9 +285,14 @@ def group_secret_hits(hits: list[dict], scanner_name: str) -> list[dict]:
         file_path = str(hit.get("file") or "").strip()
         if file_path:
             bucket["files"].add(file_path)
-        if not bucket["sample_secret"] and hit.get("secret"):
-            bucket["sample_secret"] = str(hit["secret"])
-            bucket["sample_rule"] = rule
+        secret = str(hit.get("secret") or "")
+        if secret:
+            redacted = redact_sample(secret, rule)
+            if secret_placeholder_reason(rule, redacted):
+                bucket["placeholder_count"] += 1
+            if not bucket["sample_secret"]:
+                bucket["sample_secret"] = secret
+                bucket["sample_rule"] = rule
 
     findings: list[dict] = []
     ordered = sorted(groups.values(), key=lambda item: (-item["count"], str(item["rule"]).lower()))
@@ -288,22 +301,21 @@ def group_secret_hits(hits: list[dict], scanner_name: str) -> list[dict]:
         count = int(bucket["count"])
         file_count = len(bucket["files"])
         secret = str(bucket["sample_secret"] or "")
-        findings.append(
-            make_finding(
-                secret_finding_id(rule),
-                bucket["severity"],
-                "Secrets Exposure",
-                (
-                    f"Secret detected by {scanner_name}: {rule} "
-                    f"({count} hit(s) across {file_count} file(s))"
-                ),
-                evidence_count=count,
-                sample_redacted=redact_sample(secret, bucket["sample_rule"]) if secret else rule,
-                secret_redacted=True,
-                tags=["gh_token_present" if "github" in rule.lower() else "env_read"],
-                raw_evidence_ref="raw/secrets-scan/findings.csv",
-            )
+        finding = make_finding(
+            secret_finding_id(rule),
+            bucket["severity"],
+            "Secrets Exposure",
+            format_secret_hit_title(scanner_name, rule, count, file_count),
+            evidence_count=count,
+            sample_redacted=redact_sample(secret, bucket["sample_rule"]) if secret else rule,
+            secret_redacted=True,
+            tags=["gh_token_present" if "github" in rule.lower() else "env_read"],
+            raw_evidence_ref="raw/secrets-scan/findings.csv",
         )
+        # How many hits in this rule look like examples. The briefing
+        # downgrades the row only when this equals evidence_count.
+        finding["placeholder_count"] = int(bucket["placeholder_count"])
+        findings.append(finding)
     return findings
 
 
@@ -496,15 +508,86 @@ def write_raw_outputs(raw_dir: Path, hits: list[dict], rule_counts: Counter, fil
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _same_or_within(path: Path, root: Path) -> bool:
+    if path == root:
+        return True
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _strictly_within(path: Path, root: Path) -> bool:
+    if path == root:
+        return False
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def scan_targets_excluding(targets: list[Path], excluded: list[Path]) -> list[Path]:
+    """Scan targets with excluded output directories left out.
+
+    When the OutDir sits inside a repository, the scanner must not walk that
+    folder: it would read raw/secrets-scan and evidence from the previous
+    run. If a target is itself an excluded directory, it is still scanned,
+    minus any excluded directory nested under it.
+    """
+    excluded_resolved: list[Path] = []
+    for path in excluded:
+        try:
+            excluded_resolved.append(path.resolve())
+        except OSError:
+            continue
+    expanded: list[Path] = []
+    for target in targets:
+        try:
+            resolved = target.resolve()
+        except OSError:
+            expanded.append(target)
+            continue
+        active = [root for root in excluded_resolved if root != resolved]
+        expanded.extend(_expand_scan_target(resolved, active))
+    return expanded
+
+
+def _expand_scan_target(resolved: Path, excluded: list[Path]) -> list[Path]:
+    for root in excluded:
+        if _same_or_within(resolved, root):
+            return []
+    nested = [root for root in excluded if _strictly_within(root, resolved)]
+    if not nested or not resolved.is_dir():
+        return [resolved]
+    try:
+        entries = list(resolved.iterdir())
+    except OSError:
+        return []
+    children: list[Path] = []
+    for entry in entries:
+        try:
+            child = entry.resolve()
+        except OSError:
+            continue
+        children.extend(_expand_scan_target(child, excluded))
+    return children
+
+
 def collect(
     raw_root: Path,
     repo_roots: list[Path],
     raw_out_dir: Path | None = None,
     native_roots: list[Path] | None = None,
+    exclude_roots: list[Path] | None = None,
 ) -> tuple[dict, bool, list[dict]]:
     scanner_info = find_scanner()
     targets: list[Path] = []
     coverage_findings: list[dict] = []
+    # The chat corpus lives under the raw root on purpose. Output folders
+    # (the evidence root, evidence/, raw/secrets-scan) are excluded only from
+    # repo and native targets, so a corpus inside an OutDir is still scanned.
     chat_dir = raw_root / "chat-history"
     if chat_dir.exists():
         targets.append(chat_dir)
@@ -520,8 +603,9 @@ def collect(
                 tags=["env_read"],
             )
         )
+    skip_roots = list(exclude_roots or [])
     existing_repo_roots = [root for root in repo_roots if root.exists()]
-    targets.extend(existing_repo_roots)
+    targets.extend(scan_targets_excluding(existing_repo_roots, skip_roots))
     if repo_roots is not None and not existing_repo_roots:
         coverage_findings.append(
             make_finding(
@@ -534,9 +618,8 @@ def collect(
             )
         )
     if native_roots:
-        for root in native_roots:
-            if root.exists():
-                targets.append(root)
+        existing_native = [root for root in native_roots if root.exists()]
+        targets.extend(scan_targets_excluding(existing_native, skip_roots))
 
     scope_hash = compute_scope_hash(str(t) for t in targets)
     envelope = make_envelope(COLLECTOR, __version__, scope_hash, platform_detected=bool(targets))
@@ -635,7 +718,14 @@ def main() -> None:
 
     native_roots = [Path(p).expanduser().resolve() for p in args.native_roots] if args.native_roots else None
 
-    envelope, tool_ok, _ = collect(raw_root, repo_roots, raw_root / "secrets-scan", native_roots=native_roots)
+    raw_out = raw_root / "secrets-scan"
+    envelope, tool_ok, _ = collect(
+        raw_root,
+        repo_roots,
+        raw_out,
+        native_roots=native_roots,
+        exclude_roots=[evidence_root, evidence_root / "evidence", raw_out],
+    )
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)
 
     if not tool_ok:

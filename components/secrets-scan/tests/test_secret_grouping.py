@@ -101,6 +101,39 @@ class TestGroupSecretHits(unittest.TestCase):
         self.assertEqual(findings[0]["evidence_count"], 3)
         self.assertEqual(set(by_severity), {"critical", "high"})
 
+    def test_legacy_id_shape_and_no_zero_file_clause(self):
+        self.assertEqual(ss.secret_finding_id("AWS Access Token"), "secrets_scan.aws_access_token")
+        self.assertEqual(ss.secret_finding_id("aws-access-token"), "secrets_scan.aws-access-token")
+        stem = "r" * 40
+        first = ss.secret_finding_id(stem + "-one")
+        second = ss.secret_finding_id(stem + "-two")
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.startswith("secrets_scan." + stem + "_"))
+        self.assertTrue(second.startswith("secrets_scan." + stem + "_"))
+
+        findings = ss.group_secret_hits(
+            [_hit("generic-api-key", "", "abcd1234" * 4)],
+            "gitleaks",
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertIn("(1 hit(s))", findings[0]["title"])
+        self.assertNotIn("across", findings[0]["title"])
+        self.assertEqual(findings[0]["placeholder_count"], 0)
+
+    def test_placeholder_count_is_every_example_hit(self):
+        findings = ss.group_secret_hits(
+            [
+                _hit("generic-api-key", "a.txt", "YOUR_API_KEY_HERE"),
+                _hit("generic-api-key", "b.txt", "YOUR_TOKEN_HERE"),
+                _hit("generic-api-key", "c.txt", "abcd1234" * 4),
+            ],
+            "gitleaks",
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["evidence_count"], 3)
+        self.assertEqual(findings[0]["placeholder_count"], 2)
+        self.assertEqual(findings[0]["severity"], "high")
+
     def test_same_rule_splits_when_severity_differs(self):
         calls = {"n": 0}
 
@@ -163,6 +196,63 @@ class TestCollectGrouping(unittest.TestCase):
             self.assertEqual(rows[0], ["file", "line", "rule", "sample_redacted"])
             self.assertEqual(len(rows), 4)
             self.assertEqual([row[2] for row in rows[1:]], ["aws-access-token", "aws-access-token", "generic-api-key"])
+
+
+class TestOutputDirExcluded(unittest.TestCase):
+    def _run(self, raw: Path, repo: Path, out: Path, exclude: list[Path]) -> list[Path]:
+        seen: list[Path] = []
+
+        def fake_gitleaks(target, _bin):
+            seen.append(Path(target).resolve())
+            return []
+
+        with mock.patch.object(ss, "find_scanner", return_value=("gitleaks", "gitleaks")), mock.patch.object(
+            ss, "run_gitleaks", side_effect=fake_gitleaks
+        ):
+            ss.collect(raw, [repo], out, exclude_roots=exclude)
+        return seen
+
+    def test_repo_scan_skips_outdir_and_keeps_chat_corpus(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            evidence = repo / "aiscan-out"
+            raw = evidence / "raw"
+            chat = raw / "chat-history"
+            chat.mkdir(parents=True)
+            (chat / "chat.txt").write_text("hello\n", encoding="utf-8")
+            out = raw / "secrets-scan"
+            out.mkdir()
+            (out / "findings.csv").write_text("file,line,rule\n", encoding="utf-8")
+            (evidence / "evidence").mkdir()
+            (repo / "src").mkdir()
+            (repo / "src" / "app.txt").write_text("code\n", encoding="utf-8")
+            seen = self._run(raw, repo, out, [evidence, evidence / "evidence", out])
+            self.assertIn(chat.resolve(), seen)
+            self.assertIn((repo / "src").resolve(), seen)
+            for path in seen:
+                if path == chat.resolve():
+                    continue
+                self.assertFalse(path == evidence.resolve() or evidence.resolve() in path.parents, path)
+
+    def test_repo_used_as_outdir_still_scans_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            raw = repo / "raw"
+            chat = raw / "chat-history"
+            chat.mkdir(parents=True)
+            out = raw / "secrets-scan"
+            out.mkdir()
+            (repo / "evidence").mkdir()
+            (repo / "src").mkdir()
+            (repo / "src" / "app.txt").write_text("code\n", encoding="utf-8")
+            seen = self._run(raw, repo, out, [repo, repo / "evidence", out])
+            self.assertIn((repo / "src").resolve(), seen)
+            self.assertIn(chat.resolve(), seen)
+            for path in seen:
+                self.assertNotEqual(path, out.resolve())
+                self.assertNotIn(out.resolve(), path.parents)
+                self.assertNotEqual(path, (repo / "evidence").resolve())
+                self.assertNotIn((repo / "evidence").resolve(), path.parents)
 
 
 if __name__ == "__main__":

@@ -58,6 +58,15 @@ class TestMergeDuplicateFindings(unittest.TestCase):
         self.assertEqual(high["evidence_count"], 1)
         self.assertEqual(merged[-1]["title"], "Other title")
 
+    def test_zero_count_is_kept(self):
+        rows = [
+            make_finding("a", "low", "Git Posture", "Same", evidence_count=0),
+            make_finding("b", "low", "Git Posture", "Same", evidence_count=0),
+        ]
+        merged = merge_duplicate_findings(rows)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["evidence_count"], 0)
+
     def test_distinct_titles_stay_separate(self):
         rows = [
             make_finding("a", "high", "Shell Execution", "First"),

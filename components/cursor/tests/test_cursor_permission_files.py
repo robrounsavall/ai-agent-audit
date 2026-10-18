@@ -15,6 +15,7 @@ os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
 
 import bootstrap  # noqa: E402,F401
+from common import finish_collector  # noqa: E402
 import cursor  # noqa: E402
 import cursor_permissions as cperm  # noqa: E402
 import paths  # noqa: E402
@@ -306,7 +307,12 @@ class TestSideFiles(Base):
         for repo in (self.repo, other):
             write(repo / ".cursor" / "sandbox.json", {"type": "insecure_none"})
         env = self.run_collect()
-        rows = by_id(env["findings"], "cursor.sandbox.disabled")
+        # collect() leaves both rows. finish_collector merges same title and severity.
+        root = self.root / "out"
+        root.mkdir()
+        finish_collector(env, root)
+        written = json.loads((root / "evidence" / "cursor.json").read_text(encoding="utf-8"))
+        rows = by_id(written["findings"], "cursor.sandbox.disabled")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["evidence_count"], 2)
         self.assertIn("project sandbox.json", rows[0]["title"])
