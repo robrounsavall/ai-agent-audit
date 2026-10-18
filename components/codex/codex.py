@@ -25,6 +25,7 @@ from common import (
     classify_rule,
     compute_scope_hash,
     finish_collector,
+    is_loopback_url,
     iter_jsonl,
     make_envelope,
     make_finding,
@@ -36,7 +37,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 COLLECTOR = "codex"
 
@@ -249,15 +250,9 @@ def extract_balanced_array(text: str, start_pos: int) -> str:
     return ""
 
 
-def _is_localhost(url: str) -> bool:
-    """Check if URL is localhost or loopback."""
-    if not url:
-        return False
-    lower = url.lower()
-    return any(
-        host in lower
-        for host in ["localhost", "127.0.0.1", "::1"]
-    )
+def _is_localhost(url: object) -> bool:
+    """True only when url is a string whose host is exactly loopback."""
+    return is_loopback_url(url)
 
 
 def parse_config_toml(data: dict) -> tuple[list[dict], list[dict]]:
@@ -402,7 +397,7 @@ def parse_config_toml(data: dict) -> tuple[list[dict], list[dict]]:
 
                 # External server finding
                 url = server_config.get("url", "")
-                if url and not _is_localhost(url):
+                if isinstance(url, str) and url.strip() and not _is_localhost(url):
                     findings.append(
                         make_finding(
                             "codex.mcp.external_server",
@@ -522,8 +517,8 @@ def detect_auth_method(auth_json: Path) -> str:
         return "unknown"
     data = None
     try:
-        data = json.loads(auth_json.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(auth_json.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
         return "present"
     if isinstance(data, dict):
         if "tokens" in data or "access_token" in data:

@@ -202,7 +202,7 @@ class TestCollectIntegration(unittest.TestCase):
                 envelope = grok.collect(tp, repo_roots=[])
 
             self.assertTrue(envelope["platform_detected"])
-            self.assertEqual(envelope["version"], "1.1.0")
+            self.assertEqual(envelope["version"], "1.2.0")
             got = ids(envelope["findings"])
             self.assertIn("grok.permission.always_approve", got)
             self.assertIn("grok.sandbox.off", got)

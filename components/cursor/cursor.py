@@ -23,17 +23,19 @@ import paths
 from common import (
     add_base_args,
     compute_scope_hash,
+    config_has_remote_url,
     default_repo_roots,
     finish_collector,
     make_envelope,
     make_finding,
     make_rule,
     nested_text,
+    read_json_object,
     secret_types_in,
     validate_evidence_root,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 COLLECTOR = "cursor"
 
@@ -51,8 +53,6 @@ KEYWORD_RE = re.compile(
     r"always allow|permission|allowlist|approval|auto.?run|mcp",
     re.I,
 )
-LOCALHOST_RE = re.compile(r"localhost|127\.0\.0\.1|::1", re.I)
-
 # Controlled settings_source labels — never full filesystem paths.
 MCP_SOURCE_LABELS = {
     "cursor_user": "user mcp.json",
@@ -77,14 +77,6 @@ def _cursor_mcp_server_name(server_id: str) -> str:
     if len(parts) >= 4 and parts[0] == "project" and parts[1].isdigit():
         return "-".join(parts[3:])
     return text or "unknown"
-
-
-def _is_localhost_config(config_text: str) -> bool:
-    if not config_text:
-        return True
-    if not re.search(r"https?://|url", config_text, re.I):
-        return True
-    return bool(LOCALHOST_RE.search(config_text))
 
 
 def open_vscdb(path: Path):
@@ -119,19 +111,17 @@ def _emit_mcp_server_rule(
 def _mcp_config_findings(server_name: str, config: dict) -> list[dict]:
     """External URL / secret findings for one MCP server config. Never embeds secrets."""
     findings: list[dict] = []
-    config_text = str(config)
-    if config_text and not _is_localhost_config(config_text):
-        if "url" in config_text.lower() or "http" in config_text.lower():
-            findings.append(
-                make_finding(
-                    "cursor.mcp.external_server",
-                    "high",
-                    "MCP Tooling",
-                    f"MCP server {server_name} may point outside localhost",
-                    sample_redacted=f"mcpServers.{server_name}",
-                    tags=["mcp_external"],
-                )
+    if config_has_remote_url(config):
+        findings.append(
+            make_finding(
+                "cursor.mcp.external_server",
+                "high",
+                "MCP Tooling",
+                f"MCP server {server_name} may point outside localhost",
+                sample_redacted=f"mcpServers.{server_name}",
+                tags=["mcp_external"],
             )
+        )
 
     env_vars = config.get("env")
     if isinstance(env_vars, dict):
@@ -183,13 +173,20 @@ def parse_mcp_json_file(
     rules: list[dict] = []
     findings: list[dict] = []
     names: set[str] = set()
-    if not path.exists() or not path.is_file():
+    data, err = read_json_object(path)
+    if err:
+        findings.append(
+            make_finding(
+                "cursor.config.parse_error",
+                "low",
+                "General Tooling",
+                f"Cursor {settings_source} is present but could not be parsed",
+                sample_redacted=err,
+                tags=["config_parse_error"],
+            )
+        )
         return rules, findings, names
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return rules, findings, names
-    if not isinstance(data, dict):
+    if not data:
         return rules, findings, names
     servers = data.get("mcpServers")
     if not isinstance(servers, dict):
@@ -486,18 +483,18 @@ def search_transcripts(cursor_root: Path) -> tuple[int, list[str]]:
         searched.append(str(transcripts_dir))
         for jsonl in transcripts_dir.rglob("*.jsonl"):
             try:
-                with jsonl.open("r", encoding="utf-8") as handle:
+                with jsonl.open("r", encoding="utf-8-sig") as handle:
                     for raw in handle:
                         raw = raw.strip()
                         if not raw:
                             continue
                         try:
                             obj = json.loads(raw)
-                        except json.JSONDecodeError:
+                        except (json.JSONDecodeError, ValueError, RecursionError):
                             continue
                         if KEYWORD_RE.search(nested_text(obj)):
                             count += 1
-            except OSError:
+            except (OSError, UnicodeDecodeError):
                 continue
     return count, searched
 

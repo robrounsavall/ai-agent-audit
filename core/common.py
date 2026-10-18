@@ -433,26 +433,174 @@ def make_rule(
     return rule_obj
 
 
-def load_json(path: Path) -> dict[str, Any] | None:
+def load_json(path: Path) -> Any | None:
+    """Parse JSON or JSONC. Missing, unreadable, and broken files return None.
+
+    Tolerates a UTF-8 BOM and comments. Never raises UnicodeDecodeError or
+    JSONDecodeError. Callers that need to tell "missing" from "broken" should
+    use read_json_object.
+    """
+    import configfmt
+
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data, err = configfmt.load_jsonc(Path(path))
+    except (RecursionError, ValueError):
         return None
+    if err:
+        return None
+    return data
+
+
+def read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Load a JSON/JSONC object.
+
+    (None, None) when the file is missing. (data, None) when it parsed to an
+    object. (None, reason) when it is present but not a usable object. The
+    reason never includes file contents.
+    """
+    import configfmt
+
+    file_path = Path(path)
+    try:
+        data, err = configfmt.load_jsonc(file_path)
+    except RecursionError:
+        return None, "invalid or excessively nested JSON"
+    except ValueError:
+        return None, "invalid JSON"
+    if err:
+        return None, err
+    if not file_path.is_file():
+        return None, None
+    if not isinstance(data, dict):
+        return None, "expected object"
+    return data, None
+
+
+def read_toml_table(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Load a TOML table. Same return contract as read_json_object."""
+    import configfmt
+
+    file_path = Path(path)
+    try:
+        data, err = configfmt.load_toml(file_path)
+    except RecursionError:
+        return None, "invalid or excessively nested TOML"
+    except ValueError:
+        return None, "invalid TOML"
+    if err:
+        return None, err
+    if not file_path.is_file():
+        return None, None
+    if not isinstance(data, dict):
+        return None, "expected table"
+    return data, None
 
 
 def iter_jsonl(path: Path):
+    """Yield (line_no, value) pairs. A bad file or a bad line is skipped.
+
+    Lines are decoded one at a time so a single bad byte does not discard the
+    rest of the file or escape to the caller.
+    """
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            for line_no, raw in enumerate(handle, 1):
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    yield line_no, json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
+        handle = path.open("rb")
     except OSError:
         return
+    try:
+        first = handle.read(3)
+        if first != b"\xef\xbb\xbf":
+            handle.seek(0)
+        for line_no, line in enumerate(handle, 1):
+            try:
+                raw = line.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                continue
+            if not raw:
+                continue
+            try:
+                yield line_no, json.loads(raw)
+            except (ValueError, RecursionError):
+                continue
+    except OSError:
+        return
+    finally:
+        handle.close()
+
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_URL_FIELD_NAMES = frozenset({"url", "httpurl", "serverurl"})
+_HTTP_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.I)
+
+
+def url_host(url: object) -> str | None:
+    """Hostname of a URL string, or None when it is not a string with a host.
+
+    ``urlsplit`` drops userinfo, the port, the path, and the query, so a
+    lookalike such as ``localhost.evil.example`` or a query ``?h=127.0.0.1``
+    cannot pass a substring check.
+    """
+    if not isinstance(url, str):
+        return None
+    text = url.strip()
+    if not text or any(ch.isspace() for ch in text):
+        return None
+    from urllib.parse import urlsplit
+
+    try:
+        host = urlsplit(text).hostname
+        if host is None and "://" not in text:
+            host = urlsplit("//" + text).hostname
+    except ValueError:
+        return None
+    if not host or any(ch.isspace() for ch in host):
+        return None
+    return host.lower().rstrip(".")
+
+
+def is_loopback_url(url: object) -> bool:
+    """True only when url's host is exactly localhost, 127.0.0.1, or ::1."""
+    host = url_host(url)
+    return bool(host) and host in _LOOPBACK_HOSTS
+
+
+def _config_url_strings(config: object) -> list[str]:
+    found: list[str] = []
+
+    def walk(value: object, key: str | None = None) -> None:
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return
+            if key and key.lower() in _URL_FIELD_NAMES:
+                found.append(text)
+                return
+            found.extend(_HTTP_URL_RE.findall(text))
+            return
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                walk(child, child_key if isinstance(child_key, str) else None)
+            return
+        if isinstance(value, list):
+            for child in value:
+                walk(child, key)
+
+    walk(config)
+    return found
+
+
+def config_has_remote_url(config: object) -> bool:
+    """True when a URL field or an http(s) URL has a non-loopback host.
+
+    A command name such as ``stdio`` has no host with a dot and no scheme, so
+    it is not treated as a remote endpoint. Non-string values are ignored.
+    """
+    for url in _config_url_strings(config):
+        host = url_host(url)
+        if not host or host in _LOOPBACK_HOSTS:
+            continue
+        if "://" in url or "." in host:
+            return True
+    return False
 
 
 def nested_text(value: Any) -> str:

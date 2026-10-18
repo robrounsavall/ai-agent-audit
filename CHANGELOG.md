@@ -9,7 +9,18 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- Claude project settings are read from `<repo>/.claude/settings.json` and
+  `settings.local.json`. A Claude Desktop install with no Claude Code home
+  is still collected.
+- "Is this MCP server local?" compares the URL host. `localhost.evil.example`
+  and a query string of `127.0.0.1` are not treated as localhost.
+- A config file with a BOM or comments is read. A file that cannot be decoded
+  is reported as a parse problem instead of aborting the collector or looking
+  like the file was missing.
+- Copilot's enable setting is read when it is a per-language object, and an
+  organization login is not copied into the summary.
 
 ## [0.2.0] - 2026-10-15
 

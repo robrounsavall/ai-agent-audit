@@ -1,6 +1,6 @@
 # Claude Code collector
 
-Inventories Claude Code permission settings, MCP servers, and bypass modes from `~/.claude`.
+Inventories Claude Code permission settings, MCP servers, and bypass modes from `~/.claude`, from `<repo>/.claude/settings.json` and `settings.local.json`, and from the Claude Desktop MCP config (even when Claude Code itself is not installed).
 
 | | |
 |---|---|

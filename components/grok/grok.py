@@ -17,7 +17,6 @@ import argparse
 import json
 import re
 import sys
-import tomllib
 from pathlib import Path
 
 import paths
@@ -27,16 +26,18 @@ from common import (
     compute_scope_hash,
     default_repo_roots,
     finish_collector,
+    is_loopback_url,
     load_json,
     make_envelope,
     make_finding,
     make_rule,
     parse_iso,
+    read_toml_table,
     secret_types_in,
     validate_evidence_root,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "grok"
 
@@ -58,11 +59,9 @@ MCP_EVENT_TYPES = frozenset(
 )
 
 
-def _is_localhost(url: str) -> bool:
-    if not url:
-        return False
-    lower = url.lower()
-    return any(host in lower for host in ("localhost", "127.0.0.1", "::1"))
+def _is_localhost(url: object) -> bool:
+    """True only when url is a string whose host is exactly loopback."""
+    return is_loopback_url(url)
 
 
 def _mcp_args_secret(server_id: str, server_config: dict) -> dict | None:
@@ -173,7 +172,7 @@ def parse_config_toml(data: dict) -> tuple[list[dict], list[dict], dict]:
             )
 
             url = server_config.get("url", "")
-            if url and not _is_localhost(url):
+            if isinstance(url, str) and url.strip() and not _is_localhost(url):
                 findings.append(
                     make_finding(
                         "grok.mcp.non_localhost",
@@ -562,32 +561,48 @@ def collect(tp: paths.ToolPaths, repo_roots: list[Path] | None = None) -> dict:
 
     config_toml_parsed = False
     config_extras: dict = {}
+    config_parse_reasons: list[str] = []
     if config_toml.exists():
-        try:
-            with open(config_toml, "rb") as f:
-                config_data = tomllib.load(f)
+        config_data, config_err = read_toml_table(config_toml)
+        if config_err or config_data is None:
+            config_parse_reasons.append(config_err or "unreadable")
+        else:
             config_rules, config_findings, config_extras = parse_config_toml(config_data)
             rules.extend(config_rules)
             _add_findings(config_findings)
             config_toml_parsed = True
-        except (tomllib.TOMLDecodeError, OSError):
-            pass
 
     project_config_parsed = 0
     for pcfg in project_configs:
-        try:
-            with open(pcfg, "rb") as f:
-                project_data = tomllib.load(f)
-            project_rules, project_findings, _ = parse_config_toml(project_data)
-            for r in project_rules:
-                r["scope"] = "project"
-                if not r.get("settings_source"):
-                    r["settings_source"] = "project config.toml"
-            rules.extend(project_rules)
-            _add_findings(project_findings)
-            project_config_parsed += 1
-        except (tomllib.TOMLDecodeError, OSError):
+        project_data, project_err = read_toml_table(pcfg)
+        if project_err or project_data is None:
+            config_parse_reasons.append(project_err or "unreadable")
             continue
+        project_rules, project_findings, _ = parse_config_toml(project_data)
+        for r in project_rules:
+            r["scope"] = "project"
+            if not r.get("settings_source"):
+                r["settings_source"] = "project config.toml"
+        rules.extend(project_rules)
+        _add_findings(project_findings)
+        project_config_parsed += 1
+
+    if config_parse_reasons:
+        unique_reasons: list[str] = []
+        for reason in config_parse_reasons:
+            if reason not in unique_reasons:
+                unique_reasons.append(reason)
+        _add_findings([
+            make_finding(
+                "grok.config.parse_error",
+                "low",
+                "General Tooling",
+                "Grok config.toml is present but could not be parsed",
+                evidence_count=len(config_parse_reasons),
+                sample_redacted="; ".join(unique_reasons)[:180],
+                tags=["config_parse_error"],
+            )
+        ])
 
     session_summary, session_findings, runtime_mcp_rules = collect_session_inventory(
         grok_sessions

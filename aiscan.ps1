@@ -267,7 +267,11 @@ function Get-CollectorExtras {
     param([string]$Name)
     $extra = @()
     switch ($Name) {
-        { $_ -in @("claude", "codex") } {
+        "claude" {
+            $extra += $script:PathArgs
+            if ($RepoRoots) { $extra += @("--repo-roots", $RepoRoots) }
+        }
+        "codex" {
             $extra += $script:PathArgs
         }
         "cursor" {

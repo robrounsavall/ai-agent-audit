@@ -35,7 +35,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 COLLECTOR = "chat-history"
 
@@ -102,6 +102,16 @@ def get_content_text(content, include_tool_details=False):
             parts.append(escape_md_fence(content))
 
     return "\n\n".join(p for p in parts if p and p.strip()).strip()
+
+
+def read_text_lines(path: Path, problems: list | None = None) -> list[str] | None:
+    """Lines from a UTF-8 file. A BOM is accepted. A bad byte is reported, not fatal."""
+    try:
+        return path.read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeDecodeError):
+        if problems is not None:
+            problems.append("unreadable")
+        return None
 
 
 def parse_iso(s):
@@ -236,16 +246,15 @@ def export_buckets(buckets, tool_name, folder_name, output_root):
     }
 
 
-def collect_claude(buckets, include_tool_details, root, metrics=None):
+def collect_claude(buckets, include_tool_details, root, metrics=None, problems=None):
     if not root.exists():
         return
     metrics = metrics if metrics is not None else {}
     for jsonl in root.rglob("*.jsonl"):
         relative = jsonl.relative_to(root)
         workspace = relative.parts[0] if relative.parts else ""
-        try:
-            lines = jsonl.read_text(encoding="utf-8").splitlines()
-        except OSError:
+        lines = read_text_lines(jsonl, problems)
+        if lines is None:
             continue
         for raw in lines:
             try:
@@ -293,18 +302,17 @@ def claude_history_roots(tp: paths.ToolPaths) -> list[Path]:
     return unique
 
 
-def collect_claude_roots(buckets, include_tool_details, roots: list[Path], metrics=None):
+def collect_claude_roots(buckets, include_tool_details, roots: list[Path], metrics=None, problems=None):
     for root in roots:
-        collect_claude(buckets, include_tool_details, root, metrics=metrics)
+        collect_claude(buckets, include_tool_details, root, metrics=metrics, problems=problems)
 
 
-def collect_codex(buckets, include_tool_details, root):
+def collect_codex(buckets, include_tool_details, root, problems=None):
     if not root.exists():
         return
     for jsonl in root.rglob("*.jsonl"):
-        try:
-            lines = jsonl.read_text(encoding="utf-8").splitlines()
-        except OSError:
+        lines = read_text_lines(jsonl, problems)
+        if lines is None:
             continue
         for raw in lines:
             try:
@@ -332,7 +340,7 @@ def grok_workspace_label(slug):
     return m.group(1) if m else decoded
 
 
-def collect_grok(buckets, include_tool_details, root):
+def collect_grok(buckets, include_tool_details, root, problems=None):
     """
     Grok chat_history.jsonl: role-tagged messages (`type`: system/user/
     assistant), content is a list of {type: text, text: ...} or a plain
@@ -348,18 +356,19 @@ def collect_grok(buckets, include_tool_details, root):
         session_dir = jsonl.parent
         workspace = grok_workspace_label(session_dir.parent.name)
         summary = {}
-        try:
-            summary_path = session_dir / "summary.json"
-            if summary_path.exists():
-                summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            summary = {}
+        summary_path = session_dir / "summary.json"
+        if summary_path.is_file():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                summary = {}
+                if problems is not None:
+                    problems.append("unreadable")
         start_ts = parse_iso(summary.get("created_at")) if isinstance(summary, dict) else None
         end_ts = parse_iso(summary.get("updated_at")) if isinstance(summary, dict) else None
         fallback_ts = datetime.fromtimestamp(jsonl.stat().st_mtime)
-        try:
-            lines = jsonl.read_text(encoding="utf-8").splitlines()
-        except OSError:
+        lines = read_text_lines(jsonl, problems)
+        if lines is None:
             continue
         messages = []
         for raw in lines:
@@ -397,7 +406,7 @@ def cursor_workspace_label(slug):
     return m.group(1) if m else slug
 
 
-def collect_cursor_transcripts(buckets, include_tool_details, root):
+def collect_cursor_transcripts(buckets, include_tool_details, root, problems=None):
     if not root.exists():
         return
     for project_dir in root.iterdir():
@@ -416,9 +425,8 @@ def collect_cursor_transcripts(buckets, include_tool_details, root):
                 continue
             file_time = datetime.fromtimestamp(jsonl.stat().st_mtime)
             last_known_ts = file_time
-            try:
-                lines = jsonl.read_text(encoding="utf-8").splitlines()
-            except OSError:
+            lines = read_text_lines(jsonl, problems)
+            if lines is None:
                 continue
             for raw in lines:
                 try:
@@ -530,6 +538,7 @@ def build_evidence(
     tp: paths.ToolPaths,
     claude_roots: list[Path] | None = None,
     metrics: dict | None = None,
+    parse_problems: list | None = None,
 ) -> dict:
     claude_roots = claude_roots or [tp.claude_projects]
     scanned = [
@@ -657,6 +666,19 @@ def build_evidence(
         for key, value in sorted(metrics.items()):
             if isinstance(value, int):
                 envelope["summary"][key] = value
+    if parse_problems:
+        envelope["summary"]["parse_errors"] = len(parse_problems)
+        findings.append(
+            make_finding(
+                "chat_history.parse_error",
+                "low",
+                "General Tooling",
+                "Chat history skipped files that could not be decoded",
+                evidence_count=len(parse_problems),
+                sample_redacted=f"files={len(parse_problems)}",
+                tags=["config_parse_error"],
+            )
+        )
     envelope["findings"] = findings
     envelope["raw_pointers"] = raw_pointers
     return envelope
@@ -675,16 +697,49 @@ def main():
     tp = paths.resolve_from_args(args)
     claude_roots = claude_history_roots(tp)
 
-    sources = [
-        ("Claude", defaultdict(list), lambda b: collect_claude_roots(b, args.include_tool_details, claude_roots, metrics=metrics), "claude"),
-        ("Codex", defaultdict(list), lambda b: collect_codex(b, args.include_tool_details, tp.codex_sessions), "codex"),
-        ("Cursor", defaultdict(list), lambda b: collect_cursor_transcripts(b, args.include_tool_details, tp.cursor_projects), "cursor"),
-        ("Cursor Composer", defaultdict(list), lambda b: collect_cursor_composer(b, tp.cursor_db), "cursor-composer"),
-        ("Grok", defaultdict(list), lambda b: collect_grok(b, args.include_tool_details, tp.grok_sessions), "grok"),
-    ]
-
     results = []
     metrics: dict = {}
+    parse_problems: list[str] = []
+    sources = [
+        (
+            "Claude",
+            defaultdict(list),
+            lambda b: collect_claude_roots(
+                b, args.include_tool_details, claude_roots, metrics=metrics, problems=parse_problems
+            ),
+            "claude",
+        ),
+        (
+            "Codex",
+            defaultdict(list),
+            lambda b: collect_codex(
+                b, args.include_tool_details, tp.codex_sessions, problems=parse_problems
+            ),
+            "codex",
+        ),
+        (
+            "Cursor",
+            defaultdict(list),
+            lambda b: collect_cursor_transcripts(
+                b, args.include_tool_details, tp.cursor_projects, problems=parse_problems
+            ),
+            "cursor",
+        ),
+        (
+            "Cursor Composer",
+            defaultdict(list),
+            lambda b: collect_cursor_composer(b, tp.cursor_db),
+            "cursor-composer",
+        ),
+        (
+            "Grok",
+            defaultdict(list),
+            lambda b: collect_grok(
+                b, args.include_tool_details, tp.grok_sessions, problems=parse_problems
+            ),
+            "grok",
+        ),
+    ]
     for tool_name, buckets, collector, folder in sources:
         print(f"Collecting {tool_name}...", end=" ", flush=True)
         collector(buckets)
@@ -714,7 +769,9 @@ def main():
         results.append(r)
         print(f"{r['files']} files, {r['entries']} entries")
 
-    envelope = build_evidence(results, raw_root, tp, claude_roots=claude_roots, metrics=metrics)
+    envelope = build_evidence(
+        results, raw_root, tp, claude_roots=claude_roots, metrics=metrics, parse_problems=parse_problems
+    )
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)
 
     if not envelope["platform_detected"]:

@@ -11,7 +11,6 @@ telemetry, and public-code suggestion policy.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -21,19 +20,53 @@ from common import (
     add_base_args,
     compute_scope_hash,
     finish_collector,
-    load_json,
     make_envelope,
     make_finding,
     make_rule,
+    read_json_object,
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 COLLECTOR = "copilot"
 VSCODE_SETTINGS = APPDATA / "Code" / "User" / "settings.json"
 COPILOT_STORAGE = APPDATA / "Code" / "User" / "globalStorage" / "github.copilot"
 JETBRAINS_ROOT = APPDATA / "JetBrains"
+
+# Fixed labels only. organizationLogin and any other free-text field stay out
+# of the summary; an unrecognized sku/plan is ignored rather than copied.
+_SKU_ALIASES = {
+    "free": "free",
+    "individual": "individual",
+    "pro": "individual",
+    "pro_plus": "individual",
+    "individual_or_business": "individual_or_business",
+    "business": "business",
+    "team": "business",
+    "enterprise": "enterprise",
+    "signed_in": "signed_in",
+    "unknown": "unknown",
+}
+
+
+def _sku_alias(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    token = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return _SKU_ALIASES.get(token, "")
+
+
+def _sku_from_object(data: dict) -> str:
+    mapped = _sku_alias(data.get("sku")) or _sku_alias(data.get("plan"))
+    if mapped:
+        return mapped
+    if data.get("enterprise"):
+        return "enterprise"
+    # Presence of an org login means Business. The login string itself is not a sku.
+    if data.get("organizationLogin"):
+        return "business"
+    return ""
 
 
 def detect_sku() -> str:
@@ -42,23 +75,29 @@ def detect_sku() -> str:
     for name in ("copilot-token", "copilot-chat-token"):
         if (COPILOT_STORAGE / name).exists():
             return "individual_or_business"
-    for path in COPILOT_STORAGE.rglob("*.json"):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+    try:
+        storage_files = list(COPILOT_STORAGE.rglob("*.json"))
+    except OSError:
+        storage_files = []
+    for path in storage_files:
+        data, err = read_json_object(path)
+        if err or not data:
             continue
-        if isinstance(data, dict):
-            sku = data.get("sku") or data.get("plan") or data.get("organizationLogin")
-            if sku:
-                return str(sku)
-            if data.get("enterprise"):
-                return "enterprise"
-            if data.get("organizationLogin"):
-                return "business"
+        mapped = _sku_from_object(data)
+        if mapped:
+            return mapped
     signed_in = COPILOT_STORAGE / "copilot-user"
     if signed_in.exists():
         return "signed_in"
     return "unknown"
+
+
+def _as_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return value.strip().lower() == "true"
+    return None
 
 
 def parse_vscode_settings(data: dict) -> tuple[list[dict], list[dict], dict]:
@@ -67,26 +106,45 @@ def parse_vscode_settings(data: dict) -> tuple[list[dict], list[dict], dict]:
     summary: dict = {}
 
     enabled = data.get("github.copilot.enable")
-    summary["vscode_copilot_enabled"] = bool(enabled) if enabled is not None else "unset"
-
     lang_map: dict[str, bool] = {}
+    # VS Code stores this as {"*": true, "markdown": false}, not a bool.
+    # bool({"*": false}) is True, which used to report a disabled install as on.
+    if isinstance(enabled, dict):
+        for key, value in enabled.items():
+            if not isinstance(key, str):
+                continue
+            parsed = _as_bool(value)
+            if parsed is not None:
+                lang_map[key] = parsed
+        summary["vscode_copilot_enabled"] = lang_map["*"] if "*" in lang_map else "unset"
+    elif isinstance(enabled, bool):
+        summary["vscode_copilot_enabled"] = enabled
+    else:
+        summary["vscode_copilot_enabled"] = "unset"
+
     for key, value in data.items():
-        if key.startswith("github.copilot.enable."):
-            lang = key.split(".")[-1]
-            lang_map[lang] = bool(value)
-            rules.append(
-                make_rule(
-                    "copilot",
-                    "user",
-                    "vscode",
-                    "other",
-                    key,
-                    "allow" if value else "deny",
-                    command_or_tool=lang,
-                    risk="low",
-                    exposure_category="General Tooling",
-                )
+        if not isinstance(key, str) or not key.startswith("github.copilot.enable."):
+            continue
+        lang = key.split(".")[-1]
+        parsed = _as_bool(value)
+        if parsed is None:
+            continue
+        lang_map[lang] = parsed
+
+    for lang, value in lang_map.items():
+        rules.append(
+            make_rule(
+                "copilot",
+                "user",
+                "vscode",
+                "other",
+                f"github.copilot.enable.{lang}",
+                "allow" if value else "deny",
+                command_or_tool=lang,
+                risk="low",
+                exposure_category="General Tooling",
             )
+        )
     summary["language_overrides"] = len(lang_map)
 
     excludes = data.get("github.copilot.advanced.exclude", [])
@@ -157,7 +215,7 @@ def parse_jetbrains_xml(path: Path) -> tuple[list[dict], dict]:
     try:
         tree = ET.parse(path)
         root = tree.getroot()
-    except (OSError, ET.ParseError):
+    except (OSError, ET.ParseError, UnicodeDecodeError):
         return rules, summary
 
     for elem in root.iter():
@@ -208,11 +266,23 @@ def collect() -> dict:
 
     if vscode_exists:
         summary["platforms_found"] += 1
-        data = load_json(VSCODE_SETTINGS) or {}
-        rules, findings, vs_summary = parse_vscode_settings(data)
-        all_rules.extend(rules)
-        all_findings.extend(findings)
-        summary.update(vs_summary)
+        data, err = read_json_object(VSCODE_SETTINGS)
+        if err or data is None:
+            all_findings.append(
+                make_finding(
+                    "copilot.config.parse_error",
+                    "low",
+                    "General Tooling",
+                    "VS Code settings.json is present but could not be parsed",
+                    sample_redacted=err or "unreadable",
+                    tags=["config_parse_error"],
+                )
+            )
+        else:
+            rules, findings, vs_summary = parse_vscode_settings(data)
+            all_rules.extend(rules)
+            all_findings.extend(findings)
+            summary.update(vs_summary)
 
     for jb_path in jetbrains_configs:
         summary["platforms_found"] += 1
