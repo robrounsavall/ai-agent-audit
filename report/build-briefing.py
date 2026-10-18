@@ -499,7 +499,7 @@ def _secret_group_key(finding: dict[str, Any]) -> tuple[str, ...] | None:
 
 def _collapse_secret_group(members: list[dict[str, Any]]) -> dict[str, Any]:
     first = dict(members[0])
-    hits = sum(int(m.get("evidence_count") or 1) for m in members)
+    hits = sum(_as_int((m.get("evidence_count")) or 1, 1) for m in members)
     first["evidence_count"] = hits
     first["_grouped_members"] = len(members)
     files: list[str] = []
@@ -566,13 +566,13 @@ def present_findings(
             if "likely_test_value" not in tags:
                 tags.append("likely_test_value")
             row["tags"] = tags
-            stats["placeholder_hits"] += int(row.get("evidence_count") or 1)
+            stats["placeholder_hits"] += _as_int((row.get("evidence_count")) or 1, 1)
         row["title"] = _display_finding_title(row)
         key = _secret_group_key(row)
         if key is None:
             passthrough.append(row)
             continue
-        stats["secret_hits"] += int(row.get("evidence_count") or 1)
+        stats["secret_hits"] += _as_int((row.get("evidence_count")) or 1, 1)
         if key not in buckets:
             order.append(key)
             buckets[key] = []
@@ -585,7 +585,7 @@ def present_findings(
     presented.sort(
         key=lambda f: (
             SEVERITY_ORDER.get(str(f.get("severity", "low")), 9),
-            -(int(f.get("evidence_count") or 1)),
+            -(_as_int((f.get("evidence_count")) or 1, 1)),
             str(f.get("title", "")),
         )
     )
@@ -605,7 +605,7 @@ def secret_rule_breakdown(findings: list[dict[str, Any]]) -> list[tuple[str, int
         saw = True
         _scanner, rule = parts
         placeholder = likely_placeholder_reason(finding) is not None
-        counts[(rule, placeholder)] += int(finding.get("evidence_count") or 1)
+        counts[(rule, placeholder)] += _as_int((finding.get("evidence_count")) or 1, 1)
     if not saw:
         return []
     rows: list[tuple[str, int]] = []
@@ -656,7 +656,7 @@ def _load_json(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else None
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError, RecursionError):
         return None
 
 
@@ -675,7 +675,11 @@ def load_evidence(evidence_root: Path) -> dict[str, dict[str, Any]]:
             continue
         data = _load_json(path)
         if data is None:
-            raise ValueError(f"Invalid JSON: {path}")
+            print(
+                f"Warning: skipped unreadable evidence file {path.name}",
+                file=sys.stderr,
+            )
+            continue
         name = str(data.get("collector") or path.stem)
         if name in _NON_COLLECTOR_ENVELOPES:
             continue
@@ -785,7 +789,7 @@ def aggregate_findings(envelopes: dict[str, dict[str, Any]]) -> list[dict[str, A
     findings.sort(
         key=lambda f: (
             SEVERITY_ORDER.get(str(f.get("severity", "low")), 9),
-            -(int(f.get("evidence_count") or 1)),
+            -(_as_int((f.get("evidence_count")) or 1, 1)),
             str(f.get("title", "")),
         )
     )
@@ -824,11 +828,11 @@ def _platform_chat_metric(chat_sum: dict[str, Any], platform_key: str, metric: s
         composer = chat_sum.get(f"cursor-composer_{metric}")
         if cursor is None and composer is None:
             return None
-        return int(cursor or 0) + int(composer or 0)
+        return _as_int(cursor) + _as_int(composer)
     key = f"{platform_key}_{metric}"
     if key not in chat_sum:
         return None
-    return int(chat_sum.get(key) or 0)
+    return _as_int(chat_sum.get(key))
 
 
 def _platform_chat_cell(chat_sum: dict[str, Any], platform_key: str) -> str:
@@ -864,7 +868,7 @@ def _approval_evidence_cell(
         if summary.get("otel_enabled"):
             return "OTEL configured"
         return "available via OTEL"
-    events = int(summary.get("permission_events") or summary.get("approval_requests") or 0)
+    events = _as_int(summary.get("permission_events") or summary.get("approval_requests"))
     if events:
         return str(events)
     if platform == "grok" and (
@@ -887,10 +891,10 @@ def render_posture_grid(envelopes: dict[str, dict[str, Any]]) -> str:
     chat_sum = chat_env.get("summary") or {}
     secrets_env = envelopes.get("secrets-scan") or {}
     secrets_summary = secrets_env.get("summary") or {}
-    secrets_hits = int(secrets_summary.get("hits") or 0)
-    secrets_targets = int(secrets_summary.get("targets") or 0)
+    secrets_hits = _as_int(secrets_summary.get("hits"))
+    secrets_targets = _as_int(secrets_summary.get("targets"))
     has_per_tool_chat = _chat_per_tool_breakdown_exists(chat_sum)
-    chat_corpus_total = int(chat_sum.get("total_messages") or 0)
+    chat_corpus_total = _as_int(chat_sum.get("total_messages"))
 
     for seq, key in enumerate(_visible_platform_collectors(envelopes)):
         label = TOOL_LABELS.get(key, key)
@@ -955,9 +959,9 @@ def render_posture_grid(envelopes: dict[str, dict[str, Any]]) -> str:
     )
     if not has_per_tool_chat and chat_corpus_total:
         caption_parts.append(f"Chat corpus total: {chat_corpus_total} messages across all tools.")
-    elif has_per_tool_chat and int(chat_sum.get("active_minutes_estimated") or 0):
+    elif has_per_tool_chat and _as_int(chat_sum.get("active_minutes_estimated")):
         caption_parts.append(
-            f"Active estimate total: {_format_minutes_estimate(int(chat_sum.get('active_minutes_estimated') or 0))} using a {int(chat_sum.get('active_gap_cap_minutes') or 30)}-minute capped-gap method."
+            f"Active estimate total: {_format_minutes_estimate(_as_int(chat_sum.get('active_minutes_estimated')))} using a {_as_int((chat_sum.get('active_gap_cap_minutes')) or 30, 30)}-minute capped-gap method."
         )
     if secrets_env:
         target_text = f" across {secrets_targets} targets" if secrets_targets else ""
@@ -965,7 +969,7 @@ def render_posture_grid(envelopes: dict[str, dict[str, Any]]) -> str:
             item for item in (secrets_env.get("findings") or []) if isinstance(item, dict)
         ]
         placeholder_hits = sum(
-            int(item.get("evidence_count") or 1)
+            _as_int((item.get("evidence_count")) or 1, 1)
             for item in secret_findings
             if likely_placeholder_reason(item)
         )
@@ -1014,7 +1018,7 @@ def build_tools_table(
             detected = bool(env and env.get("platform_detected"))
         if key == "copilot" and not detected:
             continue
-        version = disc.get("version") or (env or {}).get("summary", {}).get("version", "unknown")
+        version = disc.get("version") or _summary_dict(env).get("version", "unknown")
         if version == "unknown" and env:
             version = env.get("version", "unknown")
         last_used = disc.get("last_used") or disc.get("last_seen") or "unknown"
@@ -1025,8 +1029,8 @@ def build_tools_table(
         extra = ""
         if env and detected:
             rules = env.get("rules") or []
-            summary = env.get("summary") or {}
-            permission_events = int(summary.get("permission_events") or summary.get("approval_requests") or 0)
+            summary = _summary_dict(env)
+            permission_events = _as_int(summary.get("permission_events") or summary.get("approval_requests"))
             findings_n = len(env.get("findings") or [])
             if rules:
                 extra = f"{len(rules)} permission rules"
@@ -1060,26 +1064,26 @@ def build_tools_table(
         # Per-collector extra count
         extra = ""
         if key == "chat-history":
-            messages = int(summary.get("total_messages") or 0)
-            files = int(summary.get("total_files") or 0)
+            messages = _as_int(summary.get("total_messages"))
+            files = _as_int(summary.get("total_files"))
             if messages:
                 extra = f"{messages} chat messages"
             elif files:
                 extra = f"{files} transcript files"
         elif key == "secrets-scan":
-            n = int(summary.get("hits") or 0)
+            n = _as_int(summary.get("hits"))
             extra = f"{n} secret hits" if n else ""
         elif key == "git-posture":
-            n = int(summary.get("repos_scanned") or 0)
+            n = _as_int(summary.get("repos_scanned"))
             extra = f"{n} git repos" if n else ""
         elif key == "pii-scan":
-            n = int(summary.get("hits") or 0)
+            n = _as_int(summary.get("hits"))
             extra = f"{n} pattern hits" if n else "scan recorded"
         elif key == "telemetry":
-            n = int(summary.get("approval_events") or summary.get("usage_events") or 0)
+            n = _as_int(summary.get("approval_events") or summary.get("usage_events"))
             extra = f"{n} telemetry events" if n else "export recorded"
         elif key == "cloud-agents":
-            n = int(summary.get("total_agents") or 0)
+            n = _as_int(summary.get("total_agents"))
             extra = f"{n} cloud agents" if n else "no agents listed"
         rows.append(
             {
@@ -1308,8 +1312,9 @@ def render_cover_terminal(
     # discover
     disc = envelopes.get("discovery")
     if disc:
-        tools_n = len(disc.get("summary", {}).get("tools") or [])
-        caps = disc.get("summary", {}).get("capabilities") or {}
+        disc_summary = _summary_dict(disc)
+        tools_n = len(disc_summary.get("tools") or [])
+        caps = disc_summary.get("capabilities") or {}
         missing = sorted(k for k, v in caps.items() if not v)
         suffix = f" · {missing[0]}: missing" if missing else ""
         rows.append(("ok", "discover", f"{tools_n} collectors{suffix}" if tools_n else f"preflight only{suffix}"))
@@ -1335,22 +1340,22 @@ def render_cover_terminal(
     env = envelopes.get("chat-history")
     if env:
         s = env.get("summary") or {}
-        files = int(s.get("total_files") or 0)
-        hits = int(s.get("secret_hit_files") or 0)
+        files = _as_int(s.get("total_files"))
+        hits = _as_int(s.get("secret_hit_files"))
         rows.append(("ok", "chat", f"{files} transcript files; {hits} secret hit{'s' if hits != 1 else ''}"))
 
     # git-posture
     env = envelopes.get("git-posture")
     if env:
         s = env.get("summary") or {}
-        repos = int(s.get("repos_scanned") or 0)
+        repos = _as_int(s.get("repos_scanned"))
         rows.append(("ok", "git-posture", f"{repos} repos"))
 
     # cloud-agents (opt-in; absent from offline `all` runs)
     env = envelopes.get("cloud-agents")
     if env:
         s = env.get("summary") or {}
-        n = int(s.get("total_agents") or 0)
+        n = _as_int(s.get("total_agents"))
         state = "ok" if env.get("platform_detected", True) else "com"
         rows.append((state, "cloud-agents", f"{n} agents"))
 
@@ -1358,7 +1363,7 @@ def render_cover_terminal(
     env = envelopes.get("secrets-scan")
     if env:
         s = env.get("summary") or {}
-        hits = int(s.get("hits") or 0)
+        hits = _as_int(s.get("hits"))
         scanner = str(s.get("scanner") or "unknown scanner")
         rows.append(("ok", "secrets", f"{scanner} · {hits} hits"))
 
@@ -1429,9 +1434,9 @@ def render_severity_bar_note(
     """Right-side annotation on the severity bar."""
     del counts, envelopes
     stats = secret_stats or {}
-    hits = int(stats.get("secret_hits") or 0)
-    rows = int(stats.get("secret_rows") or 0)
-    placeholders = int(stats.get("placeholder_hits") or 0)
+    hits = _as_int(stats.get("secret_hits"))
+    rows = _as_int(stats.get("secret_rows"))
+    placeholders = _as_int(stats.get("placeholder_hits"))
     parts: list[str] = []
     if hits and rows and hits != rows:
         parts.append(f"{hits} secret hits grouped into {rows} rows")
@@ -1569,7 +1574,7 @@ def render_risk_register(findings: list[dict[str, Any]]) -> str:
             )
         else:
             single_ref = member_rows[0][1] if member_rows else ""
-            evn = int(f.get("evidence_count") or 1)
+            evn = _as_int((f.get("evidence_count")) or 1, 1)
             detail_html = f"""  <div class="case-grid">
     <div>
       <div class="case-lbl">Category</div>
@@ -2034,7 +2039,7 @@ def render_evidence_card(finding: dict[str, Any], ctx: EvidenceContext) -> str:
     fid = str(finding.get("id") or "")
     if fid.lower().startswith("pii_scan."):
         trig.append(_kv("Entity", _esc(_card_text(fid[len("pii_scan."):].upper(), links))))
-    members = int(finding.get("_grouped_members") or 0)
+    members = _as_int(finding.get("_grouped_members"))
     if members > 1:
         trig.append(_kv("Grouped", _esc(f"{members} scanner rows with the same rule and redacted value")))
     if finding.get("_placeholder_reason"):
@@ -2146,7 +2151,7 @@ def render_findings_section(
                 f'<td data-label="Severity"><span class="pill {sev}">{sev}</span></td>'
                 f'<td data-label="Title"><details class="ev"><summary>{_esc(f.get("title", ""))}</summary>'
                 f'{render_evidence_card(f, ctx)}</details></td>'
-                f'<td class="num" data-label="Evidence">{int(f.get("evidence_count") or 1)}</td>'
+                f'<td class="num" data-label="Evidence">{_as_int((f.get("evidence_count")) or 1, 1)}</td>'
                 f'<td class="mono date" data-label="Last seen">{_esc(last_seen)}</td>'
                 f'<td data-label="Sample">{sample_html}</td>'
                 f"</tr>"
@@ -2510,23 +2515,22 @@ def _render_claude_mode_history(chat_sum: dict[str, Any]) -> str:
     ]
     cells: list[str] = []
     for key, label in mode_rows:
-        count = int(chat_sum.get(f"claude_permission_mode_{key}") or 0)
+        count = _as_int(chat_sum.get(f"claude_permission_mode_{key}"))
         if count:
             cells.append(
                 f"<div class='mode-chip'><span>{_esc(label)}</span><strong>{count}</strong></div>"
             )
 
-    permission_responses = int(
+    permission_responses = _as_int(
         chat_sum.get("claude_granted_permission_responses")
         or chat_sum.get("claude_approval_events")
-        or 0
-    )
+       )
     if permission_responses:
         cells.append(
             f"<div class='mode-chip'><span>Granted permission responses</span><strong>{permission_responses}</strong></div>"
         )
 
-    total = int(chat_sum.get("claude_permission_mode_events_total") or 0)
+    total = _as_int(chat_sum.get("claude_permission_mode_events_total"))
     if not cells and not total:
         return ""
 
@@ -2618,12 +2622,12 @@ def _render_cursor_state_summary(summary: dict[str, Any]) -> str:
     if not summary:
         return ""
     chips = [
-        ("Registered MCP", str(int(summary.get("mcp_registered") or 0))),
-        ("Approved project MCP", str(int(summary.get("approved_project_mcp_servers") or 0))),
-        ("Known MCP (runtime)", str(int(summary.get("known_mcp_servers") or 0))),
-        ("Unmatched known", str(int(summary.get("known_mcp_unmatched") or 0))),
-        ("Approval-like events", str(int(summary.get("permission_events") or 0))),
-        ("Auto-accept workspaces", str(int(summary.get("composer_auto_accept_workspaces") or 0))),
+        ("Registered MCP", str(_as_int(summary.get("mcp_registered")))),
+        ("Approved project MCP", str(_as_int(summary.get("approved_project_mcp_servers")))),
+        ("Known MCP (runtime)", str(_as_int(summary.get("known_mcp_servers")))),
+        ("Unmatched known", str(_as_int(summary.get("known_mcp_unmatched")))),
+        ("Approval-like events", str(_as_int(summary.get("permission_events")))),
+        ("Auto-accept workspaces", str(_as_int(summary.get("composer_auto_accept_workspaces")))),
     ]
     if summary.get("agent_autorun_default_attempted"):
         chips.append(("Agent autorun default", "attempted"))
@@ -2634,10 +2638,10 @@ def _render_cursor_state_summary(summary: dict[str, Any]) -> str:
     if isinstance(full_auto, list) and full_auto:
         chips.append(("Full auto-run modes", ", ".join(str(m) for m in full_auto[:4])))
     if "ide_allowlist_count" in summary:
-        chips.append(("IDE command allowlist", str(int(summary.get("ide_allowlist_count") or 0))))
+        chips.append(("IDE command allowlist", str(_as_int(summary.get("ide_allowlist_count")))))
     if summary.get("cli_config_present"):
         chips.append(("CLI approvalMode", str(summary.get("cli_approval_mode") or "unset")))
-        chips.append(("CLI allow / deny", f"{int(summary.get('cli_allow_count') or 0)} / {int(summary.get('cli_deny_count') or 0)}"))
+        chips.append(("CLI allow / deny", f"{_as_int(summary.get('cli_allow_count'))} / {_as_int(summary.get('cli_deny_count'))}"))
     chip_html = "".join(
         f"<div class='mode-chip'><span>{_esc(label)}</span><strong>{_esc(value)}</strong></div>"
         for label, value in chips
@@ -2659,7 +2663,7 @@ def _render_cursor_state_summary(summary: dict[str, Any]) -> str:
 
 
 def _format_byte_size(n: int) -> str:
-    value = float(max(0, int(n or 0)))
+    value = float(max(0, _as_int(n)))
     for unit in ("B", "KB", "MB", "GB"):
         if value < 1024 or unit == "GB":
             if unit == "B":
@@ -2676,21 +2680,21 @@ def _render_grok_state_summary(summary: dict[str, Any]) -> str:
     yolo = "yes" if summary.get("yolo") else "no"
     models = summary.get("model_distribution") or {}
     if isinstance(models, dict) and models:
-        top = sorted(models.items(), key=lambda kv: (-int(kv[1] or 0), str(kv[0])))[:3]
+        top = sorted(models.items(), key=lambda kv: (-_as_int(kv[1]), str(kv[0])))[:3]
         model_text = ", ".join(f"{name} ({count})" for name, count in top)
     else:
         model_text = "none"
     chips = [
         ("Permission mode", mode),
         ("Yolo", yolo),
-        ("Sessions", str(int(summary.get("session_count") or 0))),
-        ("Messages", str(int(summary.get("total_messages") or 0))),
-        ("Tool calls", str(int(summary.get("total_tool_calls") or 0))),
-        ("Transcript size", _format_byte_size(int(summary.get("transcript_bytes") or 0))),
+        ("Sessions", str(_as_int(summary.get("session_count")))),
+        ("Messages", str(_as_int(summary.get("total_messages")))),
+        ("Tool calls", str(_as_int(summary.get("total_tool_calls")))),
+        ("Transcript size", _format_byte_size(_as_int(summary.get("transcript_bytes")))),
         ("Models", model_text),
-        ("Prompt-history cwds", str(int(summary.get("cwd_groups_with_prompt_history") or 0))),
-        ("Runtime MCP", str(int(summary.get("mcp_runtime_servers") or 0))),
-        ("Config MCP", str(int(summary.get("mcp_servers") or 0))),
+        ("Prompt-history cwds", str(_as_int(summary.get("cwd_groups_with_prompt_history")))),
+        ("Runtime MCP", str(_as_int(summary.get("mcp_runtime_servers")))),
+        ("Config MCP", str(_as_int(summary.get("mcp_servers")))),
     ]
     small_attr = ' class="small-value"'
     chip_html = "".join(
@@ -2728,7 +2732,7 @@ def _render_grok_bot_state_summary(summary: dict[str, Any]) -> str:
         ("Lockfile", yes_no(summary.get("lockfile_present"))),
         ("Browser/client state", yes_no(summary.get("browser_state_present") or summary.get("client_persistence_present"))),
         ("Local execution", local_exec),
-        ("Files", str(int(summary.get("file_count") or 0))),
+        ("Files", str(_as_int(summary.get("file_count")))),
         ("Newest local activity", newest),
     ]
     chip_html = "".join(
@@ -3079,7 +3083,7 @@ def per_tool_chat_stats(chat_env: dict[str, Any] | None) -> list[dict[str, Any]]
         tool = fid[len("chat_history.secret.") :]
         if not tool:
             continue
-        secret_hits[tool] += int(f.get("evidence_count") or 0)
+        secret_hits[tool] += _as_int(f.get("evidence_count"))
 
     tool_labels = {
         "claude": _tool_display_name("claude"),
@@ -3091,7 +3095,7 @@ def per_tool_chat_stats(chat_env: dict[str, Any] | None) -> list[dict[str, Any]]
     rows: list[dict[str, Any]] = []
     for tool, label in tool_labels.items():
         info = by_tool.get(tool, {"dates": [], "files": 0})
-        files = info["files"] or int(summary.get(f"{tool}_files") or 0)
+        files = info["files"] or _as_int(summary.get(f"{tool}_files"))
         if files <= 0:
             continue
         dates = info["dates"]
@@ -3106,9 +3110,9 @@ def per_tool_chat_stats(chat_env: dict[str, Any] | None) -> list[dict[str, Any]]
                 "oldest": oldest,
                 "newest": newest,
                 "files": files,
-                "retention_days": int(retention or 0),
+                "retention_days": _as_int(retention),
                 "secret_hits": secret_hits.get(tool, 0),
-                "active_minutes_estimated": int(summary.get(f"{tool}_active_minutes_estimated") or 0),
+                "active_minutes_estimated": _as_int(summary.get(f"{tool}_active_minutes_estimated")),
             }
         )
     return rows
@@ -3120,12 +3124,16 @@ def render_chat_section(chat_env: dict[str, Any] | None) -> str:
     if not chat_env.get("platform_detected", True):
         return "<p>Tool not detected. No chat transcripts found.</p>"
 
-    summary = chat_env.get("summary") or {}
+    summary = chat_env.get("summary")
+    if not isinstance(summary, dict):
+        summary = {}
     rows = per_tool_chat_stats(chat_env)
-    total_files = int(summary.get("total_files") or sum(r["files"] for r in rows))
-    active_minutes = int(summary.get("active_minutes_estimated") or 0)
-    active_gap_cap = int(summary.get("active_gap_cap_minutes") or 30)
-    secret_files = int(summary.get("secret_hit_files") or 0)
+    total_files = _as_int(summary.get("total_files")) or sum(
+        _as_int(r.get("files") if isinstance(r, dict) else None) for r in rows
+    )
+    active_minutes = _as_int(summary.get("active_minutes_estimated"))
+    active_gap_cap = _as_int((summary.get("active_gap_cap_minutes")) or 30, 30)
+    secret_files = _as_int(summary.get("secret_hit_files"))
     max_retention = max((r["retention_days"] for r in rows), default=0)
 
     # Stat cards (left column)
@@ -3463,7 +3471,7 @@ def render_secrets_section(secrets_env: dict[str, Any] | None) -> str:
             chat_hits += 1
         else:
             repo_hits += 1
-    total = int(summary.get("hits") or 0)
+    total = _as_int(summary.get("hits"))
     if total and not chat_hits and not repo_hits:
         repo_hits = total
 
@@ -3502,10 +3510,10 @@ def render_git_section(git_env: dict[str, Any] | None) -> str:
         return "<p>No git repositories found in scan scope.</p>"
 
     s = git_env.get("summary") or {}
-    repos = int(s.get("repos_scanned") or 0)
-    env_hist = int(s.get("env_in_history") or 0)
-    no_hooks = int(s.get("no_pre_commit") or 0)
-    no_prot = int(s.get("no_branch_protection") or 0)
+    repos = _as_int(s.get("repos_scanned"))
+    env_hist = _as_int(s.get("env_in_history"))
+    no_hooks = _as_int(s.get("no_pre_commit"))
+    no_prot = _as_int(s.get("no_branch_protection"))
     gh_checked = bool(s.get("gh_checked"))
 
     pre_commit_have = repos - no_hooks
@@ -3628,7 +3636,7 @@ def render_appendix_grouped(findings: list[dict[str, Any]]) -> tuple[str, str]:
         key = (sev, title, ref)
         if key not in groups:
             groups[key] = {"severity": sev, "title": title, "ref": ref, "count": 0}
-        groups[key]["count"] += int(f.get("evidence_count") or 1)
+        groups[key]["count"] += _as_int((f.get("evidence_count")) or 1, 1)
 
     if not groups:
         return "<tr><td colspan='4'>No findings recorded.</td></tr>", ""
@@ -3686,15 +3694,25 @@ _PAGE_TABS = (
 )
 
 
-def _as_int(value: Any) -> int:
+def _as_int(value: Any, default: int = 0) -> int:
+    """Integer from evidence, or default when the value is missing or not numeric."""
     if isinstance(value, bool) or value is None:
-        return 0
+        return default
     if isinstance(value, int):
         return value
+    if isinstance(value, str) and not value.strip():
+        return default
     try:
         return int(value)
-    except (TypeError, ValueError):
-        return 0
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _summary_dict(env: Any) -> dict[str, Any]:
+    if not isinstance(env, dict):
+        return {}
+    summary = env.get("summary")
+    return summary if isinstance(summary, dict) else {}
 
 
 def _not_collected(command: str) -> str:
@@ -3907,9 +3925,9 @@ def build_html(
     appendix_rows, appendix_note = render_appendix_grouped(findings)
 
     secrets_env = envelopes.get("secrets-scan")
-    total_secret_hits = int((secrets_env or {}).get("summary", {}).get("hits") or 0)
+    total_secret_hits = _as_int(_summary_dict(secrets_env).get("hits"))
     git_env = envelopes.get("git-posture")
-    git_repos = int((git_env or {}).get("summary", {}).get("repos_scanned") or 0)
+    git_repos = _as_int(_summary_dict(git_env).get("repos_scanned"))
 
     manifest_header, manifest_attest = manifest_briefing_text(manifest_sha256(evidence_root))
 

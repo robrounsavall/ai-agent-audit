@@ -32,12 +32,13 @@ from common import (
     make_finding,
     make_rule,
     parse_iso,
+    read_json_object,
     read_toml_table,
     secret_types_in,
     validate_evidence_root,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 COLLECTOR = "grok"
 
@@ -264,11 +265,30 @@ def parse_config_toml(data: dict) -> tuple[list[dict], list[dict], dict]:
     return (rules, findings, extras)
 
 
+_SESSION_MARKERS = (
+    "summary.json",
+    "chat_history.jsonl",
+    "updates.jsonl",
+    "events.jsonl",
+    "signals.json",
+)
+
+
 def _session_dirs(grok_sessions: Path):
+    """Session directories, including ones whose summary.json is missing."""
     if not grok_sessions.exists():
         return
-    for summary_path in grok_sessions.rglob("summary.json"):
-        yield summary_path.parent
+    seen: set[str] = set()
+    for name in _SESSION_MARKERS:
+        for path in grok_sessions.rglob(name):
+            if not path.is_file():
+                continue
+            parent = path.parent
+            key = str(parent)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield parent
 
 
 def _scan_events_mcp(events_path: Path) -> tuple[dict[str, str], int]:
@@ -334,30 +354,36 @@ def collect_session_inventory(grok_sessions: Path) -> tuple[dict, list[dict], li
     total_context_tokens = 0
     total_tool_calls = 0
     sandbox_off_sessions = 0
+    sandbox_unknown_sessions = 0
     runtime_servers: dict[str, str] = {}
     mcp_runtime_events = 0
 
     for session_dir in _session_dirs(grok_sessions):
         session_count += 1
-        summary = load_json(session_dir / "summary.json") or {}
-        model_id = summary.get("current_model_id")
-        if model_id:
-            model_counts[str(model_id)] = model_counts.get(str(model_id), 0) + 1
-        num_messages = summary.get("num_messages")
-        if isinstance(num_messages, int):
-            total_messages += num_messages
-        created_at = parse_iso(summary.get("created_at"))
-        if created_at:
-            dates.append(created_at)
-
-        sandbox = str(summary.get("sandbox_profile") or "").strip().lower()
-        if sandbox:
-            sandbox_counts[sandbox] = sandbox_counts.get(sandbox, 0) + 1
-            if sandbox in SANDBOX_OFF_VALUES:
-                sandbox_off_sessions += 1
+        summary, _summary_err = read_json_object(session_dir / "summary.json")
+        if not isinstance(summary, dict):
+            # Missing, unreadable, or not an object. That is unknown, not off.
+            sandbox_counts["unknown"] = sandbox_counts.get("unknown", 0) + 1
+            sandbox_unknown_sessions += 1
         else:
-            sandbox_counts["unset"] = sandbox_counts.get("unset", 0) + 1
-            sandbox_off_sessions += 1
+            model_id = summary.get("current_model_id")
+            if model_id:
+                model_counts[str(model_id)] = model_counts.get(str(model_id), 0) + 1
+            num_messages = summary.get("num_messages")
+            if isinstance(num_messages, int):
+                total_messages += num_messages
+            created_at = parse_iso(summary.get("created_at"))
+            if created_at:
+                dates.append(created_at)
+
+            sandbox = str(summary.get("sandbox_profile") or "").strip().lower()
+            if sandbox:
+                sandbox_counts[sandbox] = sandbox_counts.get(sandbox, 0) + 1
+                if sandbox in SANDBOX_OFF_VALUES:
+                    sandbox_off_sessions += 1
+            else:
+                sandbox_counts["unset"] = sandbox_counts.get("unset", 0) + 1
+                sandbox_off_sessions += 1
 
         for name in ("chat_history.jsonl", "updates.jsonl", "events.jsonl"):
             f = session_dir / name
@@ -427,6 +453,7 @@ def collect_session_inventory(grok_sessions: Path) -> tuple[dict, list[dict], li
         "total_tool_calls": total_tool_calls,
         "sandbox_profile_distribution": sandbox_counts,
         "sandbox_off_sessions": sandbox_off_sessions,
+        "sandbox_unknown_sessions": sandbox_unknown_sessions,
         "tools_used_distribution": tools_used,
         "mcp_runtime_servers": len(runtime_servers),
         "mcp_runtime_events": mcp_runtime_events,

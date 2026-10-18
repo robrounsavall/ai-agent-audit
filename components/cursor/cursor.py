@@ -35,7 +35,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 COLLECTOR = "cursor"
 
@@ -80,7 +80,8 @@ def _cursor_mcp_server_name(server_id: str) -> str:
 
 
 def open_vscdb(path: Path):
-    uri = "file:" + str(path).replace("\\", "/") + "?mode=ro&immutable=1"
+    # as_uri() encodes #, ?, and % so they stay part of the path.
+    uri = Path(path).resolve().as_uri() + "?mode=ro&immutable=1"
     return sqlite3.connect(uri, uri=True)
 
 
@@ -346,7 +347,7 @@ def search_vscdb(
     searched.append(str(db_path))
     try:
         con = open_vscdb(db_path)
-    except sqlite3.Error:
+    except (sqlite3.Error, OSError, ValueError):
         return rules, searched, durable_found, summary
 
     try:

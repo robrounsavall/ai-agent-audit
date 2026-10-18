@@ -133,6 +133,81 @@ class TestReportV2(unittest.TestCase):
                 _panel(html, "changes"),
             )
 
+    def test_bad_file_and_dirty_counts_still_build(self):
+        briefing = _load_briefing()
+        with self._root() as raw:
+            root = Path(raw)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            (evidence / "codex.json").write_text(
+                json.dumps(_envelope(
+                    "codex",
+                    summary={"permission_events": "nope"},
+                    findings=[{
+                        "id": "codex.sample",
+                        "severity": "low",
+                        "category": "General Tooling",
+                        "title": "Codex sample finding",
+                        "evidence_count": "nope",
+                    }],
+                )),
+                encoding="utf-8",
+            )
+            (evidence / "secrets-scan.json").write_text(
+                json.dumps(_envelope("secrets-scan", summary=None)),
+                encoding="utf-8",
+            )
+            (evidence / "telemetry.json").write_text(
+                json.dumps(_envelope(
+                    "telemetry",
+                    summary={
+                        "approval_events": 1,
+                        "approvals": 1,
+                        "approvals_by_group": [
+                            {"group": "config rule", "approvals": "nope"},
+                            {"group": "user", "approvals": "nope"},
+                            {"group": "hook", "approvals": "nope"},
+                        ],
+                    },
+                )),
+                encoding="utf-8",
+            )
+            (evidence / "broken.json").write_bytes(b"\xff not json")
+            (evidence / "changes.json").write_text(
+                json.dumps({
+                    "collector": "changes",
+                    "version": "1.0.0",
+                    "summary": {
+                        "comparison": "diff",
+                        "new_high_or_critical": "nope",
+                        "collectors_changed": "nope",
+                        "drift_warnings": "nope",
+                        "findings_added": "nope",
+                        "findings_resolved": "nope",
+                        "findings_severity_changed": "nope",
+                        "mcp_servers_added": "nope",
+                        "mcp_servers_removed": "nope",
+                        "counters_moved": "nope",
+                        "current_label": "today",
+                        "previous_label": "yesterday",
+                    },
+                    "findings": [],
+                    "changes": {
+                        "collectors": {
+                            "codex": {
+                                "allow_rules": {
+                                    "added": [{"rule_type": "bash", "count": "nope"}],
+                                }
+                            }
+                        }
+                    },
+                }),
+                encoding="utf-8",
+            )
+            html = briefing.build_html(root, customer="Example", operator="Test")
+            self.assertIn("Codex sample finding", html)
+            self.assertIn("Approval decisions", html)
+
     def test_opt_in_commands_stay_out_of_all(self):
         text = (ROOT / "aiscan.ps1").read_text(encoding="utf-8")
         match = re.search(r"\$StdlibOrder = @\((.*?)\)", text, re.S)

@@ -173,5 +173,14 @@ class TestParseConfigToml(unittest.TestCase):
             self.assertEqual(r.get("source_kind"), "user_config")
 
 
+class TestSafeUrl(unittest.TestCase):
+    def test_out_of_range_port_is_a_marker(self):
+        self.assertEqual(codex.safe_url("https://logs.example:99999"), "invalid-endpoint")
+        self.assertEqual(
+            codex.safe_url("https://logs.example:4318/v1/traces"),
+            "https://logs.example:4318/v1/traces",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

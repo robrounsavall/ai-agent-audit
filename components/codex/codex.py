@@ -37,7 +37,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 COLLECTOR = "codex"
 
@@ -52,14 +52,16 @@ def safe_url(value: str) -> str:
         return ""
     try:
         parts = urlsplit(text)
+        if not parts.scheme or not parts.netloc:
+            return text[:160]
+        # hostname and port can raise ValueError (bad IPv6, port above 65535).
+        host = parts.hostname or parts.netloc
+        port = parts.port
+        if port:
+            host = f"{host}:{port}"
+        return urlunsplit((parts.scheme, host, parts.path.rstrip("/"), "", ""))
     except ValueError:
-        return text[:160]
-    if not parts.scheme or not parts.netloc:
-        return text[:160]
-    host = parts.hostname or parts.netloc
-    if parts.port:
-        host = f"{host}:{parts.port}"
-    return urlunsplit((parts.scheme, host, parts.path.rstrip("/"), "", ""))
+        return "invalid-endpoint"
 
 
 def _find_endpoint(value) -> str:

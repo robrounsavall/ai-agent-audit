@@ -172,5 +172,17 @@ class TestMcpHost(unittest.TestCase):
             self.assertNotIn("claude.mcp.external_server", self.findings_for(config), config)
 
 
+class TestSafeUrl(unittest.TestCase):
+    def test_out_of_range_port_is_a_marker(self):
+        self.assertEqual(claude.safe_url("http://otel.example:99999/v1"), "invalid-endpoint")
+        self.assertEqual(claude.safe_url("http://[::1"), "invalid-endpoint")
+
+    def test_normal_endpoint_keeps_host_and_port(self):
+        self.assertEqual(
+            claude.safe_url("https://otel.example:4318/v1/traces?token=sekret"),
+            "https://otel.example:4318/v1/traces",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

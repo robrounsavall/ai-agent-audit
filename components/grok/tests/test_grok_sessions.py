@@ -138,6 +138,34 @@ class TestCollectSessionInventory(unittest.TestCase):
             self.assertNotIn(SECRET_TARGET, blob)
             self.assertNotIn("secret prompt", blob)
 
+    def test_missing_or_unreadable_summary_is_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "sessions"
+            missing = root / "cwd" / "no-summary"
+            _write(missing / "events.jsonl", "{}\n")
+            listed = root / "cwd" / "list-summary"
+            _write(listed / "summary.json", "[]")
+            junk = root / "cwd" / "junk-summary"
+            junk.mkdir(parents=True)
+            (junk / "summary.json").write_bytes(b"\xff")
+            off = root / "cwd" / "real-off"
+            off.mkdir(parents=True)
+            (off / "summary.json").write_bytes(
+                b"\xef\xbb\xbf" + json.dumps({"sandbox_profile": "off"}).encode("utf-8")
+            )
+
+            summary, findings, _rules = grok.collect_session_inventory(root)
+            self.assertEqual(summary["session_count"], 4)
+            self.assertEqual(summary["sandbox_unknown_sessions"], 3)
+            self.assertEqual(summary["sandbox_off_sessions"], 1)
+            self.assertEqual(summary["sandbox_profile_distribution"].get("unknown"), 3)
+            self.assertEqual(summary["sandbox_profile_distribution"].get("off"), 1)
+            self.assertIn("grok.sandbox.off", ids(findings))
+            self.assertEqual(
+                next(f["evidence_count"] for f in findings if f["id"] == "grok.sandbox.off"),
+                1,
+            )
+
 
 class TestCollectIntegration(unittest.TestCase):
     def test_runtime_only_finding_when_config_has_no_mcp(self):
@@ -202,7 +230,7 @@ class TestCollectIntegration(unittest.TestCase):
                 envelope = grok.collect(tp, repo_roots=[])
 
             self.assertTrue(envelope["platform_detected"])
-            self.assertEqual(envelope["version"], "1.2.0")
+            self.assertEqual(envelope["version"], "1.3.0")
             got = ids(envelope["findings"])
             self.assertIn("grok.permission.always_approve", got)
             self.assertIn("grok.sandbox.off", got)

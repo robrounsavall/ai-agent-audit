@@ -111,7 +111,7 @@ from common import (  # noqa: E402
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 COLLECTOR = "telemetry"
 
 # Confirmed Claude Code event / attribute names. See module docstring.
@@ -247,7 +247,9 @@ HARNESS_MAP = {
     "grok-build": "grok",
 }
 _HARNESS_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
-_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+_CANON_TIME_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?$"
+)
 
 RISKY_FAMILIES = (
     (
@@ -420,9 +422,20 @@ def as_int(value: Any) -> int | None:
         return None
     text = str(value).strip().replace(",", "")
     if re.fullmatch(r"-?\d+", text):
-        return int(text)
+        # A multi-megabyte digit string is not a counter. Skip it.
+        if len(text.lstrip("-")) > 18:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return None
     if re.fullmatch(r"-?\d+\.0+", text):
-        return int(float(text))
+        if len(text) > 24:
+            return None
+        try:
+            return int(float(text))
+        except (ValueError, OverflowError):
+            return None
     return None
 
 
@@ -513,15 +526,25 @@ def parse_time(value: Any) -> str:
     if re.fullmatch(r"\d{10}(?:\.\d+)?", text):
         return epoch_to_iso(float(text))
     parsed = parse_iso(text)
-    if _DAY_RE.match(parsed):
-        return parsed
-    return ""
+    if not _CANON_TIME_RE.fullmatch(parsed):
+        return ""
+    try:
+        datetime.strptime(parsed[:10], "%Y-%m-%d")
+    except ValueError:
+        return ""
+    return parsed
 
 
 def day_of(timestamp: str) -> str:
-    if _DAY_RE.match(timestamp or ""):
-        return timestamp[:10]
-    return "unknown"
+    text = timestamp or ""
+    if len(text) < 10 or not _CANON_TIME_RE.fullmatch(text):
+        return "unknown"
+    day = text[:10]
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return "unknown"
+    return day
 
 
 def _otlp_scalar(value_obj: Any) -> Any:
@@ -722,20 +745,35 @@ def _looks_like_csv(text: str) -> bool:
     return bool(set(header) & CSV_HINTS)
 
 
+def _csv_field_limit() -> None:
+    """Allow a field larger than the 128KiB default. The file is already in memory."""
+    limit = sys.maxsize
+    while limit >= 131072:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:
+            limit //= 2
+
+
 def _csv_rows(text: str) -> list[dict[str, Any]]:
-    reader = csv.DictReader(io.StringIO(text))
-    rows: list[dict[str, Any]] = []
-    for raw in reader:
-        if not raw:
-            continue
-        row: dict[str, Any] = {}
-        for key, value in raw.items():
-            if key is None:
+    _csv_field_limit()
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        rows: list[dict[str, Any]] = []
+        for raw in reader:
+            if not raw:
                 continue
-            row[_norm_key(key)] = "" if value is None else value
-        if any(str(value).strip() for value in row.values()):
-            rows.append(row)
-    return rows
+            row: dict[str, Any] = {}
+            for key, value in raw.items():
+                if key is None:
+                    continue
+                row[_norm_key(key)] = "" if value is None else value
+            if any(str(value).strip() for value in row.values()):
+                rows.append(row)
+        return rows
+    except csv.Error as exc:
+        raise ExportReadError("parse_error") from exc
 
 
 def _json_lines(text: str) -> tuple[list[Any], int]:
@@ -750,6 +788,8 @@ def _json_lines(text: str) -> tuple[list[Any], int]:
             docs.append(json.loads(stripped))
         except json.JSONDecodeError:
             continue
+        except (RecursionError, ValueError) as exc:
+            raise ExportReadError("parse_error") from exc
     return docs, nonempty
 
 
@@ -780,6 +820,8 @@ def load_export(path: Path) -> tuple[list[dict[str, Any]], ParseStats]:
             docs, nonempty = _json_lines(text)
             if nonempty and not docs:
                 raise ExportReadError("parse_error")
+        except (RecursionError, ValueError) as exc:
+            raise ExportReadError("parse_error") from exc
     else:
         docs, nonempty = _json_lines(text)
         if nonempty and not docs:
@@ -1347,7 +1389,7 @@ def collect(
     for path in paths:
         try:
             rows, file_stats = load_export(path)
-        except ExportReadError:
+        except (ExportReadError, csv.Error, RecursionError, ValueError, OverflowError):
             inputs_failed += 1
             continue
         readable.append(path)

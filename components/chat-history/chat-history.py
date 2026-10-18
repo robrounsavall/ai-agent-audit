@@ -35,7 +35,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "chat-history"
 
@@ -102,6 +102,29 @@ def get_content_text(content, include_tool_details=False):
             parts.append(escape_md_fence(content))
 
     return "\n\n".join(p for p in parts if p and p.strip()).strip()
+
+
+def _json_object(raw: str) -> dict | None:
+    """One JSON value, or None when it is not an object. Never raises."""
+    try:
+        obj = json.loads(raw)
+    except (json.JSONDecodeError, ValueError, RecursionError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _message_parts(message) -> tuple[object, str]:
+    """Content and role from a message that may be an object or a plain string."""
+    if isinstance(message, dict):
+        return message.get("content"), str(message.get("role") or "")
+    if isinstance(message, str):
+        return message, ""
+    return None, ""
+
+
+def _sqlite_ro_uri(path: Path) -> str:
+    """Read-only SQLite URI. Encodes #, ?, and % so they stay in the path."""
+    return Path(path).resolve().as_uri() + "?mode=ro&immutable=1"
 
 
 def read_text_lines(path: Path, problems: list | None = None) -> list[str] | None:
@@ -257,34 +280,36 @@ def collect_claude(buckets, include_tool_details, root, metrics=None, problems=N
         if lines is None:
             continue
         for raw in lines:
+            obj = _json_object(raw)
+            if obj is None:
+                continue
             try:
-                obj = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            subtype = obj.get("subtype")
-            if subtype in CLAUDE_PERMISSION_SUBTYPES:
-                metrics[f"claude_{subtype}s"] = int(metrics.get(f"claude_{subtype}s", 0)) + 1
-                if subtype == "permission_response" and obj.get("granted") is True:
-                    metrics["claude_granted_permission_responses"] = (
-                        int(metrics.get("claude_granted_permission_responses", 0)) + 1
+                subtype = obj.get("subtype")
+                if subtype in CLAUDE_PERMISSION_SUBTYPES:
+                    metrics[f"claude_{subtype}s"] = int(metrics.get(f"claude_{subtype}s", 0)) + 1
+                    if subtype == "permission_response" and obj.get("granted") is True:
+                        metrics["claude_granted_permission_responses"] = (
+                            int(metrics.get("claude_granted_permission_responses", 0)) + 1
+                        )
+                permission_mode = obj.get("permissionMode")
+                if isinstance(permission_mode, str) and permission_mode.strip():
+                    mode_key = metric_token(permission_mode)
+                    metrics[f"claude_permission_mode_{mode_key}"] = (
+                        int(metrics.get(f"claude_permission_mode_{mode_key}", 0)) + 1
                     )
-            permission_mode = obj.get("permissionMode")
-            if isinstance(permission_mode, str) and permission_mode.strip():
-                mode_key = metric_token(permission_mode)
-                metrics[f"claude_permission_mode_{mode_key}"] = (
-                    int(metrics.get(f"claude_permission_mode_{mode_key}", 0)) + 1
-                )
-                metrics["claude_permission_mode_events_total"] = (
-                    int(metrics.get("claude_permission_mode_events_total", 0)) + 1
-                )
-            if obj.get("type") not in ("user", "assistant") or not obj.get("timestamp"):
+                    metrics["claude_permission_mode_events_total"] = (
+                        int(metrics.get("claude_permission_mode_events_total", 0)) + 1
+                    )
+                if obj.get("type") not in ("user", "assistant") or not obj.get("timestamp"):
+                    continue
+                ts = parse_iso(obj["timestamp"])
+                if ts is None:
+                    continue
+                content, role = _message_parts(obj.get("message"))
+                text = get_content_text(content, include_tool_details)
+                add_entry(buckets, ts, "Claude", role, text, str(jsonl), workspace)
+            except (TypeError, ValueError, AttributeError, RecursionError):
                 continue
-            ts = parse_iso(obj["timestamp"])
-            if ts is None:
-                continue
-            msg = obj.get("message", {})
-            text = get_content_text(msg.get("content"), include_tool_details)
-            add_entry(buckets, ts, "Claude", msg.get("role", ""), text, str(jsonl), workspace)
 
 
 def claude_history_roots(tp: paths.ToolPaths) -> list[Path]:
@@ -315,23 +340,26 @@ def collect_codex(buckets, include_tool_details, root, problems=None):
         if lines is None:
             continue
         for raw in lines:
+            obj = _json_object(raw)
+            if obj is None:
+                continue
             try:
-                obj = json.loads(raw)
-            except json.JSONDecodeError:
+                payload = obj.get("payload")
+                if obj.get("type") != "event_msg" or not isinstance(payload, dict):
+                    continue
+                ptype = payload.get("type")
+                if ptype not in ("user_message", "agent_message"):
+                    continue
+                role = "user" if ptype == "user_message" else "assistant"
+                ts = parse_iso(obj.get("timestamp")) or datetime.fromtimestamp(jsonl.stat().st_mtime)
+                message = payload.get("message")
+                text = (
+                    str(message) if isinstance(message, str) and message
+                    else get_content_text(payload, include_tool_details)
+                )
+                add_entry(buckets, ts, "Codex", role, text, str(jsonl))
+            except (TypeError, ValueError, AttributeError, RecursionError):
                 continue
-            if obj.get("type") != "event_msg" or not obj.get("payload"):
-                continue
-            payload = obj["payload"]
-            ptype = payload.get("type")
-            if ptype not in ("user_message", "agent_message"):
-                continue
-            role = "user" if ptype == "user_message" else "assistant"
-            ts = parse_iso(obj.get("timestamp")) or datetime.fromtimestamp(jsonl.stat().st_mtime)
-            text = (
-                str(payload["message"]) if payload.get("message")
-                else get_content_text(payload, include_tool_details)
-            )
-            add_entry(buckets, ts, "Codex", role, text, str(jsonl))
 
 
 def grok_workspace_label(slug):
@@ -372,16 +400,18 @@ def collect_grok(buckets, include_tool_details, root, problems=None):
             continue
         messages = []
         for raw in lines:
+            obj = _json_object(raw)
+            if obj is None:
+                continue
             try:
-                obj = json.loads(raw)
-            except json.JSONDecodeError:
+                role = obj.get("type")
+                if role not in ("user", "assistant"):
+                    continue
+                text = get_content_text(obj.get("content"), include_tool_details)
+                if text:
+                    messages.append((role, text))
+            except (TypeError, ValueError, AttributeError, RecursionError):
                 continue
-            role = obj.get("type")
-            if role not in ("user", "assistant"):
-                continue
-            text = get_content_text(obj.get("content"), include_tool_details)
-            if text:
-                messages.append((role, text))
 
         if start_ts and end_ts and end_ts > start_ts and len(messages) > 1:
             span = (end_ts - start_ts).total_seconds()
@@ -429,26 +459,37 @@ def collect_cursor_transcripts(buckets, include_tool_details, root, problems=Non
             if lines is None:
                 continue
             for raw in lines:
+                obj = _json_object(raw)
+                if obj is None:
+                    continue
                 try:
-                    obj = json.loads(raw)
-                except json.JSONDecodeError:
+                    role = obj.get("role")
+                    if role not in ("user", "assistant"):
+                        continue
+                    content, _message_role = _message_parts(obj.get("message"))
+                    ts = last_known_ts
+                    if role == "user":
+                        parsed = parse_cursor_embedded_timestamp(content)
+                        if parsed:
+                            ts = parsed
+                            last_known_ts = parsed
+                    text = get_content_text(content, include_tool_details)
+                    add_entry(buckets, ts, "Cursor", role, text, str(jsonl), workspace)
+                except (TypeError, ValueError, AttributeError, RecursionError):
                     continue
-                if obj.get("role") not in ("user", "assistant"):
-                    continue
-                ts = last_known_ts
-                if obj["role"] == "user":
-                    parsed = parse_cursor_embedded_timestamp(obj.get("message", {}).get("content"))
-                    if parsed:
-                        ts = parsed
-                        last_known_ts = parsed
-                text = get_content_text(obj.get("message", {}).get("content"), include_tool_details)
-                add_entry(buckets, ts, "Cursor", obj["role"], text, str(jsonl), workspace)
 
 
 def cursor_composer_workspace(composer):
-    ws = composer.get("workspaceIdentifier", {})
-    fs = ws.get("uri", {}).get("fsPath", "")
-    if not fs:
+    if not isinstance(composer, dict):
+        return ""
+    ws = composer.get("workspaceIdentifier")
+    if not isinstance(ws, dict):
+        return ""
+    uri = ws.get("uri")
+    if not isinstance(uri, dict):
+        return ""
+    fs = uri.get("fsPath", "")
+    if not isinstance(fs, str) or not fs:
         return ""
     parts = fs.replace("\\", "/").rstrip("/").split("/")
     try:
@@ -461,10 +502,9 @@ def cursor_composer_workspace(composer):
 def collect_cursor_composer(buckets, db):
     if not db.exists():
         return
-    uri = "file:" + str(db).replace("\\", "/") + "?mode=ro&immutable=1"
     try:
-        con = sqlite3.connect(uri, uri=True)
-    except sqlite3.Error as e:
+        con = sqlite3.connect(_sqlite_ro_uri(db), uri=True)
+    except (sqlite3.Error, OSError, ValueError) as e:
         print(f"  Warning: cannot open state.vscdb: {e}", file=sys.stderr)
         return
     cur = con.cursor()
@@ -473,16 +513,36 @@ def collect_cursor_composer(buckets, db):
         row = cur.fetchone()
         if not row or row[0] is None:
             return
-        composers = json.loads(row[0]).get("allComposers", [])
+        try:
+            header = json.loads(row[0])
+        except (json.JSONDecodeError, ValueError, RecursionError):
+            return
+        composers = header.get("allComposers", []) if isinstance(header, dict) else []
+        if not isinstance(composers, list):
+            return
         for composer in composers:
-            cid = composer.get("composerId", "")
+            if not isinstance(composer, dict):
+                continue
+            cid = str(composer.get("composerId") or "")
             workspace = cursor_composer_workspace(composer)
             cur.execute("SELECT value FROM cursorDiskKV WHERE key=?", (f"composerData:{cid}",))
             cd_row = cur.fetchone()
             if not cd_row or cd_row[0] is None:
                 continue
-            headers = json.loads(cd_row[0]).get("fullConversationHeadersOnly", [])
+            try:
+                composer_data = json.loads(cd_row[0])
+            except (json.JSONDecodeError, ValueError, RecursionError):
+                continue
+            headers = (
+                composer_data.get("fullConversationHeadersOnly", [])
+                if isinstance(composer_data, dict)
+                else []
+            )
+            if not isinstance(headers, list):
+                continue
             for h in headers:
+                if not isinstance(h, dict):
+                    continue
                 bid = h.get("bubbleId")
                 if not bid:
                     continue
@@ -497,14 +557,19 @@ def collect_cursor_composer(buckets, db):
                 brow = cur.fetchone()
                 if not brow or brow[0] is None:
                     continue
-                b = json.loads(brow[0])
-                text = b.get("text", "").strip()
+                try:
+                    bubble = json.loads(brow[0])
+                except (json.JSONDecodeError, ValueError, RecursionError):
+                    continue
+                if not isinstance(bubble, dict):
+                    continue
+                text = str(bubble.get("text") or "").strip()
                 if not text:
                     continue
-                ts = parse_iso(b.get("createdAt"))
+                ts = parse_iso(bubble.get("createdAt"))
                 if ts is None:
                     continue
-                role = "user" if b.get("type") == 1 else "assistant"
+                role = "user" if bubble.get("type") == 1 else "assistant"
                 add_entry(buckets, ts, "Cursor", role, text, f"composerData:{cid}", workspace)
     except sqlite3.Error as e:
         print(f"  Warning: cursor composer collection failed: {e}", file=sys.stderr)

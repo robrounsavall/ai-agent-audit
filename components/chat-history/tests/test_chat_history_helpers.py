@@ -86,6 +86,124 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(found[0]["evidence_count"], 2)
         self.assertNotIn(str(root), json.dumps(found))
 
+    def test_non_object_json_does_not_abort(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claude_file = root / "proj" / "mix.jsonl"
+            claude_file.parent.mkdir(parents=True)
+            claude_file.write_text(
+                "[]\n"
+                + json.dumps(
+                    {
+                        "type": "user",
+                        "timestamp": "2026-01-02T00:00:00Z",
+                        "message": "hello from a string",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            codex_root = root / "codex"
+            codex_file = codex_root / "sess.jsonl"
+            codex_file.parent.mkdir(parents=True)
+            codex_file.write_text(
+                json.dumps({"type": "event_msg", "payload": "not-an-object"})
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "event_msg",
+                        "timestamp": "2026-01-02T00:00:00Z",
+                        "payload": {"type": "user_message", "message": "codex kept"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            grok_file = root / "grok" / "cwd" / "s1" / "chat_history.jsonl"
+            grok_file.parent.mkdir(parents=True)
+            grok_file.write_text(
+                "[]\n"
+                + json.dumps({"type": "user", "content": "grok kept"})
+                + "\n",
+                encoding="utf-8",
+            )
+            cursor_file = (
+                root
+                / "cursor"
+                / "cursor-projects-demo"
+                / "agent-transcripts"
+                / "sess"
+                / "sess.jsonl"
+            )
+            cursor_file.parent.mkdir(parents=True)
+            cursor_file.write_text(
+                json.dumps({"role": "user", "message": "cursor kept"}) + "\n",
+                encoding="utf-8",
+            )
+            buckets = defaultdict(list)
+            ch.collect_claude(buckets, False, root / "proj")
+            ch.collect_codex(buckets, False, codex_root)
+            ch.collect_grok(buckets, False, root / "grok")
+            ch.collect_cursor_transcripts(buckets, False, root / "cursor")
+        texts = [entry["text"] for rows in buckets.values() for entry in rows]
+        self.assertIn("hello from a string", texts)
+        self.assertIn("codex kept", texts)
+        self.assertIn("grok kept", texts)
+        self.assertIn("cursor kept", texts)
+
+    def test_composer_hash_path_and_odd_json(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "work#space" / "state.vscdb"
+            db.parent.mkdir()
+            con = sqlite3.connect(db)
+            con.execute("CREATE TABLE ItemTable (key TEXT, value TEXT)")
+            con.execute("CREATE TABLE cursorDiskKV (key TEXT, value TEXT)")
+            headers = {
+                "allComposers": [
+                    "not-a-composer",
+                    {"composerId": "c1"},
+                ]
+            }
+            con.execute(
+                "INSERT INTO ItemTable VALUES ('composer.composerHeaders', ?)",
+                (json.dumps(headers),),
+            )
+            composer = {
+                "fullConversationHeadersOnly": [
+                    "nope",
+                    {"bubbleId": "bad"},
+                    {"bubbleId": "good"},
+                ]
+            }
+            con.execute(
+                "INSERT INTO cursorDiskKV VALUES ('composerData:c1', ?)",
+                (json.dumps(composer),),
+            )
+            con.execute(
+                "INSERT INTO cursorDiskKV VALUES ('bubbleId:c1:bad', ?)",
+                ("[]",),
+            )
+            con.execute(
+                "INSERT INTO cursorDiskKV VALUES ('bubbleId:c1:good', ?)",
+                (
+                    json.dumps(
+                        {
+                            "text": "kept line",
+                            "createdAt": "2026-01-02T00:00:00Z",
+                            "type": 1,
+                        }
+                    ),
+                ),
+            )
+            con.commit()
+            con.close()
+            buckets = defaultdict(list)
+            ch.collect_cursor_composer(buckets, db)
+        texts = [entry["text"] for rows in buckets.values() for entry in rows]
+        self.assertEqual(texts, ["kept line"])
+
 
 if __name__ == "__main__":
     unittest.main()
