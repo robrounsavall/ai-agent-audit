@@ -69,6 +69,7 @@ from pathlib import Path
 from typing import Any
 
 from common import (
+    display_path,
     hostname_short,
     load_json,
     make_envelope,
@@ -941,7 +942,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print(json.dumps(envelope, indent=2, ensure_ascii=False))
     else:
-        print(f"Wrote {current / 'evidence' / CHANGES_FILENAME}")
+        print(f"Wrote {display_path(current / 'evidence' / CHANGES_FILENAME, current)}")
     return 0
 
 

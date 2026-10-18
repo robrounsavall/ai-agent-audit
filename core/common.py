@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from tool_version import tool_version
+
 USERPROFILE = Path(os.environ.get("USERPROFILE", Path.home()))
 APPDATA = Path(os.environ.get("APPDATA", USERPROFILE / "AppData" / "Roaming"))
 
@@ -220,6 +222,27 @@ def compute_scope_hash(paths: Iterable[str | Path]) -> str:
     return sha256_full(payload)
 
 
+def agent_mode() -> bool:
+    """True when aiscan.ps1 -AgentMode set AISCAN_AGENT_MODE."""
+    return os.environ.get("AISCAN_AGENT_MODE", "").strip().lower() in ("1", "true", "yes")
+
+
+def display_path(path: str | Path, root: str | Path | None = None) -> str:
+    """Path for an informational line.
+
+    Absolute unless agent mode is on, then relative to the scan root so the
+    console does not repeat a username. Error text should keep the raw path.
+    """
+    text = os.fspath(path)
+    if not agent_mode() or root is None:
+        return text
+    try:
+        rel = Path(text).resolve().relative_to(Path(root).resolve())
+    except (OSError, ValueError):
+        return text
+    return os.fspath(rel)
+
+
 def make_envelope(
     collector: str,
     version: str,
@@ -231,6 +254,7 @@ def make_envelope(
     return {
         "collector": collector,
         "version": version,
+        "aiscan_version": tool_version(),
         "ran_at": datetime.now().astimezone().isoformat(),
         "host": host or hostname_short(),
         "platform_detected": platform_detected,

@@ -9,7 +9,27 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `-AgentMode` prints scan paths relative to the output folder and omits the
+  closing "Evidence kept at" line. The summary table and errors stay.
+- Evidence envelopes include `aiscan_version`, the tool version that wrote
+  them.
+
+### Changed
+
+- `aiscan all` prints the tool version from `git describe --tags` in a
+  checkout, and from the `VERSION` file in a release zip. A checkout that is
+  not exactly the release tag no longer prints `dev`.
+- The release build refuses to publish when `VERSION` does not match the tag.
+  Bump `VERSION` in the commit you tag.
+
+### Fixed
+
+- The process exits 2 when a collector errors or its evidence does not parse,
+  and 3 when the only failure is the briefing. A normal run, including
+  "platform not detected", still exits 0.
+- A successful browser open prints `Opened briefing in default browser`.
 
 ## [0.2.0] - 2026-10-15
 

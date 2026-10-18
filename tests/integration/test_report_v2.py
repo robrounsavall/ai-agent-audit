@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
+import os
 import re
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -132,6 +135,37 @@ class TestReportV2(unittest.TestCase):
                 "Not collected in this scan.",
                 _panel(html, "changes"),
             )
+
+    def test_agent_mode_wrote_line_is_relative_to_the_scan(self):
+        briefing = _load_briefing()
+        previous = os.environ.get("AISCAN_AGENT_MODE")
+        os.environ["AISCAN_AGENT_MODE"] = "1"
+        try:
+            with self._root() as raw:
+                root = Path(raw)
+                evidence = root / "evidence"
+                evidence.mkdir()
+                (evidence / "codex.json").write_text(
+                    json.dumps(_envelope("codex")),
+                    encoding="utf-8",
+                )
+                out = root / "briefing" / "briefing.html"
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    code = briefing.main([
+                        "--evidence-root", str(root),
+                        "--out", str(out),
+                    ])
+                self.assertEqual(code, 0)
+                text = buf.getvalue()
+                self.assertIn("Wrote " + str(Path("briefing") / "briefing.html"), text)
+                self.assertNotIn(str(root), text)
+                self.assertTrue(out.is_file())
+        finally:
+            if previous is None:
+                os.environ.pop("AISCAN_AGENT_MODE", None)
+            else:
+                os.environ["AISCAN_AGENT_MODE"] = previous
 
     def test_opt_in_commands_stay_out_of_all(self):
         text = (ROOT / "aiscan.ps1").read_text(encoding="utf-8")

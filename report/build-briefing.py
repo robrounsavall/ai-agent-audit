@@ -47,6 +47,7 @@ from access_map import build_access_map  # noqa: E402
 from briefing_template import REPORT_V2_CSS, REPORT_V2_JS  # noqa: E402
 from common import (  # noqa: E402
     _hash_path,
+    display_path,
     mask_secrets,
     redact_paths,
     redact_sample,
@@ -4122,8 +4123,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    args = build_parser().parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     root = Path(args.evidence_root)
     out = Path(args.out)
 
@@ -4140,7 +4141,7 @@ def main() -> int:
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html_content, encoding="utf-8", newline="\n")
-    print(f"Wrote {out}")
+    print(f"Wrote {display_path(out, root)}")
     return 0
 
 

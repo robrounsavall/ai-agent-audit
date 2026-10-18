@@ -65,11 +65,22 @@ class TestSanitize(unittest.TestCase):
         self.assertNotIn(key, f["sample_redacted"])
 
     def test_envelope_shape(self):
-        env = make_envelope("claude", "1.0.0", "abc", platform_detected=True)
-        for key in ("collector", "version", "ran_at", "host", "platform_detected",
-                    "scope_hash", "summary", "findings", "rules", "raw_pointers"):
+        previous = os.environ.get("AISCAN_VERSION")
+        os.environ["AISCAN_VERSION"] = "1.2.3-test"
+        try:
+            env = make_envelope("claude", "1.0.0", "abc", platform_detected=True)
+        finally:
+            if previous is None:
+                os.environ.pop("AISCAN_VERSION", None)
+            else:
+                os.environ["AISCAN_VERSION"] = previous
+        for key in ("collector", "version", "aiscan_version", "ran_at", "host",
+                    "platform_detected", "scope_hash", "summary", "findings",
+                    "rules", "raw_pointers"):
             self.assertIn(key, env)
         self.assertEqual(env["collector"], "claude")
+        self.assertEqual(env["version"], "1.0.0")
+        self.assertEqual(env["aiscan_version"], "1.2.3-test")
 
     def test_sha256_short_stable(self):
         self.assertEqual(sha256_short("x"), sha256_short("x"))

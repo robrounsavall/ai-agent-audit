@@ -94,6 +94,11 @@
     Folder of dated scan directories. Passed to scan_diff as --history-root
     when -Previous is omitted. Default is the parent of the scan folder.
 
+.PARAMETER AgentMode
+    Print paths relative to the scan folder and omit the closing
+    "Evidence kept at" line. The summary table and error lines stay.
+    For agent runs that must not repeat absolute paths.
+
 .EXAMPLE
     .\aiscan.ps1
     Runs every stdlib collector, unredacted, and prints a combined summary.
@@ -132,6 +137,11 @@
 .EXAMPLE
     .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Previous C:\scans\2026-10-01 -Briefing
     Offline collectors, then a changes envelope versus the previous scan, then the HTML briefing.
+
+.EXAMPLE
+    .\aiscan.ps1 all -OutDir C:\scans\today -AgentMode
+    Summary table and errors stay. Paths are relative to that folder, and the
+    closing "Evidence kept at" line is omitted.
 #>
 [CmdletBinding()]
 param(
@@ -169,7 +179,9 @@ param(
 
     [string]$Previous,
 
-    [string]$HistoryRoot
+    [string]$HistoryRoot,
+
+    [switch]$AgentMode
 )
 
 Set-StrictMode -Version Latest
@@ -184,6 +196,7 @@ if ($Here -and $OutDir) {
 # The collectors read AISCAN_REDACT centrally (sanitize_text). -Redact turns on
 # masking for output you intend to share.
 if ($Redact) { $env:AISCAN_REDACT = "1" } else { $env:AISCAN_REDACT = $null }
+if ($AgentMode) { $env:AISCAN_AGENT_MODE = "1" } else { $env:AISCAN_AGENT_MODE = $null }
 $UseLocalLinks = [bool]$LocalLinks
 if ($LocalLinks -and $Redact) {
     Write-Host "-Redact turns off -LocalLinks; building a shareable briefing without local paths." -ForegroundColor Yellow
@@ -196,11 +209,6 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CoreDir = Join-Path $ScriptDir "core"
 $ComponentsDir = Join-Path $ScriptDir "components"
 $Python = "python"
-
-# Release zips carry a VERSION file (written by scripts/build-release-zip.sh).
-# A repo checkout has none and reports "dev".
-$VersionFile = Join-Path $ScriptDir "VERSION"
-$AiscanVersion = if (Test-Path -LiteralPath $VersionFile) { (Get-Content -LiteralPath $VersionFile -TotalCount 1).Trim() } else { "dev" }
 
 # core/ holds shared common.py + paths.py; every collector script imports them.
 # Prepend so child Python processes resolve imports without an install step.
@@ -338,6 +346,84 @@ function Invoke-OneCollector {
     return $LASTEXITCODE
 }
 
+# Banner version. core/tool_version.py is the source of truth. The fallback
+# covers a machine where that helper cannot run: VERSION file, then "dev".
+function Get-AiscanVersion {
+    $helper = Join-Path $CoreDir "tool_version.py"
+    if ((Test-Path -LiteralPath $helper) -and (Get-Command $Python -ErrorAction SilentlyContinue)) {
+        $out = & $Python $helper 2>$null
+        if ($LASTEXITCODE -eq 0 -and $out) {
+            $text = "$($out | Select-Object -Last 1)".Trim()
+            if ($text) { return $text }
+        }
+    }
+    $versionFile = Join-Path $ScriptDir "VERSION"
+    if (Test-Path -LiteralPath $versionFile) {
+        $line = "$(Get-Content -LiteralPath $versionFile -TotalCount 1)".Trim()
+        if ($line) { return $line }
+    }
+    return "dev"
+}
+
+# One collector, in the form core/run_status.py reads:
+# "<exit>,<1 if an evidence file exists>,<1 if that file parsed>".
+function New-CollectorStatusRow {
+    param(
+        [int]$ExitCode,
+        [bool]$HasEvidence,
+        [bool]$Parsed
+    )
+    $hasFlag = if ($HasEvidence) { "1" } else { "0" }
+    $parsedFlag = if ($Parsed) { "1" } else { "0" }
+    return "$ExitCode,$hasFlag,$parsedFlag"
+}
+
+# 2 when any collector errors or its evidence does not parse.
+# 3 when collectors were fine and only the briefing failed.
+# 0 otherwise, including "platform not detected".
+function Get-AiscanScanExitCode {
+    param(
+        [string[]]$Rows,
+        [bool]$BriefingFailed
+    )
+    $helper = Join-Path $CoreDir "run_status.py"
+    $brief = if ($BriefingFailed) { "1" } else { "0" }
+    $argList = @($helper)
+    if ($Rows) { $argList += $Rows }
+    $argList += @("--briefing", $brief)
+    $out = & $Python @argList
+    if ($LASTEXITCODE -eq 0 -and $null -ne $out) {
+        return [int]("$($out | Select-Object -Last 1)".Trim())
+    }
+    Write-Host "Could not compute the scan exit code." -ForegroundColor Yellow
+    return 2
+}
+
+# In -AgentMode, paths under the scan folder are printed relative to it.
+function Format-AiscanPath {
+    param(
+        [string]$Path,
+        [string]$Root
+    )
+    if (-not $AgentMode -or -not $Path -or -not $Root) { return $Path }
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    $pathFull = [System.IO.Path]::GetFullPath($Path)
+    if ($pathFull.Equals($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "."
+    }
+    $prefix = $rootFull + $sep
+    if ($pathFull.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $pathFull.Substring($prefix.Length)
+    }
+    return $Path
+}
+
+# Banner version, also stamped on every evidence envelope via AISCAN_VERSION.
+# Resolved after the helper functions exist (PowerShell does not hoist them).
+$AiscanVersion = Get-AiscanVersion
+$env:AISCAN_VERSION = $AiscanVersion
+
 function New-PeekRoot {
     # -Here/-OutDir make the root persistent (same evidence/raw layout);
     # otherwise fall back to a throwaway temp directory, same as always.
@@ -361,7 +447,10 @@ function Remove-PeekRoot {
     # browser opens it asynchronously; deleting the root would race the open.
     if ($Keep -or $OutDir -or $Here -or $Briefing) {
         Write-Host ""
-        Write-Host "Evidence kept at: $Root" -ForegroundColor Cyan
+        # -AgentMode drops this absolute path. The warning line stays.
+        if (-not $AgentMode) {
+            Write-Host "Evidence kept at: $Root" -ForegroundColor Cyan
+        }
         Write-Host "(unredacted by default: real secrets / paths / transcript metadata - delete when done)" -ForegroundColor DarkGray
     }
     else {
@@ -401,6 +490,9 @@ function Invoke-ScanDiff {
 # through; a briefing is a nice-to-have on a local scan, not a gate.
 function Invoke-AiscanBriefing {
     param([string]$Root)
+    # Stays true until the HTML is written. Opening the browser is separate:
+    # a failed Start-Process does not fail the briefing.
+    $script:AiscanBriefingFailed = $true
     $briefingScript = Join-Path $ScriptDir "report\build-briefing.py"
     $briefingName = if ($UseLocalLinks) { "briefing-local.html" } else { "briefing.html" }
     $briefingOut = Join-Path $Root "briefing\$briefingName"
@@ -431,13 +523,15 @@ function Invoke-AiscanBriefing {
         Write-Host "Briefing generation failed (exit $code)." -ForegroundColor Yellow
         return
     }
-    Write-Host "Briefing written: $briefingOut" -ForegroundColor Green
+    Write-Host ("Briefing written: {0}" -f (Format-AiscanPath -Path $briefingOut -Root $Root)) -ForegroundColor Green
     try {
         Start-Process -FilePath $briefingOut
+        Write-Host "Opened briefing in default browser" -ForegroundColor Green
     }
     catch {
         Write-Host "Could not open briefing automatically: $_" -ForegroundColor Yellow
     }
+    $script:AiscanBriefingFailed = $false
 }
 
 function Get-SevColor {
@@ -550,82 +644,98 @@ if ($Collector -eq "all") {
     $root = New-PeekRoot
     Write-Host "aiscan $AiscanVersion" -ForegroundColor DarkGray
     $rows = @()
+    $statusRows = @()
     foreach ($name in $StdlibOrder) {
         Write-Host "Running $name..." -ForegroundColor Cyan
         $code = Invoke-OneCollector -Name $name -EvidenceRoot $root
+        if ($null -eq $code) { $code = 1 }
         $jsonPath = Join-Path $root "evidence\$name.json"
         $findings = "-"
         $detected = "-"
+        $hasEvidence = Test-Path -LiteralPath $jsonPath
+        $parsed = $false
         # Collectors write their evidence envelope even when the platform is not
         # detected (exit 2). Exit 2 WITHOUT an envelope is a real failure (e.g.
         # argparse rejects bad args with exit 2), not "not detected".
-        if (Test-Path -LiteralPath $jsonPath) {
+        if ($hasEvidence) {
             try {
                 $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+                $parsed = $true
                 if ($j.PSObject.Properties.Name -contains "findings") { $findings = @($j.findings).Count }
                 if ($j.PSObject.Properties.Name -contains "platform_detected") { $detected = $j.platform_detected }
                 if ($code -eq 2) { $detected = "not detected" }
+                elseif ($code -ne 0) { $detected = "error (exit $code)" }
             }
             catch { $detected = "parse error" }
         }
         elseif ($code -ne 0) {
             $detected = "error (exit $code)"
         }
+        $statusRows += (New-CollectorStatusRow -ExitCode $code -HasEvidence $hasEvidence -Parsed $parsed)
         $rows += [PSCustomObject]@{ Collector = $name; Detected = $detected; Findings = $findings }
     }
     Write-Host ""
     $rows | Format-Table -AutoSize
+    $script:AiscanBriefingFailed = $false
     if ($Briefing) {
         Invoke-ScanDiff -Root $root
         Invoke-AiscanBriefing -Root $root
     }
     Remove-PeekRoot -Root $root
-    exit 0
+    exit (Get-AiscanScanExitCode -Rows $statusRows -BriefingFailed $script:AiscanBriefingFailed)
 }
 
 # --- single collector ---
 $root = New-PeekRoot
 $code = Invoke-OneCollector -Name $Collector -EvidenceRoot $root
+if ($null -eq $code) { $code = 1 }
+$jsonPath = Join-Path $root "evidence\$Collector.json"
+$hasEvidence = Test-Path -LiteralPath $jsonPath
+$parsed = $false
+$j = $null
+if ($hasEvidence) {
+    try {
+        $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+        $parsed = $true
+    }
+    catch {
+        Write-Host ""
+        Write-Host "$Collector evidence could not be parsed." -ForegroundColor Red
+    }
+}
 
-# Exit 2 with an evidence envelope means "platform not detected". Exit 2
+# Exit 2 with a readable envelope means "platform not detected". Exit 2
 # without one is a real failure (argparse errors also exit 2).
-$evidenceWritten = Test-Path -LiteralPath (Join-Path $root "evidence\$Collector.json")
-if ($code -eq 2 -and $evidenceWritten) {
+if ($parsed -and $code -eq 2) {
     Write-Host ""
     Write-Host "${Collector}: platform not detected (tool not installed, no local data, or no telemetry export)." -ForegroundColor Yellow
-    if ($Briefing) {
-        Invoke-ScanDiff -Root $root
-        Invoke-AiscanBriefing -Root $root
-    }
-    Remove-PeekRoot -Root $root
-    exit 0
 }
-if ($code -ne 0) {
+elseif (-not $parsed -and $hasEvidence) {
+    # The parse message above is the collector failure.
+}
+elseif ($code -ne 0) {
     Write-Host ""
     Write-Host "$Collector failed (exit $code)." -ForegroundColor Red
-    Remove-PeekRoot -Root $root
-    exit $code
 }
-
-$jsonPath = Join-Path $root "evidence\$Collector.json"
-if (-not (Test-Path -LiteralPath $jsonPath)) {
+elseif (-not $hasEvidence) {
     Write-Host "$Collector produced no evidence file." -ForegroundColor Yellow
-    Remove-PeekRoot -Root $root
-    exit 0
 }
 
-Write-Host ""
-if ($Json) {
-    Get-Content -LiteralPath $jsonPath -Raw
-}
-else {
-    $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
-    Show-Peek -Result $j
+if ($parsed -and $code -eq 0) {
+    Write-Host ""
+    if ($Json) {
+        Get-Content -LiteralPath $jsonPath -Raw
+    }
+    else {
+        Show-Peek -Result $j
+    }
 }
 
-if ($Briefing) {
+$script:AiscanBriefingFailed = $false
+# A hard failure or a parse error skips the briefing; those already exit 2.
+if ($Briefing -and $parsed -and ($code -eq 0 -or $code -eq 2)) {
     Invoke-ScanDiff -Root $root
     Invoke-AiscanBriefing -Root $root
 }
 Remove-PeekRoot -Root $root
-exit 0
+exit (Get-AiscanScanExitCode -Rows @((New-CollectorStatusRow -ExitCode $code -HasEvidence $hasEvidence -Parsed $parsed)) -BriefingFailed $script:AiscanBriefingFailed)
