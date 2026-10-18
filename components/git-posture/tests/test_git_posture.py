@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
@@ -62,6 +63,24 @@ class TestNotDetectedFindings(unittest.TestCase):
             self.assertFalse(envelope["platform_detected"])
             ids = [f["id"] for f in envelope["findings"]]
             self.assertIn("git.scan.no_repos_in_roots", ids)
+
+
+class TestLargeBlobSample(unittest.TestCase):
+    def test_blob_name_is_masked_before_truncate(self):
+        secret = "AKIA" + "B" * 16
+        name = ("n" * 32) + secret
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+            with patch.object(gp, "check_large_blobs", return_value=[(name, 11 * 1024 * 1024)]):
+                with patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+                    envelope = gp.collect([Path(tmp)], allow_gh=False)
+        sample = next(
+            f["sample_redacted"] for f in envelope["findings"] if f["id"] == "git.blob.large"
+        )
+        self.assertNotIn(secret, sample)
+        self.assertNotIn("AKIA", sample)
 
 
 if __name__ == "__main__":

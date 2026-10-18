@@ -9,7 +9,19 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- With `-Redact`, finding titles and first/last-seen dates are masked, and a
+  redacted scan no longer copies raw rules, titles, or MCP names out of an
+  older unredacted scan. Secrets shorter than 24 characters are fully masked.
+  Lines are masked before they are shortened, so a cut token cannot leak as a
+  fragment. Secret masking covers dashed vendor keys (`sk-ant-`, `sk-proj-`,
+  `xai-`, `AIza`), `Authorization` and `Bearer` headers, `password=` values,
+  and credentials in URLs. Path masking covers UNC paths (`\\server\share`,
+  `\\wsl$`) and quoted paths, and a short username no longer rewrites a longer
+  word. Telemetry endpoint, protocol, and service name are masked with the
+  rest of the evidence. The briefing only uses a severity of critical, high,
+  medium, or low in a pill's class.
 
 ## [0.2.0] - 2026-10-15
 

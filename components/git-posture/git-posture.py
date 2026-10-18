@@ -19,6 +19,7 @@ from pathlib import Path
 
 from common import (
     add_base_args,
+    clip_sanitized,
     compute_scope_hash,
     default_repo_roots,
     finish_collector,
@@ -320,7 +321,7 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
                     "low",
                     "Git Posture",
                     f"Large blob ({size // (1024*1024)}MB) in repository history",
-                    sample_redacted=blob_name[:40],
+                    sample_redacted=clip_sanitized(blob_name, 40),
                     tags=["history_retention"],
                 )
             )

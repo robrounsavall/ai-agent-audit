@@ -51,6 +51,7 @@ from common import (  # noqa: E402
     redact_paths,
     redact_sample,
     redaction_disabled,
+    sanitize_text,
 )
 from scan_diff import load_changes_envelope  # noqa: E402
 from sections.access_map import render_access_map_section  # noqa: E402
@@ -158,6 +159,19 @@ def secrets_scan_purpose(env: dict[str, Any] | None) -> str:
 
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
+def _severity_class(value: Any) -> str:
+    """CSS class for a severity pill.
+
+    Anything that is not one of the four levels becomes "low", so a tampered
+    severity cannot break out of a class attribute.
+    """
+    sev = str(value or "low").strip().lower()
+    if sev not in SEVERITY_ORDER:
+        return "low"
+    return sev
+
 
 EXPOSURE_CATEGORIES = [
     "Shell Execution",
@@ -1756,7 +1770,11 @@ def local_folder_uri(path: str) -> str | None:
         return None
 
 
-_SAMPLE_FORMAT_RE = re.compile(r".{4}\.\.\..{4} \([^()]*\)|\*\*\*\*REDACTED:[^*]*\*\*\*\*")
+# redact_sample writes either a full mask or prefix...suffix (type). The
+# revealed sides are 1-16 characters (at most 32 shown, split in half).
+_SAMPLE_FORMAT_RE = re.compile(
+    r"(?:.{1,16}\.\.\..{1,16} \([^()]*\)|\*\*\*\*REDACTED:[^*]*\*\*\*\*)"
+)
 _CLEAN_REL_RE = re.compile(r"[\w.\-]+(?:/[\w.\-]+)*/?")
 _ABS_LOOKING_RE = re.compile(
     r"[A-Za-z]:[\\/]|\\\\|file:|(?<![\w:.])/[^/\s]+/[^/\s]*", re.I
@@ -2116,7 +2134,7 @@ def render_findings_section(
         )
         rows = []
         for f in by_category[cat]:
-            sev = _esc(f.get("severity", "low"))
+            sev = _severity_class(f.get("severity", "low"))
             blob = _esc(_finding_search_blob(f))
             sample = _fix_plurals(_display_redaction_tokens(f.get("sample_redacted") or ""))
             files: list[str] = []
@@ -2143,7 +2161,7 @@ def render_findings_section(
             last_seen = (f.get("last_seen") or "")[:10] or "n/a"
             rows.append(
                 f'<tr class="frow" data-search="{blob}">'
-                f'<td data-label="Severity"><span class="pill {sev}">{sev}</span></td>'
+                f'<td data-label="Severity"><span class="pill {sev}">{_esc(sev)}</span></td>'
                 f'<td data-label="Title"><details class="ev"><summary>{_esc(f.get("title", ""))}</summary>'
                 f'{render_evidence_card(f, ctx)}</details></td>'
                 f'<td class="num" data-label="Evidence">{int(f.get("evidence_count") or 1)}</td>'
@@ -2547,8 +2565,8 @@ def _render_telemetry_summary(platform: str, summary: dict[str, Any]) -> str:
         if not summary.get("otel_log_user_prompt_configured"):
             return ""
         title = "Codex telemetry export"
-        dest = str(summary.get("otel_exporter_destination") or "").strip()
-        protocol = str(summary.get("otel_exporter_protocol") or "").strip()
+        dest = sanitize_text(str(summary.get("otel_exporter_destination") or "").strip())
+        protocol = sanitize_text(str(summary.get("otel_exporter_protocol") or "").strip())
         transport = "OTEL"
         if protocol:
             transport = f"OTEL/{protocol}"
@@ -2571,8 +2589,8 @@ def _render_telemetry_summary(platform: str, summary: dict[str, Any]) -> str:
         if not summary.get("otel_enabled"):
             return ""
         title = "Claude Code telemetry export"
-        dest = str(summary.get("otel_destination") or "").strip()
-        protocol = str(summary.get("otel_protocol") or "").strip()
+        dest = sanitize_text(str(summary.get("otel_destination") or "").strip())
+        protocol = sanitize_text(str(summary.get("otel_protocol") or "").strip())
         transport = "OTLP"
         if protocol:
             transport = f"OTLP/{protocol}"
@@ -2790,7 +2808,7 @@ def render_permissions_section(envelopes: dict[str, dict[str, Any]]) -> str:
             if posture_findings:
                 finding_rows = []
                 for f in posture_findings[:5]:
-                    sev = str(f.get("severity", "low"))
+                    sev = _severity_class(f.get("severity", "low"))
                     sample = _display_redaction_tokens(f.get("sample_redacted") or "")
                     sample_html = f"<code>{_esc(sample)}</code>" if sample else "<span>configuration state</span>"
                     finding_rows.append(
@@ -3644,7 +3662,7 @@ def render_appendix_grouped(findings: list[dict[str, Any]]) -> tuple[str, str]:
 
     row_html: list[str] = []
     for g in sorted_groups:
-        sev = g["severity"]
+        sev = _severity_class(g["severity"])
         count = g["count"]
         count_cls = "count one" if count <= 1 else "count"
         search = _esc(f"{g['title']} {g['ref']}".lower())

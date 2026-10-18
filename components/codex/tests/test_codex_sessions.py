@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
@@ -141,6 +142,31 @@ class TestCollectAgainstFixtures(unittest.TestCase):
         env = codex.collect(self.tp)
         git_rules = [r for r in env.get("rules", []) if r["rule"] == "git status"]
         self.assertEqual(len(git_rules), 1, "duplicate prefix not deduped")
+
+    def test_approval_sample_masks_secret_before_truncate(self):
+        secret = "AKIA" + "B" * 16
+        command = ("echo " + ("Q" * 70)) + secret
+        row = {
+            "timestamp": "2026-05-20T10:00:00Z",
+            "payload": {
+                "type": "function_call",
+                "name": "shell",
+                "arguments": json.dumps({
+                    "command": command,
+                    "sandbox_permissions": "require_escalated",
+                }),
+            },
+        }
+        self._write_session("rollout-a.jsonl", [row])
+        with patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+            env = codex.collect(self.tp)
+        sample = next(
+            f["sample_redacted"]
+            for f in env["findings"]
+            if f["id"] == "codex.sandbox.require_escalated"
+        )
+        self.assertNotIn(secret, sample)
+        self.assertNotIn("AKIA", sample)
 
 
 if __name__ == "__main__":

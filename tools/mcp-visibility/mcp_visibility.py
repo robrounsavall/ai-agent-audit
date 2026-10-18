@@ -50,7 +50,13 @@ def redact_path(path: str) -> str:
     userprofile = str(Path.home())
     out = path
     if userprofile:
-        out = re.sub(re.escape(userprofile), "<userprofile>", out, flags=re.I)
+        # Boundary so a short home like /home/dev does not rewrite /home/development.
+        out = re.sub(
+            r"(?<![A-Za-z0-9])" + re.escape(userprofile) + r"(?![A-Za-z0-9])",
+            "<userprofile>",
+            out,
+            flags=re.I,
+        )
     return out
 
 

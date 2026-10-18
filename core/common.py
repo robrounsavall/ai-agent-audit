@@ -41,10 +41,41 @@ def default_repo_roots() -> list[Path]:
     roots += [home.joinpath(*parts) for parts in DEFAULT_REPO_ROOT_EXTRA]
     return [r for r in roots if r.exists()]
 
+# Vendor and header patterns sit above the length-only matchers. A dashed key
+# such as sk-ant- never reaches 32 characters in one run, and a short Bearer
+# or password= value would otherwise be left intact.
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("aws_key", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("github_pat", re.compile(r"gh[pousr]_[A-Za-z0-9_]{20,}")),
     ("slack_token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
+    (
+        "vendor_token",
+        re.compile(
+            r"(?<![A-Za-z0-9])(?:sk-ant-|sk-proj-|xai-)[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])"
+        ),
+    ),
+    (
+        "google_api",
+        re.compile(r"(?<![A-Za-z0-9])AIza[A-Za-z0-9_-]{12,}(?![A-Za-z0-9_-])"),
+    ),
+    (
+        "authorization",
+        re.compile(
+            r"(?i)\bAuthorization\s*:\s*\S+(?:\s+[A-Za-z0-9._~+/=-]{6,})?"
+        ),
+    ),
+    (
+        "bearer",
+        re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{6,}"),
+    ),
+    (
+        "password_assign",
+        re.compile(r"""(?i)\bpassword\s*=\s*[^\s&#"']+"""),
+    ),
+    (
+        "url_userinfo",
+        re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^/\s:@]+(?::[^/\s@]+)?@"),
+    ),
     (
         "generic_secret",
         re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/=]{32,}(?![A-Za-z0-9+/=])"),
@@ -135,14 +166,20 @@ def secret_types_in(text: str) -> list[str]:
     ]
 
 
-# Generic absolute-path matcher. Segments deliberately exclude whitespace so the
+# Generic absolute-path matcher. Unquoted segments exclude whitespace so the
 # match does not run past a path into surrounding prose. The running operator's
 # own profile (which may contain spaces, e.g. "Test User") is handled by
-# the literal pass in redact_paths() before this regex runs.
+# the literal pass in redact_paths() before this regex runs. Quoted paths and
+# the username segment of C:\Users\... may contain spaces. UNC (\\server\share
+# and \\wsl$\...) is included; bare //host/path is not, so https:// URLs stay.
 _GENERIC_PATH_RE = re.compile(
     r"""(?ix)
     (?:
-        [A-Za-z]:[\\/](?:[^\\/:*?"<>|\r\n\s]+[\\/]?)+   # Windows  C:\a\b
+        "(?:[A-Za-z]:[\\/]|\\\\)[^"\r\n]+"             # quoted Windows or UNC
+      | '(?:[A-Za-z]:[\\/]|\\\\)[^'\r\n]+'             # single-quoted
+      | \\\\[^\\/:*?"<>|\r\n\s]+\\(?:[^\\/:*?"<>|\r\n\s]+\\?)+  # UNC \\server\share, \\wsl$\...
+      | [A-Za-z]:[\\/]Users[\\/][^\\/:*?"<>|\r\n]+?[\\/](?:[^\\/:*?"<>|\r\n\s]+[\\/]?)*
+      | [A-Za-z]:[\\/](?:[^\\/:*?"<>|\r\n\s]+[\\/]?)+   # Windows  C:\a\b
       | /mnt/[a-z]/(?:[^/\0"'\r\n\s]+/?)+                # WSL      /mnt/c/a/b
       | /(?:home|Users)/(?:[^/\0"'\r\n\s]+/?)+           # POSIX    /home/x  /Users/x
     )
@@ -161,8 +198,11 @@ def redact_paths(text: str) -> str:
     Two passes:
       1. Literal removal of the running user's profile dir and bare username
          across Windows, WSL, mac, and POSIX forms. This catches usernames that
-         contain spaces, which the generic regex cannot.
-      2. Generic absolute paths (other users, no-space segments) -> <path#hash>.
+         contain spaces, which the generic regex cannot. Replacements require
+         an alphanumeric boundary, so a short name such as "dev" does not
+         rewrite "development", and a short profile does not eat a longer
+         directory that only shares its prefix.
+      2. Generic absolute paths, including UNC and quoted paths -> <path#hash>.
 
     Deterministic: the same path always maps to the same token, so evidence
     stays correlatable without exposing the value. Applied centrally by
@@ -174,7 +214,7 @@ def redact_paths(text: str) -> str:
     out = text
     user = USERPROFILE.name
     profile = str(USERPROFILE)
-    drive = profile[0].lower() if profile[1:2] == ":" else "c"
+    drive = profile[0].lower() if len(profile) > 1 and profile[1:2] == ":" else "c"
     variants = {
         profile,
         profile.replace("\\", "/"),
@@ -183,10 +223,20 @@ def redact_paths(text: str) -> str:
         f"/Users/{user}",
     }
     for variant in sorted((v for v in variants if v), key=len, reverse=True):
-        out = re.sub(re.escape(variant), "<userprofile>", out, flags=re.IGNORECASE)
+        out = re.sub(
+            r"(?<![A-Za-z0-9])" + re.escape(variant) + r"(?![A-Za-z0-9])",
+            "<userprofile>",
+            out,
+            flags=re.IGNORECASE,
+        )
 
     if user:
-        out = re.sub(re.escape(user), "<user>", out, flags=re.IGNORECASE)
+        out = re.sub(
+            r"(?<![A-Za-z0-9])" + re.escape(user) + r"(?![A-Za-z0-9])",
+            "<user>",
+            out,
+            flags=re.IGNORECASE,
+        )
 
     out = _GENERIC_PATH_RE.sub(lambda m: _hash_path(m.group(0)), out)
     return out
@@ -208,6 +258,20 @@ def sanitize_text(text: str) -> str:
     if redaction_disabled():
         return text
     return mask_secrets(redact_paths(text))
+
+
+def clip_sanitized(text: str, limit: int) -> str:
+    """Mask the whole value, then keep the first ``limit`` characters.
+
+    Cutting first can split a token so a later mask no longer recognizes it,
+    and the fragment is what gets stored.
+    """
+    if not isinstance(text, str):
+        text = "" if text is None else str(text)
+    clipped = sanitize_text(text)
+    if limit < 0:
+        return ""
+    return clipped[:limit]
 
 
 def hostname_short() -> str:
@@ -378,15 +442,18 @@ def make_finding(
     tags: list[str] | None = None,
     raw_evidence_ref: str | None = None,
 ) -> dict[str, Any]:
+    def _field(value: Any) -> Any:
+        return sanitize_text(value) if isinstance(value, str) else value
+
     finding: dict[str, Any] = {
         "id": finding_id,
         "severity": severity,
         "category": category,
-        "title": title,
+        "title": _field(title),
         "evidence_count": evidence_count,
-        "first_seen": first_seen,
-        "last_seen": last_seen,
-        "sample_redacted": sanitize_text(sample_redacted),
+        "first_seen": _field(first_seen),
+        "last_seen": _field(last_seen),
+        "sample_redacted": _field(sample_redacted),
         "secret_redacted": secret_redacted,
         "tags": tags or [],
     }
@@ -473,10 +540,22 @@ def nested_text(value: Any) -> str:
 
 
 def redact_sample(secret: str, secret_type: str = "generic") -> str:
+    """Mask a secret for a sample line.
+
+    Values shorter than 24 characters are masked completely. A 9-12 character
+    token used to keep 8 characters, which is most of the value. Longer values
+    keep at most a quarter of their characters, and never more than 32, split
+    between the start and the end.
+    """
     secret = secret.strip()
-    if len(secret) <= 8:
+    if len(secret) < 24:
         return f"****REDACTED:{secret_type}****"
-    return f"{secret[:4]}...{secret[-4:]} ({secret_type})"
+    reveal = min(len(secret) // 4, 32)
+    head = reveal // 2
+    tail = reveal - head
+    if head < 1 or tail < 1 or head + tail >= len(secret):
+        return f"****REDACTED:{secret_type}****"
+    return f"{secret[:head]}...{secret[-tail:]} ({secret_type})"
 
 
 def finish_collector(

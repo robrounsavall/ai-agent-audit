@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import bootstrap  # noqa: E402,F401
 import scan_diff  # noqa: E402
@@ -352,6 +354,44 @@ class TestDiffContent(unittest.TestCase):
         self.assertEqual(env["summary"]["comparison"], "diff")
         self.assertEqual(env["changes"]["collectors"]["claude"]["platform"]["change"], "newly_detected")
         self.assertIn("changes.finding.new.claude.claude.x", {f["id"] for f in env["findings"]})
+
+    def test_redacted_diff_does_not_republish_an_older_scan(self):
+        token = "sk-ant-" + "test1234"
+        unc = "\\\\" + "zzunc" + "\\share\\notes.txt"
+        previous = {
+            "claude": {
+                "collector": "claude",
+                "version": "1.0.0",
+                "platform_detected": True,
+                "summary": {"mcp_servers": [token]},
+                "findings": [_finding("claude.old", "high", f"Opened {unc}")],
+                "rules": [_rule(f"Bash(type {unc} {token})")],
+            }
+        }
+        current = {
+            "claude": {
+                "collector": "claude",
+                "version": "1.0.0",
+                "platform_detected": True,
+                "summary": {},
+                "findings": [],
+                "rules": [],
+            }
+        }
+        with patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+            env = scan_diff.diff_envelopes(
+                current, previous, current_label="now", previous_label="then"
+            )
+        blob = json.dumps(env)
+        self.assertNotIn(token, blob)
+        self.assertNotIn("zzunc", blob)
+        with patch.dict(os.environ, {"AISCAN_REDACT": ""}):
+            raw = scan_diff.diff_envelopes(
+                current, previous, current_label="now", previous_label="then"
+            )
+        raw_blob = json.dumps(raw)
+        self.assertIn(token, raw_blob)
+        self.assertIn("zzunc", raw_blob)
 
 
 class TestHistorySelection(unittest.TestCase):
