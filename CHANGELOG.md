@@ -13,10 +13,18 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 - Codex reports compressed session logs (`.jsonl.zst`) it does not open.
   The count is a low finding, "N compressed Codex session logs not scanned".
-- trufflehog is started with `--no-verification`, so a secrets scan does
-  not send secrets to provider APIs.
-- PII scan counts published test card numbers as a low "test card numbers"
-  finding. Other valid card numbers stay critical.
+- trufflehog is started with `--no-verification` and `--no-update`, so a
+  secrets scan does not check secrets online or phone home for updates.
+- A gitleaks or trufflehog run that fails is a finding. It is no longer
+  reported as zero hits.
+- PII scan counts a built-in list of common test card numbers as a low
+  finding. The briefing calls them "Test card numbers". Other valid card
+  numbers stay critical.
+- With `-Redact`, pii-scan does not write scan-target paths into the
+  evidence file.
+- `--dry-run` does not write the pii-scan or secrets-scan raw files.
+- git-posture does not lazy-fetch missing objects from a partial clone, and
+  reports those repos as a coverage gap.
 
 ## [0.2.0] - 2026-10-15
 

@@ -254,6 +254,7 @@ _SECRET_RULE_LABELS = {
 }
 _PII_ENTITY_LABELS = {
     "CREDIT_CARD": "Credit card numbers",
+    "TEST_CARD": "Test card numbers",
     "US_SSN": "US Social Security numbers",
     "IBAN_CODE": "IBANs",
     "EMAIL_ADDRESS": "Email addresses",

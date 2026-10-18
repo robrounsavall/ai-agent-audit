@@ -14,8 +14,8 @@ was exactly the validatable, structured set below — all detectable in stdlib.
 
 Entities:
     CREDIT_CARD     IIN prefix + Luhn checksum          critical
-                    published test PANs are split out
-                    as "test card numbers"              low
+                    a built-in list of common test
+                    card numbers is split out           low
     US_SSN          ddd-dd-dddd + issuance rules        critical
     IBAN_CODE       pattern + mod-97 checksum           critical
     EMAIL_ADDRESS   pattern                             medium
@@ -59,7 +59,9 @@ from common import (
     redact_sample,
     redaction_disabled,
     resolve_raw_root,
+    sanitize_text,
     secret_types_in,
+    sha256_short,
     validate_evidence_root,
 )
 
@@ -83,12 +85,6 @@ SEVERITY_BY_ENTITY = {
     "EMAIL_ADDRESS": "medium",
     "PHONE_NUMBER": "medium",
     "IP_ADDRESS": "medium",
-}
-
-# Finding titles use the entity name, except test cards, which are named in
-# plain language so they are not read as live PANs.
-_FINDING_LABELS = {
-    "TEST_CARD": "test card numbers",
 }
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -130,12 +126,13 @@ def credit_card_ok(raw: str) -> bool:
     return bool(_CC_PREFIX_RE.match(digits)) and luhn_ok(digits)
 
 
-# Published test PANs (Visa, Mastercard, Amex, Discover, JCB). They pass the
-# IIN + Luhn checks above, so they are counted apart from other cards. This
-# is the short set that shows up in docs and fixtures, including Stripe's
-# basic per-brand success cards. It is not the full Stripe regional or
-# decline catalog; those still rate critical. Diners Club and UnionPay test
-# numbers are omitted because this scanner's IIN list does not match them.
+# A built-in list of common test card numbers (Visa, Mastercard, Amex,
+# Discover, JCB). They pass the IIN + Luhn checks above, so they are counted
+# apart from other cards. This is the short set that shows up in docs and
+# fixtures, including Stripe's basic per-brand success cards. It is not every
+# published test number; regional and decline cards still rate critical.
+# Diners Club and UnionPay test numbers are omitted because this scanner's
+# IIN list does not match them.
 TEST_PANS = frozenset({
     "4111111111111111",
     "4012888888881881",
@@ -365,11 +362,33 @@ def write_raw_outputs(
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _evidence_target(path: Path) -> str:
+    """Path label for the share-safe envelope.
+
+    Unredacted local runs keep the path so the operator can see what was
+    scanned. -Redact stores a hash only; summary is take-home data.
+    """
+    text = str(path)
+    if redaction_disabled():
+        return text
+    norm = text.rstrip("\\/").replace("\\", "/").lower()
+    return f"<path#{sha256_short(norm)}>"
+
+
+def _target_summary(targets: list[Path]) -> dict:
+    return {
+        "target_count": len(targets),
+        "targets": [_evidence_target(t) for t in targets],
+    }
+
+
 def collect(
     targets: list[Path],
     entities: list[str],
     raw_dir: Path,
     max_samples_per_file: int = 25,
+    *,
+    write_raw: bool = True,
 ) -> tuple[dict, list[dict]]:
     existing_targets = [t for t in targets if t.exists()]
     missing_targets = [t for t in targets if not t.exists()]
@@ -385,7 +404,7 @@ def collect(
                 "pii-scan.target_missing",
                 "low",
                 "PII Exposure",
-                f"Target path not found: {t}",
+                sanitize_text(f"Target path not found: {_evidence_target(t)}"),
                 tags=["env_read"],
             )
         )
@@ -393,7 +412,7 @@ def collect(
     if not existing_targets:
         envelope["findings"] = findings
         envelope["summary"] = {
-            "targets": [str(t) for t in targets],
+            **_target_summary(targets),
             "files_scanned": 0,
             "hits": 0,
         }
@@ -448,29 +467,35 @@ def collect(
         file=sys.stderr, flush=True,
     )
 
-    write_raw_outputs(raw_dir, all_hits, entity_counts, file_counts, samples_truncated)
+    if write_raw:
+        write_raw_outputs(raw_dir, all_hits, entity_counts, file_counts, samples_truncated)
 
     for entity, count in entity_counts.most_common():
         sample_hit = next((h for h in all_hits if h["entity"] == entity), None)
         sample = redact_sample(sample_hit["sample"], entity) if sample_hit else ""
-        label = _FINDING_LABELS.get(entity, entity)
+        if entity == "TEST_CARD":
+            tags = ["pii", "test_data"]
+        elif entity.startswith("SECRET_"):
+            tags = ["pii", "secret"]
+        else:
+            tags = ["pii"]
         findings.append(
             make_finding(
                 f"pii_scan.{entity.lower()}",
                 severity_for(entity),
                 "PII Exposure",
-                f"{label} detected ({count} hit(s) across {len(per_entity_files[entity])} file(s))",
+                f"{entity} detected ({count} hit(s) across {len(per_entity_files[entity])} file(s))",
                 evidence_count=count,
                 sample_redacted=sample,
                 secret_redacted=entity.startswith("SECRET_"),
-                tags=["pii"] if not entity.startswith("SECRET_") else ["pii", "secret"],
+                tags=tags,
                 raw_evidence_ref="raw/pii-scan/findings.csv",
             )
         )
 
     envelope["findings"] = findings
     envelope["summary"] = {
-        "targets": [str(t) for t in targets],
+        **_target_summary(targets),
         "files_scanned": files_scanned,
         "files_with_hits": len(file_counts),
         "hits": total_hits,
@@ -546,6 +571,7 @@ def main() -> None:
     envelope, hits = collect(
         targets, entities, raw_dir,
         max_samples_per_file=max(1, args.max_samples_per_file),
+        write_raw=not args.dry_run,
     )
 
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)

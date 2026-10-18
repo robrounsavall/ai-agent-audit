@@ -1,12 +1,12 @@
 # Secrets-scan collector
 
-Runs gitleaks (preferred) or trufflehog over chat corpus and repo roots; redacted findings only in evidence. trufflehog is passed `--no-verification` so it does not check secrets against live services.
+Runs Betterleaks, gitleaks, or trufflehog over chat corpus and repo roots; redacted findings only in evidence. Betterleaks is preferred. trufflehog is passed `--no-verification` and `--no-update`, so it does not check secrets against live services or phone home for updates. A scanner that fails to finish is reported; it is not shown as zero hits.
 
 | | |
 |---|---|
 | Evidence | `evidence/secrets-scan.json` |
 | In `aiscan all` | yes |
-| Deps | `gitleaks` preferred on PATH |
+| Deps | Betterleaks, gitleaks, or trufflehog on PATH |
 
 ## Test
 

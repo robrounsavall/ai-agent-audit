@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
@@ -202,8 +206,11 @@ class TestTestCardNumbers(unittest.TestCase):
         self.assertEqual(test_cards["evidence_count"], 3)
         self.assertEqual(
             test_cards["title"],
-            "test card numbers detected (3 hit(s) across 2 file(s))",
+            "TEST_CARD detected (3 hit(s) across 2 file(s))",
         )
+        self.assertEqual(test_cards["tags"], ["pii", "test_data"])
+        self.assertNotIn("4111111111111111", test_cards["sample_redacted"])
+        self.assertNotIn("4242424242424242", test_cards["sample_redacted"])
         self.assertEqual(other["severity"], "critical")
         self.assertEqual(other["evidence_count"], 1)
         self.assertEqual(
@@ -228,6 +235,63 @@ class TestTestCardNumbers(unittest.TestCase):
         self.assertEqual([f["id"] for f in envelope["findings"]], ["pii_scan.test_card"])
         self.assertEqual(envelope["findings"][0]["severity"], "low")
         self.assertEqual(envelope["findings"][0]["evidence_count"], 2)
+        self.assertIn("test_data", envelope["findings"][0]["tags"])
+
+    def test_redacted_csv_masks_the_test_card_sample(self):
+        pan = "4242424242424242"
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "notes.md").write_text(pan + "\n", encoding="utf-8")
+            raw = root / "raw"
+            with mock.patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+                envelope, _hits = pii.collect([corpus], ["CREDIT_CARD"], raw)
+            finding = envelope["findings"][0]
+            csv_text = (raw / "findings.csv").read_text(encoding="utf-8")
+        self.assertNotIn(pan, finding["sample_redacted"])
+        self.assertIn("4242...4242", finding["sample_redacted"])
+        self.assertNotIn(pan, csv_text)
+        self.assertIn("4242...4242", csv_text)
+
+    def test_redact_hides_target_paths_in_the_envelope(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            present = root / "ZZZTARGETSENTINEL"
+            present.mkdir()
+            (present / "note.txt").write_text("hello\n", encoding="utf-8")
+            missing = root / "ZZZMISSINGTARGET"
+            raw = root / "raw"
+            with mock.patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+                hidden, _hits = pii.collect([present, missing], ["EMAIL_ADDRESS"], raw)
+            shown, _hits = pii.collect([present, missing], ["EMAIL_ADDRESS"], raw)
+        hidden_blob = json.dumps(hidden)
+        self.assertNotIn("ZZZTARGETSENTINEL", hidden_blob)
+        self.assertNotIn("ZZZMISSINGTARGET", hidden_blob)
+        self.assertEqual(hidden["summary"]["target_count"], 2)
+        self.assertTrue(all(label.startswith("<path#") for label in hidden["summary"]["targets"]))
+        self.assertIn("Target path not found:", hidden["findings"][0]["title"])
+        self.assertIn("ZZZTARGETSENTINEL", json.dumps(shown["summary"]["targets"]))
+
+    def test_dry_run_does_not_write_raw_files(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            evidence = root / "out"
+            evidence.mkdir()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "notes.md").write_text("4111111111111111\n", encoding="utf-8")
+            argv = [
+                "pii-scan.py",
+                "--evidence-root", str(evidence),
+                "--target", str(corpus),
+                "--entities", "CREDIT_CARD",
+                "--dry-run",
+            ]
+            with mock.patch.object(sys, "argv", argv), mock.patch("sys.stdout", io.StringIO()):
+                pii.main()
+        self.assertFalse((evidence / "raw" / "pii-scan" / "findings.csv").exists())
+        self.assertFalse((evidence / "evidence" / "pii-scan.json").exists())
 
 
 if __name__ == "__main__":

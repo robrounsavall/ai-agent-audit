@@ -5,9 +5,10 @@ Stdlib scan of a chat corpus for regulated-data indicators: credit cards
 numbers (separators required), and public IP addresses (private/loopback are
 counted in the summary but are not findings). No models, no pip install.
 
-Published test card numbers (for example 4111… and 4242…) are counted
-separately as a low "test card numbers" finding. Other valid card numbers
-stay critical.
+A built-in list of common test card numbers (for example 4111… and 4242…)
+is counted separately as a low finding. The briefing calls them "Test card
+numbers". Other valid card numbers stay critical. With `-Redact`, target
+paths are stored as hashes, not full paths.
 
 v2 dropped Microsoft Presidio: its NER entities tagged code identifiers as
 people and places, and everything that survived triage was validatable with

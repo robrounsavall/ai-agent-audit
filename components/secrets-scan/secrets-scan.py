@@ -183,47 +183,75 @@ def run_betterleaks(target: Path, binary: str, major: int) -> tuple[list[dict], 
     return [], f"exit code {proc.returncode}, no readable report"
 
 
-def run_gitleaks(target: Path, gitleaks: str) -> list[dict]:
-    proc = subprocess.run(
-        [gitleaks, "detect", "--source", str(target), "--no-git", "--report-format", "json", "--report-path", "-"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=600,
-    )
-    out = proc.stdout or ""
-    if not out.strip():
-        return []
+# Gitleaks exits 1 for leaks and for real failures. --exit-code 2 makes a
+# finished scan with leaks distinguishable from a failed run (still exit 1).
+_GITLEAKS_LEAK_EXIT = 2
+
+
+def _scanner_failure(exc: BaseException) -> str:
+    # The exception text can carry a local path. The type name cannot.
+    return type(exc).__name__
+
+
+def run_gitleaks(target: Path, gitleaks: str) -> tuple[list[dict], str | None]:
+    """Return (raw hits, error or None). A readable report is a finished scan."""
     try:
-        data = json.loads(out)
-        return data if isinstance(data, list) else []
-    except json.JSONDecodeError:
-        return []
+        proc = subprocess.run(
+            [
+                gitleaks, "detect", "--source", str(target), "--no-git",
+                "--report-format", "json", "--report-path", "-",
+                "--exit-code", str(_GITLEAKS_LEAK_EXIT),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], _scanner_failure(exc)
+    data = _load_json(proc.stdout or "")
+    if proc.returncode in (0, _GITLEAKS_LEAK_EXIT) and (
+        isinstance(data, list) or not (proc.stdout or "").strip()
+    ):
+        hits = [hit for hit in data if isinstance(hit, dict)] if isinstance(data, list) else []
+        return hits, None
+    # Only the exit code goes into evidence: scanner stderr can carry local paths.
+    return [], f"exit code {proc.returncode}, no readable report"
 
 
-def run_trufflehog(target: Path, trufflehog: str) -> list[dict]:
+def run_trufflehog(target: Path, trufflehog: str) -> tuple[list[dict], str | None]:
     # --no-verification is the current trufflehog v3 flag (still present in
     # 3.99) that sets Verify=false. Without it, trufflehog calls provider
     # APIs. --results only filters printed hits and still verifies.
-    proc = subprocess.run(
-        [trufflehog, "filesystem", str(target), "--json", "--no-verification"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=600,
-    )
+    # --no-update skips the update check, which also uses the network.
+    try:
+        proc = subprocess.run(
+            [trufflehog, "filesystem", str(target), "--json", "--no-verification", "--no-update"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], _scanner_failure(exc)
+    # Trufflehog exits 0 when the scan finishes, including when it found
+    # secrets. We do not pass --fail, so a non-zero exit is a failed run.
+    if proc.returncode != 0:
+        return [], f"exit code {proc.returncode}, no readable report"
     hits: list[dict] = []
     for line in (proc.stdout or "").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            hits.append(json.loads(line))
+            parsed = json.loads(line)
         except json.JSONDecodeError:
             continue
-    return hits
+        if isinstance(parsed, dict):
+            hits.append(parsed)
+    return hits, None
 
 
 def normalize_hit(scanner: str, hit: dict) -> dict:
@@ -374,9 +402,13 @@ def collect(
             if error:
                 scan_errors.append(error)
         elif scanner_kind == "gitleaks":
-            hits = run_gitleaks(target, scanner_bin)
+            hits, error = run_gitleaks(target, scanner_bin)
+            if error:
+                scan_errors.append(error)
         else:
-            hits = run_trufflehog(target, scanner_bin)
+            hits, error = run_trufflehog(target, scanner_bin)
+            if error:
+                scan_errors.append(error)
         for hit in hits:
             normalized = normalize_hit(scanner_kind, hit)
             all_hits.append(normalized)
@@ -453,7 +485,9 @@ def main() -> None:
 
     native_roots = [Path(p).expanduser().resolve() for p in args.native_roots] if args.native_roots else None
 
-    envelope, tool_ok, _ = collect(raw_root, repo_roots, raw_root / "secrets-scan", native_roots=native_roots)
+    # --dry-run prints the envelope and writes nothing, including raw/.
+    raw_out = None if args.dry_run else raw_root / "secrets-scan"
+    envelope, tool_ok, _ = collect(raw_root, repo_roots, raw_out, native_roots=native_roots)
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)
 
     if not tool_ok:

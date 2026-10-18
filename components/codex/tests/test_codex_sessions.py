@@ -13,12 +13,14 @@ Run:
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
@@ -161,7 +163,23 @@ class TestCollectAgainstFixtures(unittest.TestCase):
         # A plain .zst that is not a session log is not part of the count.
         (self.sessions / "notes.zst").write_bytes(b"nope")
 
-        env = codex.collect(self.tp)
+        opened: list[str] = []
+        real_path_open = Path.open
+        real_open = builtins.open
+
+        def spy_path_open(self, *args, **kwargs):
+            opened.append(str(self))
+            return real_path_open(self, *args, **kwargs)
+
+        def spy_open(file, *args, **kwargs):
+            if isinstance(file, (str, Path)):
+                opened.append(str(file))
+            return real_open(file, *args, **kwargs)
+
+        with mock.patch.object(Path, "open", spy_path_open), mock.patch("builtins.open", spy_open):
+            env = codex.collect(self.tp)
+        self.assertTrue(any(name.endswith(".jsonl") and not name.endswith(".jsonl.zst") for name in opened))
+        self.assertFalse(any(name.endswith(".jsonl.zst") for name in opened))
         self.assertEqual(env["summary"]["session_files"], 1)
         self.assertEqual(env["summary"]["compressed_session_files"], 2)
         hits = [f for f in env["findings"] if f["id"] == "codex.sessions.compressed_not_scanned"]
