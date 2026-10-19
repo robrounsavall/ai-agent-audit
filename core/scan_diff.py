@@ -69,6 +69,8 @@ from pathlib import Path
 from typing import Any
 
 from common import (
+    DERIVED_EVIDENCE_STEMS,
+    display_path,
     hostname_short,
     load_json,
     make_envelope,
@@ -124,13 +126,13 @@ _RULE_FIELDS = (
 
 
 def load_scan(root: str | Path) -> dict[str, dict[str, Any]]:
-    """Load collector envelopes from ``<root>/evidence``, skipping changes.json."""
+    """Load collector envelopes from ``<root>/evidence``, skipping derived files."""
     evidence = Path(root) / "evidence"
     envelopes: dict[str, dict[str, Any]] = {}
     if not evidence.is_dir():
         return envelopes
     for path in sorted(evidence.glob("*.json")):
-        if path.name == CHANGES_FILENAME or path.stem == COLLECTOR:
+        if path.stem in DERIVED_EVIDENCE_STEMS or path.stem == COLLECTOR:
             continue
         data = load_json(path)
         if not isinstance(data, dict):
@@ -941,7 +943,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print(json.dumps(envelope, indent=2, ensure_ascii=False))
     else:
-        print(f"Wrote {current / 'evidence' / CHANGES_FILENAME}")
+        print(f"Wrote {display_path(current / 'evidence' / CHANGES_FILENAME, current)}")
     return 0
 
 

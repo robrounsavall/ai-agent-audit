@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
+import os
 import re
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -117,6 +120,31 @@ class TestReportV2(unittest.TestCase):
             )
             self.assertNotIn('id="cloud-agents"', html)
 
+    def test_agent_summary_files_are_not_collectors(self):
+        briefing = _load_briefing()
+        with self._root() as raw:
+            root = Path(raw)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            (evidence / "codex.json").write_text(
+                json.dumps(_envelope("codex")),
+                encoding="utf-8",
+            )
+            (evidence / "agent-summary.json").write_text(json.dumps({
+                "findings": [{
+                    "collector": "codex",
+                    "severity": "critical",
+                    "title": "SENTINEL_AGENT_SUMMARY",
+                    "category": "General Tooling",
+                    "evidence_count": 1,
+                }],
+            }), encoding="utf-8")
+            (evidence / "run-status.json").write_text("{not json", encoding="utf-8")
+            loaded = briefing.load_evidence(root)
+            self.assertEqual(set(loaded), {"codex"})
+            html = briefing.build_html(root, customer="Example", operator="Test")
+            self.assertNotIn("SENTINEL_AGENT_SUMMARY", html)
+
     def test_missing_changes_file_is_a_note(self):
         briefing = _load_briefing()
         with self._root() as raw:
@@ -208,6 +236,37 @@ class TestReportV2(unittest.TestCase):
             self.assertIn("Codex sample finding", html)
             self.assertIn("Approval decisions", html)
 
+    def test_agent_mode_wrote_line_is_relative_to_the_scan(self):
+        briefing = _load_briefing()
+        previous = os.environ.get("AISCAN_AGENT_MODE")
+        os.environ["AISCAN_AGENT_MODE"] = "1"
+        try:
+            with self._root() as raw:
+                root = Path(raw)
+                evidence = root / "evidence"
+                evidence.mkdir()
+                (evidence / "codex.json").write_text(
+                    json.dumps(_envelope("codex")),
+                    encoding="utf-8",
+                )
+                out = root / "briefing" / "briefing.html"
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    code = briefing.main([
+                        "--evidence-root", str(root),
+                        "--out", str(out),
+                    ])
+                self.assertEqual(code, 0)
+                text = buf.getvalue()
+                self.assertIn("Wrote " + str(Path("briefing") / "briefing.html"), text)
+                self.assertNotIn(str(root), text)
+                self.assertTrue(out.is_file())
+        finally:
+            if previous is None:
+                os.environ.pop("AISCAN_AGENT_MODE", None)
+            else:
+                os.environ["AISCAN_AGENT_MODE"] = previous
+
     def test_opt_in_commands_stay_out_of_all(self):
         text = (ROOT / "aiscan.ps1").read_text(encoding="utf-8")
         match = re.search(r"\$StdlibOrder = @\((.*?)\)", text, re.S)
@@ -216,7 +275,13 @@ class TestReportV2(unittest.TestCase):
         self.assertIn("grok-bot", body)
         self.assertNotIn("cloud-agents", body)
         self.assertNotIn("telemetry", body)
+        self.assertNotIn("summary", body)
         self.assertIn('"telemetry"', text)
+        self.assertIn('"summary"', text)
+        self.assertIn("agent_summary.py", text)
+        self.assertIn("OUTDIR_ID=", text)
+        self.assertIn("function Write-OutDirId", text)
+        self.assertNotIn("--no-id", text)
         self.assertIn("scan_diff.py", text)
 
     def _root(self):

@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote
 
+import compressed
 import paths
 from common import (
     APPDATA,
@@ -335,10 +336,26 @@ def collect_claude_roots(buckets, include_tool_details, roots: list[Path], metri
 def collect_codex(buckets, include_tool_details, root, problems=None):
     if not root.exists():
         return
-    for jsonl in root.rglob("*.jsonl"):
-        lines = read_text_lines(jsonl, problems)
-        if lines is None:
+    for jsonl in compressed.jsonl_files(root):
+        try:
+            if compressed.is_compressed(jsonl):
+                # Without stdlib zstd this raises before the file is opened.
+                # The codex collector reports that coverage gap.
+                text = compressed.read_text(
+                    jsonl, errors="replace", max_bytes=compressed.MAX_DECOMPRESSED_BYTES
+                )
+                lines = text.splitlines()
+            else:
+                # A bad byte is reported and this file is skipped. Other files continue.
+                lines = read_text_lines(jsonl, problems)
+                if lines is None:
+                    continue
+        except OSError:
             continue
+        except (compressed.ZstdUnavailable, compressed.TooLarge, compressed.DecompressTimeout, UnicodeError):
+            if compressed.is_compressed(jsonl):
+                continue
+            raise
         for raw in lines:
             obj = _json_object(raw)
             if obj is None:

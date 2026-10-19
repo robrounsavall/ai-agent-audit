@@ -1,6 +1,6 @@
 # Git-posture collector
 
-Checks repos under configured roots for `.env` history, hooks, ignore posture, and large blobs.
+Checks repos under configured roots for `.env` history, hooks, ignore posture, and large blobs. Git commands disable lazy fetch, so a partial clone is not downloaded from the network. Those repos are a low coverage finding.
 
 | | |
 |---|---|

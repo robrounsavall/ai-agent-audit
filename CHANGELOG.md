@@ -9,8 +9,99 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
+### Added
+
+- `aiscan summary` prints a safe summary of a finished scan: collector,
+  detection status, and each finding's severity, title, category, and
+  evidence count. Paths, samples, rules, and raw pointers are left out.
+  Titles and categories are masked even when the scan was unredacted.
+  Coverage gaps are listed only as caveats, not as ranked findings. A bad
+  evidence file is one collector error and does not stop the summary.
+  Every run also writes `evidence\agent-summary.json`. The summary includes
+  `aiscan_version`. `OUTDIR_ID=<folder name>` is printed only when that
+  folder exists and will be kept. Running `summary` again keeps stored
+  collector exit codes. With no `-OutDir`, `summary` reads the newest folder
+  under `%LOCALAPPDATA%\aiscan-results`.
+- `-AgentMode` prints scan paths relative to the output folder and omits the
+  closing "Evidence kept at" line. The summary table and errors stay.
+- Evidence envelopes include `aiscan_version`, the tool version that wrote
+  them.
+
+### Changed
+
+- `aiscan all` prints the tool version from `git describe --tags` in a
+  checkout, and from the `VERSION` file in a release zip. A checkout that is
+  not exactly the release tag no longer prints `dev`.
+- The release build refuses to publish when `VERSION` does not match the tag.
+  Bump `VERSION` in the commit you tag.
+- `secrets-scan` 1.1.0 reports one finding per scanner rule and severity.
+  `evidence_count` is the number of hits, and the title includes how many
+  files were involved. Per-hit rows stay in `raw/secrets-scan/findings.csv`.
+  Severity comes from an explicit rule list (high-impact tokens are
+  critical; every other rule is high) instead of a substring of the rule
+  name. A rule whose hits are all placeholders is counted, and the briefing
+  labels that rule as a likely test value.
+- `git-posture` 1.1.0 reports one finding per check, with the repo or blob
+  count in the title. The large-blob title includes the largest size.
+  `.env.example`, `.env.sample`, `.env.template`, and `.env.dist` are not
+  treated as a committed `.env`. A `.gitignore` comment or a `!.env` line
+  no longer counts as ignoring that file.
+- The briefing keeps the severity stored on these grouped secret findings,
+  so the HTML matches the summary. Older per-hit secret titles still use
+  the previous substring severity. Evidence cards for a grouped rule list
+  every file for that rule, including when the scanner spelled the rule
+  two ways.
+- `secrets-scan` does not scan its own output folder when that folder sits
+  inside a repository being scanned.
+- The next scan diff can show each secret once as changed, because the
+  title and the hit count moved from one row per hit to one row per rule.
+  Finding ids keep the previous `secrets_scan.<rule>` shape (lowercase,
+  spaces as underscores, 40 characters). A rule name longer than that gains
+  a short hash so two long names do not share an id. Those ids are not
+  reported as resolved and added back.
+
 ### Fixed
 
+- The process exits 2 when a collector errors, writes no evidence file, or
+  writes a file that is not a readable envelope. It exits 3 when the only
+  failure is the briefing. A normal run, including "platform not detected",
+  still exits 0.
+- A previous envelope in the output folder is removed before that collector
+  runs, so a new failure cannot be read as "not detected".
+- `Opened briefing in default browser` is printed only when the browser
+  launch succeeds.
+- Throwaway output folders include a unique id, so two runs started in the
+  same second do not share a directory.
+- A byte-order mark in `VERSION` is ignored, and the release zip writes that
+  file once.
+- With `-Redact`, the closing note says this run's new evidence and briefing
+  are redacted, that `raw\` is not, and that older files already in the folder
+  are left as they were. Without `-Redact`, the previous warning is unchanged.
+- The README asked for Python 3.10+, but collectors import `tomllib` (3.11).
+  It now says 3.11+, and `aiscan.ps1` stops immediately if `python` is older.
+- Windows PowerShell 5.1 was reading evidence with the ANSI code page and
+  discovery JSON with the OEM code page, which mangled non-ASCII text. Evidence
+  is read as UTF-8, and discovery JSON escapes non-ASCII paths.
+- On Python 3.14 and newer, compressed Codex session logs (`.jsonl.zst`)
+  are decompressed with the standard-library `compression.zstd` module and
+  scanned (Codex, chat history, PII, and secrets). On older Python they are
+  counted, not opened, and reported as a low finding, "N compressed Codex
+  session logs not scanned". A compressed log that is corrupt, too large,
+  or too slow to unpack is a coverage note, not a failed run. The Codex
+  briefing row uses session activity for last used, and shows the Desktop
+  app's last opened date on its own row.
+- trufflehog is started with `--no-verification` and `--no-update`, so a
+  secrets scan does not check secrets online or phone home for updates.
+- A gitleaks or trufflehog run that fails is a finding. It is no longer
+  reported as zero hits.
+- PII scan counts a built-in list of common test card numbers as a low
+  finding. The briefing calls them "Test card numbers". Other valid card
+  numbers stay critical.
+- With `-Redact`, pii-scan does not write scan-target paths into the
+  evidence file.
+- `--dry-run` does not write the pii-scan or secrets-scan raw files.
+- git-posture does not lazy-fetch missing objects from a partial clone, and
+  reports those repos as a coverage gap.
 - Claude project settings are read from `<repo>/.claude/settings.json` and
   `settings.local.json`. A Claude Desktop install with no Claude Code home
   is still collected.
