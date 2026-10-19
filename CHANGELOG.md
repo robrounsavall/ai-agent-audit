@@ -9,6 +9,34 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
+### Changed
+
+- `secrets-scan` 1.1.0 reports one finding per scanner rule and severity.
+  `evidence_count` is the number of hits, and the title includes how many
+  files were involved. Per-hit rows stay in `raw/secrets-scan/findings.csv`.
+  Severity comes from an explicit rule list (high-impact tokens are
+  critical; every other rule is high) instead of a substring of the rule
+  name. A rule whose hits are all placeholders is counted, and the briefing
+  labels that rule as a likely test value.
+- `git-posture` 1.1.0 reports one finding per check, with the repo or blob
+  count in the title. The large-blob title includes the largest size.
+  `.env.example`, `.env.sample`, `.env.template`, and `.env.dist` are not
+  treated as a committed `.env`. A `.gitignore` comment or a `!.env` line
+  no longer counts as ignoring that file.
+- The briefing keeps the severity stored on these grouped secret findings,
+  so the HTML matches the summary. Older per-hit secret titles still use
+  the previous substring severity. Evidence cards for a grouped rule list
+  every file for that rule, including when the scanner spelled the rule
+  two ways.
+- `secrets-scan` does not scan its own output folder when that folder sits
+  inside a repository being scanned.
+- The next scan diff can show each secret once as changed, because the
+  title and the hit count moved from one row per hit to one row per rule.
+  Finding ids keep the previous `secrets_scan.<rule>` shape (lowercase,
+  spaces as underscores, 40 characters). A rule name longer than that gains
+  a short hash so two long names do not share an id. Those ids are not
+  reported as resolved and added back.
+
 ### Fixed
 
 - With `-Redact`, the closing note says this run's new evidence and briefing
