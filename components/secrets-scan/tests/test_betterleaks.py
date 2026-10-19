@@ -208,7 +208,11 @@ class TestCollectWithBetterleaks(unittest.TestCase):
             secret_findings = [f for f in envelope["findings"] if f["id"].startswith("secrets_scan.")]
             self.assertEqual(len(secret_findings), 1)
             finding = secret_findings[0]
-            self.assertEqual(finding["title"], "Secret detected by betterleaks: github-pat")
+            self.assertEqual(
+                finding["title"],
+                "Secret detected by betterleaks: github-pat (1 hit(s) across 1 file(s))",
+            )
+            self.assertEqual(finding["evidence_count"], 1)
             self.assertEqual(finding["severity"], "critical")
             self.assertNotIn("FAKEFAKE", json.dumps(envelope))
             with (out_dir / "findings.csv").open(encoding="utf-8", newline="") as handle:

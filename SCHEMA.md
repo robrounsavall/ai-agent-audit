@@ -16,6 +16,7 @@ ever leave the machine. Anything unknown is dropped by default.
 {
   "collector": "claude",
   "version": "1.0.0",
+  "aiscan_version": "0.2.0",
   "ran_at": "2026-05-23T19:30:00-04:00",
   "host": "DESKTOP-XYZ",
   "platform_detected": true,
@@ -31,7 +32,8 @@ ever leave the machine. Anything unknown is dropped by default.
 
 | Field | Take-home? | Notes |
 |---|---|---|
-| `collector`, `version`, `ran_at`, `host`, `platform_detected` | YES | Metadata. `host` is short hostname only. |
+| `collector`, `version`, `ran_at`, `host`, `platform_detected` | YES | Metadata. `host` is short hostname only. `version` is the collector schema, not the aiscan release. |
+| `aiscan_version` | YES | Optional. Present when aiscan itself wrote the envelope. A release looks like `0.2.0`. A checkout that is not that tag looks like `0.2.0-3-gabcdef` or `0.2.0-dirty`. A release zip with no git metadata uses the `VERSION` file. `tools/mcp-visibility` and the hand-written samples omit it; an envelope without the field is still valid. |
 | `scope_hash` | YES | SHA-256 of sorted, normalized list of paths scanned. Proves coverage without revealing paths. |
 | `summary` | YES | Numeric counts and labels only. NEVER strings derived from user content. |
 | `findings` | YES (sanitized per field tags) | See Finding shape. |
@@ -286,7 +288,9 @@ A collector that previously had data and now reports none is a drift warning, no
 
 Findings are sorted by severity (`critical`, `high`, `medium`, `low`, then `unknown`), then real findings before any finding the collector tagged `test_data` (that tag is not copied), then by `evidence_count` descending. Remaining ties break on collector, category, then title. `evidence_count` is the count that collector recorded. Collectors do not share one unit. A severity outside that list is stored as `unknown` and still listed.
 
-`detection_status` is one of `detected`, `not detected`, `parse error`, `not collected`, or `error (exit N)`. A known exit other than 0 is a collector error even when an envelope was written, listed as `error (exit N)`. Exit 2 with a parsed envelope is not an error: collectors use that for "not detected", and the status then follows `platform_detected`. Exit 2 with no file is `error (exit 2)`. An unreadable envelope is `parse error`. When no exit code was stored, status follows `platform_detected`.
+The object also has `aiscan_version`, the same string the scan printed (`git describe` in a checkout, the `VERSION` file in a release zip).
+
+`detection_status` is one of `detected`, `not detected`, `parse error`, `not collected`, or `error (exit N)`. A known exit other than 0 is a collector error even when an envelope was written, listed as `error (exit N)`. Exit 0 with no evidence file is `error (exit 0)`, the same rule the scan uses when a collector writes nothing. Exit 2 with a parsed envelope is not an error: collectors use that for "not detected", and the status then follows `platform_detected`. Exit 2 with no file is `error (exit 2)`. An unreadable envelope is `parse error`. When no exit code was stored, status follows `platform_detected`.
 
 Coverage caveats are findings that describe a gap (missing scanner, nothing to scan, a `coverage` tag or id). They appear only in `coverage_caveats`, not in `findings`. A secrets-scan envelope whose `summary.scanner` is `none`, and that has no coverage finding of its own, adds the caveat "No secrets scanner found".
 
@@ -297,3 +301,7 @@ Titles and categories are always masked for paths and secrets, even when the sca
 Bump `version` (semver) on any schema change. Downstream tooling (e.g. the
 briefing builder) refuses to process evidence with a major version it does not
 understand.
+
+`aiscan_version` does not bump that number. It is an optional field, and
+collectors that already write major version 1 stay on `1.x`. Readers must
+accept an envelope that omits it.

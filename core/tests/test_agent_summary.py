@@ -18,6 +18,7 @@ import agent_summary  # noqa: E402
 # Hard-coded on purpose. Importing the allow-list from the module would let
 # a new field ship in both places and the test would still pass.
 ALLOWED_KEYS = {
+    "aiscan_version",
     "collectors",
     "findings",
     "collector_errors",
@@ -159,8 +160,11 @@ class TestAllowList(unittest.TestCase):
 
             self.assertEqual(
                 set(summary),
-                {"collectors", "findings", "collector_errors", "coverage_caveats"},
+                {"aiscan_version", "collectors", "findings", "collector_errors", "coverage_caveats"},
             )
+            self.assertEqual(summary["aiscan_version"], agent_summary.tool_version())
+            self.assertNotIn("/", summary["aiscan_version"])
+            self.assertNotIn("\\", summary["aiscan_version"])
             self.assertTrue(set(_keys(summary)) <= ALLOWED_KEYS)
             for needle in _LEAKS:
                 self.assertNotIn(needle, blob)
@@ -342,12 +346,13 @@ class TestErrorsAndCaveats(unittest.TestCase):
                 "pii-scan": "parse error",
                 "cursor": "error (exit 1)",
                 "grok": "error (exit 2)",
+                "copilot": "error (exit 0)",
             })
             detected = {row["collector"]: row["detection_status"] for row in summary["collectors"]}
             self.assertEqual(detected["claude"], "detected")
             self.assertEqual(detected["secrets-scan"], "detected")
             self.assertEqual(detected["git-posture"], "not detected")
-            self.assertEqual(detected["copilot"], "not collected")
+            self.assertNotIn("copilot", detected)
             self.assertNotIn("grok", detected)
             self.assertNotIn("cursor", detected)
             self.assertNotIn("codex", detected)
@@ -764,13 +769,13 @@ class TestCli(unittest.TestCase):
                 code = agent_summary.main([
                     "--evidence-root", str(root),
                     "--write",
-                    "--collector-status", "cursor|0|detected",
+                    "--collector-status", "cursor,0,0,0",
                 ])
             self.assertEqual(code, 0)
             summary = json.loads(out.getvalue())
             errors = {row["collector"]: row["detection_status"] for row in summary["collector_errors"]}
             self.assertEqual(errors["claude"], "error (exit 4)")
-            self.assertNotIn("cursor", errors)
+            self.assertEqual(errors["cursor"], "error (exit 0)")
             stored = json.loads((evidence / "run-status.json").read_text(encoding="utf-8"))
             codes = {row["collector"]: row.get("exit_code") for row in stored["collectors"]}
             self.assertEqual(codes["claude"], 4)

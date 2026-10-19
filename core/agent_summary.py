@@ -39,6 +39,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import run_status
+from tool_version import tool_version
+
 SUMMARY_FILENAME = "agent-summary.json"
 RUN_STATUS_FILENAME = "run-status.json"
 
@@ -190,6 +193,7 @@ def build_agent_summary(
     for row in caveats:
         row.pop("_test_data", None)
     return {
+        "aiscan_version": tool_version(),
         "collectors": collectors,
         "findings": findings,
         "collector_errors": errors,
@@ -224,21 +228,29 @@ def load_run_status(evidence_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def parse_status_token(token: str) -> dict[str, Any] | None:
-    """Parse ``name|exit|status`` from the PowerShell wrapper.
+    """Parse ``name,exit,has,parsed`` from the PowerShell wrapper.
 
-    The status text is kept only long enough to classify the collector.
-    It is never copied into the summary.
+    ``has`` and ``parsed`` are 1 or 0, the same row ``run_status.py`` uses,
+    with the collector name in front. The display status is not passed.
     """
-    parts = str(token).split("|", 2)
-    if len(parts) != 3:
+    parts = [part.strip() for part in str(token).split(",")]
+    if len(parts) != 4:
         return None
-    name, code_text, raw_status = (part.strip() for part in parts)
+    name, code_text, has_text, parsed_text = parts
     if not _SAFE_NAME.fullmatch(name):
+        return None
+    if has_text not in ("0", "1") or parsed_text not in ("0", "1"):
         return None
     code = _exit_code(code_text)
     if code is None:
         return None
-    return {"collector": name, "exit_code": code, "raw_status": raw_status}
+    return {
+        "collector": name,
+        "exit_code": code,
+        "has_evidence": has_text == "1",
+        "parsed": parsed_text == "1",
+        "raw_status": "",
+    }
 
 
 def write_summary_files(
@@ -281,8 +293,8 @@ def main(argv: list[str] | None = None) -> int:
         "--collector-status",
         action="append",
         default=[],
-        metavar="NAME|EXIT|STATUS",
-        help="Collector result recorded by aiscan.ps1. Repeat for each collector.",
+        metavar="NAME,EXIT,HAS,PARSED",
+        help="Collector result recorded by aiscan.ps1 (exit,has,parsed). Repeat for each collector.",
     )
     args = parser.parse_args(argv)
 
@@ -502,19 +514,13 @@ def _error_row(
 def _collector_failed(exit_code: int | None, has_evidence: bool, parsed: bool) -> bool:
     """True when a stored exit code means this collector is an error.
 
-    After PR #23 merges, replace the body below with
-    ``return run_status.collector_failed(exit_code, has_evidence, parsed)``
-    for a known exit. Do not vendor that module into this branch.
     ``None`` means this folder has no stored exit, so an older scan is not
-    marked failed just because the code is missing.
+    marked failed just because the code is missing. A known exit uses the
+    same rule as the scan's process exit.
     """
     if exit_code is None:
         return False
-    if has_evidence and not parsed:
-        return True
-    if exit_code == 2 and has_evidence and parsed:
-        return False
-    return exit_code != 0
+    return run_status.collector_failed(exit_code, has_evidence, parsed)
 
 
 def _status_without_envelope(exit_code: int | None, raw_status: str) -> str:
