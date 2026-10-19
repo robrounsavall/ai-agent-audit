@@ -134,7 +134,9 @@ function python {
 class TestEvidenceUtf8(unittest.TestCase):
     def test_script_reads_evidence_as_utf8(self):
         text = AISCAN.read_text(encoding="utf-8")
-        self.assertEqual(text.count("Read-EvidenceText -Path"), 3)
+        # The table and 'all' read through Read-EvidenceEnvelope, which calls
+        # Read-EvidenceText. -Json is the other call site.
+        self.assertEqual(text.count("Read-EvidenceText -Path"), 2)
         self.assertIn("Get-Content -LiteralPath $Path -Encoding UTF8 -Raw", text)
 
     def _writer(self) -> str:
@@ -147,6 +149,8 @@ function python {
         '{"cli_args":[],"native_dirs":{}}'
         return
     }
+    if ($joined -like '*tool_version.py*') { 'dev'; $global:LASTEXITCODE = 0; return }
+    if ($joined -like '*run_status.py*') { '0'; $global:LASTEXITCODE = 0; return }
     $root = $null
     for ($i = 0; $i -lt $args.Count; $i++) {
         if ($args[$i] -eq '--evidence-root') { $root = $args[$i + 1] }

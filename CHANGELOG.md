@@ -9,8 +9,20 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
+### Added
+
+- `-AgentMode` prints scan paths relative to the output folder and omits the
+  closing "Evidence kept at" line. The summary table and errors stay.
+- Evidence envelopes include `aiscan_version`, the tool version that wrote
+  them.
+
 ### Changed
 
+- `aiscan all` prints the tool version from `git describe --tags` in a
+  checkout, and from the `VERSION` file in a release zip. A checkout that is
+  not exactly the release tag no longer prints `dev`.
+- The release build refuses to publish when `VERSION` does not match the tag.
+  Bump `VERSION` in the commit you tag.
 - `secrets-scan` 1.1.0 reports one finding per scanner rule and severity.
   `evidence_count` is the number of hits, and the title includes how many
   files were involved. Per-hit rows stay in `raw/secrets-scan/findings.csv`.
@@ -39,6 +51,18 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Fixed
 
+- The process exits 2 when a collector errors, writes no evidence file, or
+  writes a file that is not a readable envelope. It exits 3 when the only
+  failure is the briefing. A normal run, including "platform not detected",
+  still exits 0.
+- A previous envelope in the output folder is removed before that collector
+  runs, so a new failure cannot be read as "not detected".
+- `Opened briefing in default browser` is printed only when the browser
+  launch succeeds.
+- Throwaway output folders include a unique id, so two runs started in the
+  same second do not share a directory.
+- A byte-order mark in `VERSION` is ignored, and the release zip writes that
+  file once.
 - With `-Redact`, the closing note says this run's new evidence and briefing
   are redacted, that `raw\` is not, and that older files already in the folder
   are left as they were. Without `-Redact`, the previous warning is unchanged.

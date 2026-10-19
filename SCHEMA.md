@@ -16,6 +16,7 @@ ever leave the machine. Anything unknown is dropped by default.
 {
   "collector": "claude",
   "version": "1.0.0",
+  "aiscan_version": "0.2.0",
   "ran_at": "2026-05-23T19:30:00-04:00",
   "host": "DESKTOP-XYZ",
   "platform_detected": true,
@@ -31,7 +32,8 @@ ever leave the machine. Anything unknown is dropped by default.
 
 | Field | Take-home? | Notes |
 |---|---|---|
-| `collector`, `version`, `ran_at`, `host`, `platform_detected` | YES | Metadata. `host` is short hostname only. |
+| `collector`, `version`, `ran_at`, `host`, `platform_detected` | YES | Metadata. `host` is short hostname only. `version` is the collector schema, not the aiscan release. |
+| `aiscan_version` | YES | Optional. Present when aiscan itself wrote the envelope. A release looks like `0.2.0`. A checkout that is not that tag looks like `0.2.0-3-gabcdef` or `0.2.0-dirty`. A release zip with no git metadata uses the `VERSION` file. `tools/mcp-visibility` and the hand-written samples omit it; an envelope without the field is still valid. |
 | `scope_hash` | YES | SHA-256 of sorted, normalized list of paths scanned. Proves coverage without revealing paths. |
 | `summary` | YES | Numeric counts and labels only. NEVER strings derived from user content. |
 | `findings` | YES (sanitized per field tags) | See Finding shape. |
@@ -277,3 +279,7 @@ A collector that previously had data and now reports none is a drift warning, no
 Bump `version` (semver) on any schema change. Downstream tooling (e.g. the
 briefing builder) refuses to process evidence with a major version it does not
 understand.
+
+`aiscan_version` does not bump that number. It is an optional field, and
+collectors that already write major version 1 stay on `1.x`. Readers must
+accept an envelope that omits it.

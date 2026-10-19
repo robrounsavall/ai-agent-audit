@@ -196,6 +196,9 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 # Mask usernames/paths/secrets for output you intend to share
 .\aiscan.ps1 all -Redact
 
+# Paths relative to the scan folder; no "Evidence kept at" line
+.\aiscan.ps1 all -OutDir C:\scans\today -AgentMode
+
 # What would be scanned, reading nothing
 .\aiscan.ps1 discover
 
@@ -236,6 +239,26 @@ it, or set `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `GROK_HOME`.
 
 More on scan history and telemetry: [docs/scan-history.md](docs/scan-history.md),
 [docs/telemetry-import.md](docs/telemetry-import.md).
+
+## Output and exit codes
+
+The script prints a summary table, then a closing line. `-AgentMode` prints
+paths relative to the scan folder and omits `Evidence kept at`. The table
+and error lines stay. Text a collector writes to its own error stream is
+unchanged, and can still contain a path.
+
+When `-Briefing` writes the HTML and the default browser opens, the script
+prints `Opened briefing in default browser`.
+
+| Exit | Meaning |
+|---|---|
+| 0 | The scan finished. "Platform not detected" is a normal result. |
+| 1 | Usage error. `-Here` and `-OutDir` cannot be used together. |
+| 2 | A collector failed, wrote no evidence file, or wrote a file that is not a readable evidence envelope. |
+| 3 | Every collector was fine and only the briefing failed to generate. Whether the browser opened is separate; a failed open still exits 0 when the HTML was written. |
+
+Comparing this scan with the previous one is a warning when it fails. That
+warning does not change the exit code.
 
 MCP server inventory (Claude, Cursor, Codex, Grok Build and repo-scoped
 configs). This is a separate tool and prints real local paths by default:
