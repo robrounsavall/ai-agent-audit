@@ -11,8 +11,14 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Fixed
 
-- Codex reports compressed session logs (`.jsonl.zst`) it does not open.
-  The count is a low finding, "N compressed Codex session logs not scanned".
+- On Python 3.14 and newer, compressed Codex session logs (`.jsonl.zst`)
+  are decompressed with the standard-library `compression.zstd` module and
+  scanned (Codex, chat history, PII, and secrets). On older Python they are
+  counted, not opened, and reported as a low finding, "N compressed Codex
+  session logs not scanned". A compressed log that is corrupt, too large,
+  or too slow to unpack is a coverage note, not a failed run. The Codex
+  briefing row uses session activity for last used, and shows the Desktop
+  app's last opened date on its own row.
 - trufflehog is started with `--no-verification` and `--no-update`, so a
   secrets scan does not check secrets online or phone home for updates.
 - A gitleaks or trufflehog run that fails is a finding. It is no longer

@@ -284,5 +284,42 @@ class TestBriefingHtmlQuality(unittest.TestCase):
         self.assertNotIn("1 files", html)
 
 
+class CodexActivityTests(unittest.TestCase):
+    """Cover: Codex last used from the codex summary; Desktop last opened as its own row."""
+
+    def test_cover_summary_and_desktop(self):
+        from collections import Counter
+
+        mod = _load_briefing()
+        envelopes = {"codex": _envelope("codex", summary={
+            "last_used": "2026-10-04",
+            "desktop_installed": True,
+            "desktop_last_opened": "2026-10-15",
+        })}
+        html = mod.render_cover_status(envelopes, {}, Counter())
+        self.assertIn("2026-10-04", html)
+        self.assertIn("Codex Desktop app", html)
+        self.assertIn("opened 2026-10-15", html)
+        self.assertLess(html.index("2026-10-04"), html.index("Codex Desktop app"))
+        self.assertIn("<strong>1</strong>", html)
+        self.assertEqual(mod._tool_last_used("codex", envelopes), "2026-10-04")
+
+    def test_no_desktop_row_when_not_installed(self):
+        from collections import Counter
+
+        mod = _load_briefing()
+        envelopes = {"codex": _envelope("codex", summary={"last_used": "2026-10-04"})}
+        html = mod.render_cover_status(envelopes, {}, Counter())
+        self.assertNotIn("Codex Desktop app", html)
+        self.assertNotIn("opened", html)
+
+    def test_tools_table_last_used_not_dead(self):
+        mod = _load_briefing()
+        envelopes = {"codex": _envelope("codex", summary={"last_used": "2026-10-04"})}
+        rows = mod.build_tools_table(envelopes, None, {})
+        codex_row = next(row for row in rows if row["key"] == "codex")
+        self.assertEqual(codex_row["last_used"], "2026-10-04")
+
+
 if __name__ == "__main__":
     unittest.main()

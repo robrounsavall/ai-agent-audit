@@ -49,6 +49,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Callable, Iterable
 
+import compressed
 import paths
 from common import (
     add_base_args,
@@ -237,14 +238,26 @@ DETECTORS: dict[str, tuple[re.Pattern, Callable[[str], bool] | None, float]] = {
 DEFAULT_ENTITIES = list(DETECTORS)
 
 
+def _text_suffix(path: Path) -> str:
+    """Extension that decides text-ness. ``a.jsonl.zst`` is judged as ``.jsonl``."""
+    if compressed.is_compressed(path):
+        return compressed.plain_twin(path).suffix.lower()
+    return path.suffix.lower()
+
+
 def iter_text_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        if path.suffix.lower() not in TEXT_EXTENSIONS:
+        if _text_suffix(path) not in TEXT_EXTENSIONS:
+            continue
+        is_zst = compressed.is_compressed(path)
+        # A plain file and its .jsonl.zst twin: scan the plain one only.
+        if is_zst and compressed.plain_twin(path).is_file():
             continue
         try:
-            if path.stat().st_size > MAX_FILE_BYTES:
+            # Compressed size is checked after decompression.
+            if not is_zst and path.stat().st_size > MAX_FILE_BYTES:
                 continue
         except OSError:
             continue
@@ -253,8 +266,12 @@ def iter_text_files(root: Path) -> Iterable[Path]:
 
 def read_text(path: Path) -> str | None:
     try:
+        if compressed.is_compressed(path):
+            return compressed.read_text(path, errors="replace", max_bytes=MAX_FILE_BYTES)
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
+        if compressed.is_compressed(path):
+            raise
         return None
 
 
@@ -415,10 +432,13 @@ def collect(
             **_target_summary(targets),
             "files_scanned": 0,
             "hits": 0,
+            "compressed_files_unreadable": 0,
         }
         return envelope, []
 
     all_hits: list[dict] = []
+    compressed_unreadable = 0
+    zstd_ok = compressed.zstd_backend() is not None
     files_scanned = 0
     total_hits = 0
     samples_truncated = 0
@@ -437,13 +457,23 @@ def collect(
             file=sys.stderr, flush=True,
         )
         for file_path in target_files:
+            if compressed.is_compressed(file_path) and not zstd_ok:
+                compressed_unreadable += 1
+                continue
             files_scanned += 1
             if files_scanned % 200 == 0:
                 print(
                     f"pii-scan: {files_scanned} files scanned, {total_hits} hits so far",
                     file=sys.stderr, flush=True,
                 )
-            hits, private_ips = scan_file(file_path, entities)
+            try:
+                hits, private_ips = scan_file(file_path, entities)
+            except (OSError, compressed.TooLarge, compressed.DecompressTimeout, compressed.ZstdUnavailable):
+                if compressed.is_compressed(file_path):
+                    compressed_unreadable += 1
+                    files_scanned -= 1
+                    continue
+                raise
             private_ip_total += private_ips
             if not hits:
                 continue
@@ -466,6 +496,26 @@ def collect(
         f" {private_ip_total} private/loopback IPs counted, not findings).",
         file=sys.stderr, flush=True,
     )
+
+    if compressed_unreadable:
+        if zstd_ok:
+            title = (
+                f"{compressed_unreadable} compressed file(s) (.jsonl.zst) "
+                "could not be read for PII"
+            )
+        else:
+            title = (
+                f"{compressed_unreadable} compressed file(s) (.jsonl.zst) "
+                "were not scanned for PII"
+            )
+        findings.append(make_finding(
+            "pii-scan.compressed_files_unreadable",
+            "low",
+            "PII Exposure",
+            title,
+            evidence_count=compressed_unreadable,
+            tags=["coverage_gap"],
+        ))
 
     if write_raw:
         write_raw_outputs(raw_dir, all_hits, entity_counts, file_counts, samples_truncated)
@@ -497,6 +547,7 @@ def collect(
     envelope["summary"] = {
         **_target_summary(targets),
         "files_scanned": files_scanned,
+        "compressed_files_unreadable": compressed_unreadable,
         "files_with_hits": len(file_counts),
         "hits": total_hits,
         "sample_rows_stored": len(all_hits),

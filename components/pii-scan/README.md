@@ -23,7 +23,7 @@ chat-history run produced one) plus every native chat location that exists
 |---|---|
 | Evidence | `evidence/pii-scan.json` |
 | In `aiscan all` | yes |
-| Deps | stdlib only |
+| Deps | stdlib only (`compression.zstd` on Python 3.14+ reads `.jsonl.zst` transcripts; older Python counts them and does not open them) |
 
 ## Test
 

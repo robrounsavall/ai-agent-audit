@@ -27,6 +27,7 @@ os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
 import bootstrap  # noqa: E402,F401
 
 import codex  # noqa: E402
+import compressed  # noqa: E402
 import paths  # noqa: E402
 
 AWS_KEY = "AKIA" + "B" * 16
@@ -176,7 +177,12 @@ class TestCollectAgainstFixtures(unittest.TestCase):
                 opened.append(str(file))
             return real_open(file, *args, **kwargs)
 
-        with mock.patch.object(Path, "open", spy_path_open), mock.patch("builtins.open", spy_open):
+        # Force the pre-3.14 path even when this interpreter has compression.zstd.
+        with (
+            mock.patch.object(compressed, "zstd_backend", return_value=None),
+            mock.patch.object(Path, "open", spy_path_open),
+            mock.patch("builtins.open", spy_open),
+        ):
             env = codex.collect(self.tp)
         self.assertTrue(any(name.endswith(".jsonl") and not name.endswith(".jsonl.zst") for name in opened))
         self.assertFalse(any(name.endswith(".jsonl.zst") for name in opened))
@@ -195,7 +201,8 @@ class TestCollectAgainstFixtures(unittest.TestCase):
 
     def test_one_compressed_log_uses_singular_title(self):
         (self.sessions / "only.jsonl.zst").write_bytes(b"x")
-        env = codex.collect(self.tp)
+        with mock.patch.object(compressed, "zstd_backend", return_value=None):
+            env = codex.collect(self.tp)
         hits = [f for f in env["findings"] if f["id"] == "codex.sessions.compressed_not_scanned"]
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0]["title"], "1 compressed Codex session log not scanned")
