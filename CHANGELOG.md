@@ -11,6 +11,14 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Fixed
 
+- With `-Redact`, the closing note says this run's new evidence and briefing
+  are redacted, that `raw\` is not, and that older files already in the folder
+  are left as they were. Without `-Redact`, the previous warning is unchanged.
+- The README asked for Python 3.10+, but collectors import `tomllib` (3.11).
+  It now says 3.11+, and `aiscan.ps1` stops immediately if `python` is older.
+- Windows PowerShell 5.1 was reading evidence with the ANSI code page and
+  discovery JSON with the OEM code page, which mangled non-ASCII text. Evidence
+  is read as UTF-8, and discovery JSON escapes non-ASCII paths.
 - On Python 3.14 and newer, compressed Codex session logs (`.jsonl.zst`)
   are decompressed with the standard-library `compression.zstd` module and
   scanned (Codex, chat history, PII, and secrets). On older Python they are

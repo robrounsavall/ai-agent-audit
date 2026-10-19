@@ -249,7 +249,10 @@ def main() -> None:
     # Mode: --json (machine-readable, sensitive).
     if args.output_json:
         out = _json_output(p)
-        print(json.dumps(out, indent=2, ensure_ascii=False))
+        # ASCII-only. Windows PowerShell 5.1 decodes native stdout with the OEM
+        # code page, so a raw non-ASCII path would be corrupted before
+        # ConvertFrom-Json. \u escapes survive that and decode back to the path.
+        print(json.dumps(out, indent=2, ensure_ascii=True))
         sys.exit(0)
 
     # Default: console report (full paths, nothing written).
