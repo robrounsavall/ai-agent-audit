@@ -9,7 +9,17 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- [RUN-AISCAN.md](RUN-AISCAN.md), instructions an AI agent can follow to run
+  one scan without reading transcripts or uploading results. The scan
+  command in that file does not pass `-Redact`.
+
+### Changed
+
+- Docs no longer say the default output has no identifying paths or is
+  redacted. `-Redact` stays off unless you pass it. It masks paths and
+  secrets in evidence and the briefing, and it does not clean `raw/`.
 
 ## [0.2.0] - 2026-10-15
 

@@ -6,9 +6,13 @@ Every collector under `components/<name>/` MUST emit a single JSON file:
 <evidence_root>/evidence/<collector_name>.json
 ```
 
-Downstream tooling (report rendering, any sharing/sanitization pipeline) keys
-off this schema. Fields marked share-safe below are the only fields that should
-ever leave the machine. Anything unknown is dropped by default.
+Downstream tooling (report rendering, any sharing pipeline) keys off this
+schema. A normal local run does not redact. `-Redact` and `AISCAN_REDACT=1`
+are off unless the operator turns them on. With redaction off, samples,
+rules, and workspace labels can contain real paths, names, and secret-shaped
+text. Raw chat transcripts still stay in `raw/`. The take-home marks below
+are what a sharing pipeline may copy, and only after redaction is on.
+Anything unknown should be dropped before a file leaves the machine.
 
 ## Top-level shape
 
@@ -63,7 +67,7 @@ ever leave the machine. Anything unknown is dropped by default.
 | `title` | string | YES | author-written, no customer data |
 | `evidence_count` | int | YES | |
 | `first_seen`, `last_seen` | ISO8601 | YES | |
-| `sample_redacted` | string | YES | MUST already be redacted by collector. Use `${VAR}` for variable parts. |
+| `sample_redacted` | string | Only after `-Redact` | The field name does not mean the value was masked. With redaction off, this is the collector's original sample and can include paths and secret-shaped text. With `AISCAN_REDACT` set, `sanitize_text` masks secrets and hashes absolute paths before this field is saved. |
 | `secret_redacted` | bool | YES | true if a secret value was present and masked |
 | `tags` | string[] | YES | controlled vocabulary |
 | `raw_evidence_ref` | string | NO | path into raw/, never leaves the machine |
@@ -89,8 +93,11 @@ ever leave the machine. Anything unknown is dropped by default.
 `source_kind` and `confidence` are OPTIONAL (omit for collectors that do not
 track provenance).
 
-`scope_label_redacted`: Workspace and project names are PII. Replace with
-`<scope>#<short hash of original name>` before writing. Collectors do this.
+`scope_label_redacted`: Workspace and project names are PII. When redaction
+is on, collectors replace the name with `<scope>#<short hash>`. When it is
+off, they keep the last path segment as `<scope>:<name>`. That segment can
+be a project name or a username. Full filesystem paths are not stored in
+this field either way.
 
 `Rule` records describe an effective permission decision. `decision` is limited
 to `allow`, `deny`, or `ask`; collectors must not emit configuration posture as
@@ -137,28 +144,35 @@ Used for run bookkeeping. Never included in shared output.
 
 ## Sanitization rules
 
+These rules describe a redacted run, or a bundle someone is about to take
+off the machine. They are not what a default local run writes.
+`make_finding` and `make_rule` call `sanitize_text`, which returns the
+original string unless `AISCAN_REDACT` is set (`-Redact` on `aiscan.ps1`).
+
 Any shared bundle must be built field-by-field from this schema. Rules:
 
 1. `raw_pointers` is dropped entirely.
 2. Any field named `raw_evidence_ref` is dropped.
-3. Any field ending in `_redacted` is passed through as-is (collector
-   guarantees it is safe). Any unsuffixed string that LOOKS like a secret
-   (matches secret regex) is masked at sanitization time as belt-and-suspenders.
+3. Any field ending in `_redacted` is passed through as-is. That value is
+   masked only when the scan used `-Redact`. Any unsuffixed string that looks
+   like a secret is masked again at sharing time, as a backstop.
 4. `summary` values must be numeric or short controlled-vocab strings.
    Sanitizer drops any string > 64 chars or matching the secret regex.
-5. Workspace/project names: collectors emit `scope_label_redacted` only.
-   Original names live in `raw/`.
+5. Workspace and project names are stored in `scope_label_redacted`. With
+   `-Redact`, that value is a hash. Without it, it is the last folder name,
+   which can be a project name or a username. The full path is not copied
+   into this field.
 6. Chat transcript text NEVER appears in evidence/. It lives only in `raw/`.
    The chat-history collector emits counts, sizes, date ranges, and findings
    (e.g., "12 transcripts contain AKIA prefixes") but not text.
-7. The `_redacted` suffix is a collector guarantee, not a sanitizer transform.
-   Collectors MUST remove user names, workspace/repository paths, WSL-mounted
-   user paths, and irrelevant surrounding session text before emitting these
-   fields.
+7. The `_redacted` suffix is not itself a transform. When redaction is on,
+   collectors remove user names, workspace and repository paths, and
+   WSL-mounted user paths before emitting these fields. When redaction is
+   off, the same fields can still contain that text.
 
 ## Discovery summary block (safe metadata only)
 
-`evidence/discovery.json` and the `summary.history_roots` block in collector evidence carry safe metadata only. No raw filesystem paths appear in any stored evidence.
+`evidence/discovery.json` and the `summary.history_roots` block in collector evidence store a hash (`path_id`) instead of the raw path. That block does not contain filesystem paths. Other evidence files can, when redaction is off.
 
 Each entry contains:
 
@@ -170,9 +184,12 @@ Each entry contains:
 | `source` | string | Source label: `default`, `cli`, `config`, `env:CODEX_HOME`, or `env:CLAUDE_CONFIG_DIR` |
 | `path_id` | string | SHA-256 short hash of the normalized path. Proves identity without revealing it. |
 
-This is consistent with the `scope_hash` rule above: coverage is provable; resolved paths are not exposed. Console output and `--json` output from `discover.py` contain full paths — those stay on the operator's machine and are never persisted to evidence.
+For this block, coverage is provable and the resolved path is not stored. Console output and `--json` output from `discover.py` contain full paths. Those are not written into `discovery.json`. Other evidence can still contain paths when redaction is off.
 
 ## Redaction status
+
+Redaction is off unless `-Redact` or `AISCAN_REDACT=1` is set. A default
+local run keeps real paths, names, and secret-shaped samples in evidence.
 
 Codex session parsing was hardened against two early defects (verified
 2026-07-07 against the open-source `openai/codex` rollout format): prose is no
@@ -196,7 +213,7 @@ before sharing it.
 | `copilot` | `%APPDATA%\Code\User\settings.json`, JetBrains config | NEW. Enable state, exclude rules, telemetry, SKU. |
 | `chat-history` | All 4 transcript sources | Writes raw markdown to `raw/chat-history/`. Evidence is counts + secret-hit findings only. |
 | `git-posture` | Repos under user-specified roots | `.env` in history, hook presence, branch protection (opt-in `gh`), large blobs. |
-| `secrets-scan` | `raw/chat-history/` + repo roots | Betterleaks, gitleaks, or trufflehog wrapper (first one found). `summary.scanner` names it; `summary.scanner_mode` is `betterleaks-v1` or `betterleaks-v2` for Betterleaks. Betterleaks validation is always forced off. Findings only, redacted samples. |
+| `secrets-scan` | `raw/chat-history/` + repo roots | Betterleaks, gitleaks, or trufflehog wrapper (first one found). `summary.scanner` names it; `summary.scanner_mode` is `betterleaks-v1` or `betterleaks-v2` for Betterleaks. Betterleaks validation is always forced off. Evidence samples shorten the secret (first and last four characters). File paths for those hits stay in `raw/secrets-scan/findings.csv` and are not removed by `-Redact`. Other evidence text is masked only when redaction is on. |
 | `cloud-agents` | Official Cloud Agents API, `GET https://api.cursor.com` only, with a user-supplied `CURSOR_API_KEY` | Opt-in. Not part of `aiscan all`. Does not read the Cursor IDE session token or call `cursor.com/api/dashboard`. Does not call `GET /v1/repositories` or the enterprise Admin API. |
 | `telemetry` | Local files only: OTLP JSON / JSON-lines (`--otel-file`) and Splunk JSON or CSV exports (`--splunk-export`) | Opt-in `aiscan telemetry`. Not part of `aiscan all`. Counts tool decisions and usage. Does not store prompts, commands, or secret values. `cost_cents` is copied from a Cursor dashboard usage export and is never estimated from tokens. |
 | `changes` | Derived. Not a collector. `python core/scan_diff.py` compares two evidence roots and writes `evidence/changes.json` | The briefing loader skips this file when it walks collector envelopes and passes it only to the changes section. |
@@ -268,7 +285,7 @@ Prompt text, tool parameters, and secret-shaped attributes are dropped before an
 
 `evidence/changes.json` is a normal major-version-1 envelope (`collector` = `changes`) plus a `changes` object. `aiscan` writes it when `-Briefing` is set, by running `core/scan_diff.py` against the previous evidence root. The briefing does not iterate this file with the other collectors.
 
-`summary.comparison` is `first_scan` when no earlier scan was found, and `diff` otherwise. Count fields include `findings_added`, `findings_resolved`, `new_high_or_critical`, `drift_warnings`, `mcp_servers_added`, `allow_rules_added`, and `counters_moved`. Per-collector before/after counters live under `changes.collectors`. The file does not contain filesystem paths or transcript text.
+`summary.comparison` is `first_scan` when no earlier scan was found, and `diff` otherwise. Count fields include `findings_added`, `findings_resolved`, `new_high_or_critical`, `drift_warnings`, `mcp_servers_added`, `allow_rules_added`, and `counters_moved`. Per-collector before/after counters live under `changes.collectors`. The file does not copy transcript bodies. Titles and rule text go through `sanitize_text`, so without `-Redact` they can still contain paths.
 
 A collector that previously had data and now reports none is a drift warning, not a clean result. Long-term trends (token lines over months, and so on) belong in Splunk, not in a pile of HTML files. See [docs/scan-history.md](docs/scan-history.md) and [docs/report-v2.md](docs/report-v2.md).
 

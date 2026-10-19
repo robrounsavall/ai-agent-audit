@@ -128,13 +128,14 @@ OpenTelemetry `tool_decision` export.
 | 1 | `--evidence-root` does not exist |
 
 `--dry-run` prints the envelope and writes nothing. `--raw-root` defaults to
-`<evidence-root>/raw`. The raw files are a redacted JSONL copy: tool name,
+`<evidence-root>/raw`. The raw files are a trimmed JSONL copy: tool name,
 decision, source, tokens, and cost. Command arguments and prompt text are not
 copied there either.
 
-`AISCAN_REDACT=1` (or `-Redact` on `aiscan.ps1`, once this collector is wired)
-runs the shared path and secret masking. The default, matching the other
-collectors, leaves ordinary tool and model names readable.
+`AISCAN_REDACT=1` (or `-Redact` on `aiscan.ps1`) runs the shared path and
+secret masking on what remains. The default, matching the other collectors,
+leaves ordinary tool and model names readable. Path masking waits for that
+flag.
 
 ## What the evidence contains
 

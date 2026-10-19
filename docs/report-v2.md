@@ -18,7 +18,7 @@ Under the summary are tabs:
 
 If a tab has no evidence, it says so in one line, for example `Not collected — run aiscan telemetry -OtelFile <file> -SplunkExport <file> to enable.` The page still opens. A missing file is not an error in the report.
 
-The page shows presence and counts. It does not show prompts, transcript text, or secret values. That is the same rule the Cowork collector already follows: count the files, do not read the contents into the report.
+The page does not copy full transcripts or prompts. It does show finding samples. Those samples are unredacted unless the scan used `-Redact`, so they can include paths and secret-shaped text. Cowork still contributes counts, not file contents.
 
 ## What changed since the last scan
 
@@ -47,7 +47,7 @@ A collector that used to report data and now reports nothing is called out. An e
 
 ## Where trends go
 
-`changes.json` is one comparison: this scan versus the last one. It is not a chart of the last year. Counts you want to follow over time (tokens, messages, new high findings) should be indexed in Splunk. The summary fields in `changes.json` are already counts, and the per-collector before/after numbers are the rows to index. Do not ship the `raw\` folder. Paths and transcripts stay on the machine.
+`changes.json` is one comparison: this scan versus the last one. It is not a chart of the last year. Counts you want to follow over time (tokens, messages, new high findings) should be indexed in Splunk. The summary fields in `changes.json` are already counts, and the per-collector before/after numbers are the rows to index. Do not ship the `raw\` folder. Without `-Redact`, the evidence can also contain paths, so do not forward the scan folder either.
 
 More on the folder layout and the diff command is in [scan-history.md](scan-history.md).
 

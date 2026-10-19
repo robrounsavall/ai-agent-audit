@@ -198,7 +198,7 @@ HTML_SHELL = """<!doctype html>
         <span class="kicker-label">SECRETS &amp; GIT POSTURE</span>
       </div>
       <h2 class="h2">Secret scanning and git posture.</h2>
-      <p class="sub">The secrets scanner (Betterleaks, gitleaks, or trufflehog) scans chat exports and repo roots for credential-shaped strings; samples are redacted and full hits stay in <span class="mono">raw/secrets-scan/findings.csv</span>. Git posture checks local repos for .env in history, hook presence, .gitignore coverage, and large blobs.</p>
+      <p class="sub">The secrets scanner (Betterleaks, gitleaks, or trufflehog) scans chat exports and repo roots for credential-shaped strings; secret samples in evidence are shortened, and full hits stay in <span class="mono">raw/secrets-scan/findings.csv</span>. Other paths are masked only when the scan used -Redact. Git posture checks local repos for .env in history, hook presence, .gitignore coverage, and large blobs.</p>
     </header>
 
     <div class="two-col">

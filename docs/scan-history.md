@@ -77,4 +77,4 @@ The report v2 briefing loads `evidence/changes.json` on its own. The loader skip
 
 The per-collector `changes.collectors.<name>.counters` list is the trend source: each row is a counter name plus `before` and `after`. Index those if you want message or token lines over time.
 
-Do not forward `raw/` or any path fields. This envelope does not put filesystem paths in the JSON; it keeps the scan folder's name only. That is the same boundary as the other evidence files: counts and redacted findings can leave the machine, raw transcripts cannot.
+Do not forward `raw/` or an unredacted scan folder. `changes.json` does not copy transcript bodies. Titles and rule text in it can still contain paths unless the scan used `-Redact`. Counts from a redacted scan are the part that can leave the machine. Raw transcripts cannot.

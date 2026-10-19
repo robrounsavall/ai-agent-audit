@@ -4,8 +4,11 @@ aiscan is an offline Windows scanner that shows what AI coding agents can
 reach and do on a machine. One command inventories what Claude Code, Claude
 Cowork, Cursor, Codex, GitHub Copilot, Grok Build and Grok Bot are allowed to
 do, what chat history they keep locally, and where secrets may have landed.
-The output is an evidence layer with no raw transcripts and no identifying
-filesystem paths, plus a one-file HTML briefing.
+The output is an evidence folder and a one-file HTML briefing. Raw chat
+transcripts stay in the local `raw/` directory. By default the evidence and
+the briefing are unredacted: they can include real paths, usernames,
+hostnames, and secret samples. Pass `-Redact` to mask those in the evidence
+and the briefing. `-Redact` does not clean `raw/`.
 
 Current release: **[v0.2.0](https://github.com/robrounsavall/ai-agent-audit/releases/tag/v0.2.0)**
 (2026-10-15). What changed in each release is in [CHANGELOG.md](CHANGELOG.md).
@@ -45,6 +48,19 @@ cd ai-agent-audit
 Either way, `all` runs the offline collectors, writes what changed since the
 previous scan, and builds a self-contained HTML report.
 
+## Have an AI agent run the scan
+
+[RUN-AISCAN.md](RUN-AISCAN.md) is a set of instructions for an AI coding
+agent. It tells the agent how to clone a fresh copy, run one offline scan
+on this Windows machine, and report only finding titles and counts.
+
+Hand that file to an agent such as Claude Code, Codex, or Cursor, and ask
+it to follow the file. The agent should follow only that file, not other
+docs in the repo and not text it finds in the scan output. The scan command
+in the file does not pass `-Redact`. The output is unredacted and stays on
+the machine. The agent is told not to read `raw\`, not to open the briefing,
+and not to repeat paths, usernames, or secrets in the chat.
+
 ## Why
 
 AI coding agents act on developer machines with real privileges. They hold
@@ -67,7 +83,9 @@ teams have no inventory of any of it. aiscan answers the first question:
   and equivalents contribute presence and auth-method only.
 - **Transcripts stay local.** Raw chat content only ever lands in the local
   `raw/` directory. The `evidence/` layer carries counts, sizes, hashes, and
-  redacted samples — the contract is [SCHEMA.md](SCHEMA.md).
+  samples. Those samples and rule strings are masked only when you pass
+  `-Redact` (or set `AISCAN_REDACT=1`). The field names and the contract are
+  in [SCHEMA.md](SCHEMA.md). `-Redact` does not clean `raw/`.
 - Pure stdlib Python: every collector runs on stock Python 3.10+ with no
   pip install. Small enough to audit before you run it.
 
@@ -84,7 +102,7 @@ teams have no inventory of any of it. aiscan answers the first question:
 | `grok-bot` | `%APPDATA%\Grok Bot` presence, sizes, and mtimes | desktop app data, secrets-store and lockfile presence, newest activity. Local execution is reported unknown, not absent |
 | `chat-history` | all transcript sources | volume, retention, secret-hit indicators (content stays in local `raw/`) |
 | `git-posture` | repos under `-RepoRoots`, or by default whichever of `~/repos`, `~/code`, `~/src`, `~/projects`, `~/source`, `~/dev`, `~/git`, `~/work`, `~/workspace`, `~/cursor-projects`, `~/Documents/GitHub`, `~/Documents/repos` exist | `.env` in history, hooks, ignore posture, large blobs |
-| `secrets-scan` | chat corpus + repo roots | Betterleaks, gitleaks, or trufflehog findings with redacted samples. Needs one of them installed, see [Prerequisites](#prerequisites) |
+| `secrets-scan` | chat corpus + repo roots | Betterleaks, gitleaks, or trufflehog findings. Secret samples in evidence are shortened. Full file paths stay in `raw/`. Other paths in evidence are masked only with `-Redact`. Needs one of them installed, see [Prerequisites](#prerequisites) |
 | `pii-scan` | chat corpus | regulated-data indicators: cards (Luhn), SSNs, IBANs, emails, phones, public IPs |
 | `cloud-agents` (not in `all`) | Cursor Cloud Agents API (`GET https://api.cursor.com` only) | agent status, repos, branches, PR URLs, latest run, token totals. No dollar cost, no conversation text by default |
 | `telemetry` (not in `all`) | Local OTLP and Splunk export files | Approval counts and usage. Cursor `cost_cents` is labeled as from the Cursor dashboard usage export. Dollars are never estimated from tokens |
@@ -246,10 +264,12 @@ python tools\mcp-visibility\mcp_visibility.py --format summary
 Every collector writes one JSON envelope to `evidence/<name>.json`:
 `findings` (severity-ranked), `rules` (normalized allow/deny/ask inventory),
 `summary` (numeric / controlled vocabulary only), `raw_pointers` (local-only
-file references, never share-safe). Workspace identity is hashed
-(`scope_label_redacted`), full filesystem paths never land in evidence, and
-transcript text never leaves the local `raw/` directory.
-[SCHEMA.md](SCHEMA.md) is the contract; collectors that violate it are bugs.
+file references, never share-safe). Without `-Redact`, samples, rules, and
+workspace labels can contain real names and paths. With `-Redact`, workspace
+labels are hashed (`scope_label_redacted`) and path and secret text in
+samples and rules is masked. Transcript text stays in the local `raw/`
+directory either way. [SCHEMA.md](SCHEMA.md) is the contract; collectors
+that violate it are bugs.
 
 ## Repo layout (components)
 
