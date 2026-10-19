@@ -70,7 +70,7 @@ class TestNoExport(unittest.TestCase):
             self.assertIn("not on disk", stderr.getvalue())
             written = json.loads((root / "evidence" / "telemetry.json").read_text(encoding="utf-8"))
         self.assertEqual(written["collector"], "telemetry")
-        self.assertEqual(written["version"], "1.0.0")
+        self.assertEqual(written["version"], "1.1.0")
         self.assertFalse(written["platform_detected"])
         self.assertEqual(written["summary"]["status"], "not_detected")
         self.assertEqual(written["summary"]["note"], ti.NOTE_NO_EXPORT)
@@ -535,6 +535,48 @@ class TestReportSection(unittest.TestCase):
         self.assertNotIn("from the Cursor dashboard usage export", html)
         self.assertIn("gpt-example", html)
         self.assertIn("codex", html)
+
+
+class TestMessyExports(unittest.TestCase):
+    def test_junk_after_a_date_is_not_a_timestamp(self):
+        self.assertEqual(ti.parse_time("2026-01-01trailing"), "")
+        self.assertEqual(ti.day_of("2026-01-01trailing"), "unknown")
+        parsed = ti.parse_time("2026-01-01T00:00:00Z")
+        self.assertTrue(parsed.startswith("2026-01-01"))
+        self.assertEqual(ti.day_of(parsed), "2026-01-01")
+        self.assertIsNone(ti.as_int("9" * 40))
+
+    def test_one_bad_export_does_not_drop_the_rest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            deep = root / "deep.json"
+            blob = "0"
+            for _ in range(2000):
+                blob = "[" + blob + "]"
+            deep.write_text(blob, encoding="utf-8")
+            wide = root / "wide.csv"
+            wide.write_text(
+                "event,tool,decision\n" + "tool_decision,bash," + ("a" * 200000) + "\n",
+                encoding="utf-8",
+            )
+            good = root / "good.jsonl"
+            good.write_text(
+                json.dumps(
+                    {
+                        "event.name": "tool_decision",
+                        "tool_name": "bash",
+                        "decision": "accept",
+                        "source": "user",
+                        "event.timestamp": "2026-01-02T00:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            envelope = ti.collect(otel_files=[deep, good], splunk_files=[wide])
+        self.assertGreaterEqual(envelope["summary"]["inputs_failed"], 1)
+        self.assertGreaterEqual(envelope["summary"]["inputs_read"], 1)
+        self.assertGreaterEqual(envelope["summary"]["approval_events"], 1)
 
 
 if __name__ == "__main__":

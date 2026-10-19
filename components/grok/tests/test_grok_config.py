@@ -15,8 +15,10 @@ Run:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -72,8 +74,20 @@ class TestParseConfigToml(unittest.TestCase):
         self.assertIn("grok.mcp.non_localhost", ids(findings))
 
     def test_mcp_localhost_no_non_localhost_finding(self):
-        data = {"mcp_servers": {"local": {"url": "http://localhost:9000"}}}
-        _, findings, _ = self.parse(data)
+        for url in ("http://localhost:9000", "http://127.0.0.1:9", "http://[::1]:8080"):
+            _, findings, _ = self.parse({"mcp_servers": {"local": {"url": url}}})
+            self.assertNotIn("grok.mcp.non_localhost", ids(findings), url)
+
+    def test_mcp_lookalike_host_is_non_localhost(self):
+        for url in (
+            "http://localhost.evil.example/mcp",
+            "https://evil.example/mcp?h=127.0.0.1",
+        ):
+            _, findings, _ = self.parse({"mcp_servers": {"remote": {"url": url}}})
+            self.assertIn("grok.mcp.non_localhost", ids(findings), url)
+
+    def test_mcp_non_string_url_does_not_raise(self):
+        _, findings, _ = self.parse({"mcp_servers": {"x": {"url": 5}}})
         self.assertNotIn("grok.mcp.non_localhost", ids(findings))
 
     def test_mcp_http_transport_finding(self):
@@ -112,6 +126,52 @@ class TestParseConfigToml(unittest.TestCase):
         _, _, extras = self.parse(data)
         self.assertTrue(extras["subagents_configured"])
         self.assertTrue(extras["memory_configured"])
+
+
+class TestConfigFileTolerance(unittest.TestCase):
+    def collect(self, root: Path):
+        grok_home = root / "grok"
+        grok_home.mkdir(exist_ok=True)
+        tp = grok.paths.ToolPaths(
+            claude_home=root / ".claude",
+            claude_projects=root / ".claude" / "projects",
+            codex_home=root / ".codex",
+            codex_sessions=root / ".codex" / "sessions",
+            codex_config=root / ".codex" / "config.toml",
+            codex_auth=root / ".codex" / "auth.json",
+            cursor_projects=root / ".cursor" / "projects",
+            cursor_db=root / "state.vscdb",
+            cursor_user_mcp=root / ".cursor" / "mcp.json",
+            cursor_appdata_mcp=root / "Cursor" / "mcp.json",
+            shared_mcp=root / ".mcp.json",
+            grok_home=grok_home,
+            grok_sessions=grok_home / "sessions",
+            grok_config=grok_home / "config.toml",
+            grok_logs=grok_home / "logs",
+            grok_auth=grok_home / "auth.json",
+            grok_project_config=None,
+        )
+        return grok.collect(tp, repo_roots=[])
+
+    def test_bom_toml_is_parsed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "grok").mkdir()
+            (root / "grok" / "config.toml").write_bytes(
+                b'\xef\xbb\xbf[ui]\npermission_mode = "always-approve"\n'
+            )
+            env = self.collect(root)
+        self.assertIn("grok.permission.always_approve", ids(env["findings"]))
+        self.assertNotIn("grok.config.parse_error", ids(env["findings"]))
+
+    def test_bad_byte_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "grok").mkdir()
+            (root / "grok" / "config.toml").write_bytes(b"\xff")
+            env = self.collect(root)
+        self.assertIn("grok.config.parse_error", ids(env["findings"]))
+        self.assertNotIn(str(root), json.dumps(env["findings"]))
 
 
 if __name__ == "__main__":

@@ -30,6 +30,8 @@ from common import (
     classify_rule,
     compute_scope_hash,
     finish_collector,
+    is_loopback_url,
+    iter_jsonl,
     make_envelope,
     make_finding,
     make_rule,
@@ -40,7 +42,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.4.0"
 
 COLLECTOR = "codex"
 
@@ -55,14 +57,16 @@ def safe_url(value: str) -> str:
         return ""
     try:
         parts = urlsplit(text)
+        if not parts.scheme or not parts.netloc:
+            return text[:160]
+        # hostname and port can raise ValueError (bad IPv6, port above 65535).
+        host = parts.hostname or parts.netloc
+        port = parts.port
+        if port:
+            host = f"{host}:{port}"
+        return urlunsplit((parts.scheme, host, parts.path.rstrip("/"), "", ""))
     except ValueError:
-        return text[:160]
-    if not parts.scheme or not parts.netloc:
-        return text[:160]
-    host = parts.hostname or parts.netloc
-    if parts.port:
-        host = f"{host}:{parts.port}"
-    return urlunsplit((parts.scheme, host, parts.path.rstrip("/"), "", ""))
+        return "invalid-endpoint"
 
 
 def _find_endpoint(value) -> str:
@@ -253,15 +257,9 @@ def extract_balanced_array(text: str, start_pos: int) -> str:
     return ""
 
 
-def _is_localhost(url: str) -> bool:
-    """Check if URL is localhost or loopback."""
-    if not url:
-        return False
-    lower = url.lower()
-    return any(
-        host in lower
-        for host in ["localhost", "127.0.0.1", "::1"]
-    )
+def _is_localhost(url: object) -> bool:
+    """True only when url is a string whose host is exactly loopback."""
+    return is_loopback_url(url)
 
 
 def parse_config_toml(data: dict) -> tuple[list[dict], list[dict]]:
@@ -406,7 +404,7 @@ def parse_config_toml(data: dict) -> tuple[list[dict], list[dict]]:
 
                 # External server finding
                 url = server_config.get("url", "")
-                if url and not _is_localhost(url):
+                if isinstance(url, str) and url.strip() and not _is_localhost(url):
                     findings.append(
                         make_finding(
                             "codex.mcp.external_server",
@@ -571,8 +569,8 @@ def detect_auth_method(auth_json: Path) -> str:
         return "unknown"
     data = None
     try:
-        data = json.loads(auth_json.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(auth_json.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
         return "present"
     if isinstance(data, dict):
         if "tokens" in data or "access_token" in data:
@@ -658,7 +656,10 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None, localapp
                 continue
             session_files += 1
             try:
-                for line_no, obj in compressed.iter_jsonl(jsonl):
+                reader = compressed.iter_jsonl if compressed.is_compressed(jsonl) else iter_jsonl
+                for line_no, obj in reader(jsonl):
+                    if not isinstance(obj, dict):
+                        continue
                     ts = parse_iso(obj.get("timestamp"))
                     payload = obj.get("payload", {})
 

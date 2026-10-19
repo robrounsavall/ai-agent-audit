@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,6 +41,22 @@ class TestCursorCollect(unittest.TestCase):
             count, samples = cursor.search_transcripts(Path(d))
             self.assertEqual(count, 0)
             self.assertEqual(samples, [])
+
+    def test_hash_or_percent_in_db_path_still_opens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "dir#hash" / "100%done" / "state.vscdb"
+            db.parent.mkdir(parents=True)
+            con = sqlite3.connect(db)
+            con.execute("CREATE TABLE ItemTable (key TEXT, value TEXT)")
+            con.execute("INSERT INTO ItemTable VALUES ('k', 'v')")
+            con.commit()
+            con.close()
+            opened = cursor.open_vscdb(db)
+            try:
+                row = opened.execute("SELECT value FROM ItemTable WHERE key='k'").fetchone()
+            finally:
+                opened.close()
+            self.assertEqual(row[0], "v")
 
 
 if __name__ == "__main__":

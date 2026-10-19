@@ -133,6 +133,64 @@ class TestParseMcpJson(unittest.TestCase):
             )
             self.assertNotIn("cursor.mcp.external_server", ids(findings))
 
+    def test_lookalike_host_is_external(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mcp.json"
+            _write_json(
+                path,
+                {
+                    "mcpServers": {
+                        "bad": {
+                            "url": "http://localhost.evil.example/mcp",
+                            "note": "localhost",
+                        },
+                        "query": {"url": "https://evil.example/mcp?h=127.0.0.1"},
+                        "loop": {"url": "http://[::1]:8080"},
+                        "odd": {"url": 5},
+                    }
+                },
+            )
+            _, findings, names = cursor.parse_mcp_json_file(
+                path,
+                scope="user",
+                scope_label="global",
+                source_kind="user_config",
+                settings_source="user mcp.json",
+            )
+        self.assertEqual(names, {"bad", "query", "loop", "odd"})
+        external = [f for f in findings if f["id"] == "cursor.mcp.external_server"]
+        self.assertEqual(len(external), 2)
+
+    def test_jsonc_bom_and_bad_byte(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good = Path(tmp) / "good.json"
+            good.write_bytes(
+                b'\xef\xbb\xbf{\n  // kept\n  "mcpServers": {"local": {"url": "http://127.0.0.1:9"}},\n}\n'
+            )
+            _, findings, names = cursor.parse_mcp_json_file(
+                good,
+                scope="user",
+                scope_label="global",
+                source_kind="user_config",
+                settings_source="user mcp.json",
+            )
+            self.assertEqual(names, {"local"})
+            self.assertNotIn("cursor.config.parse_error", ids(findings))
+            self.assertNotIn("cursor.mcp.external_server", ids(findings))
+
+            bad = Path(tmp) / "bad.json"
+            bad.write_bytes(b"\xff")
+            _, findings, names = cursor.parse_mcp_json_file(
+                bad,
+                scope="user",
+                scope_label="global",
+                source_kind="user_config",
+                settings_source="user mcp.json",
+            )
+            self.assertEqual(names, set())
+            self.assertIn("cursor.config.parse_error", ids(findings))
+            self.assertNotIn(str(bad), json.dumps(findings))
+
 
 class TestVscdbMcp(unittest.TestCase):
     def test_known_enrichment_and_approved(self):

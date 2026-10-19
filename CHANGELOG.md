@@ -102,6 +102,31 @@ each collector's `__version__` and appear in the evidence envelopes.
 - `--dry-run` does not write the pii-scan or secrets-scan raw files.
 - git-posture does not lazy-fetch missing objects from a partial clone, and
   reports those repos as a coverage gap.
+- Claude project settings are read from `<repo>/.claude/settings.json` and
+  `settings.local.json`. A Claude Desktop install with no Claude Code home
+  is still collected.
+- "Is this MCP server local?" compares the URL host. `localhost.evil.example`
+  and a query string of `127.0.0.1` are not treated as localhost.
+- A config file with a BOM or comments is read. A file that cannot be decoded
+  is reported as a parse problem instead of aborting the collector or looking
+  like the file was missing.
+- Copilot's enable setting is read when it is a per-language object, and an
+  organization login is not copied into the summary.
+- A chat transcript line that is not a JSON object, or a message stored as a
+  plain string, is skipped or kept. It does not stop the chat-history export.
+- An OpenTelemetry URL with a port above 65535 is recorded as
+  `invalid-endpoint` instead of stopping the Claude or Codex collector.
+- Cursor's state database still opens when the path contains `#`, `?`, or `%`.
+- A telemetry timestamp has to be a real date. Trailing junk is not stored as
+  the first or last time seen. One oversized or deeply nested export is
+  counted as failed and the other files are still read.
+- An MCP config whose `args` is not a list, or whose URL is a broken IPv6
+  address, is recorded as unknown instead of stopping the MCP inventory.
+- A Grok session with a missing, unreadable, or non-object `summary.json` is
+  counted as sandbox unknown. It is not reported as sandbox off. A readable
+  `sandbox_profile` of `off` is unchanged.
+- The briefing skips one unreadable evidence file and keeps going. A count
+  that is not a number is shown as zero instead of stopping the report.
 
 ## [0.2.0] - 2026-10-15
 
