@@ -7,9 +7,10 @@ Use GitHub private vulnerability reporting on this repository (Security tab >
 leak user data, including parser bugs that cause under-redaction.
 
 Reports that matter most here: any case where a collector writes raw
-transcript content, credentials, or identifying filesystem paths into
-`evidence/` output, or where `-Redact` fails to mask something it claims to
-mask.
+transcript content into `evidence/`, or where `-Redact` was on and a path,
+username, or secret still appears in the evidence or the briefing. A normal
+run without `-Redact` is unredacted on purpose. Paths and secret samples in
+that output are not a bug.
 
 ## What this tool does and does not do
 
@@ -23,8 +24,10 @@ mask.
 - Credential stores (`auth.json` and equivalents) are checked for presence and
   key names only. Token values are never read into output.
 - Raw transcript content only ever lands in the local `raw/` directory on your
-  machine. The `evidence/` layer carries counts, hashes, and redacted samples
-  per [SCHEMA.md](SCHEMA.md).
-- Redaction (`-Redact`) masks the running user's profile path and username and
-  hashes other absolute paths. Known limits are documented in SCHEMA.md;
-  review output before sharing it.
+  machine. The `evidence/` layer carries counts, hashes, and samples. Samples
+  and rule text are masked only when `-Redact` is set. `-Redact` does not
+  clean `raw/`. See [SCHEMA.md](SCHEMA.md).
+- Redaction (`-Redact`) masks secret-shaped text, the running user's profile
+  path and username, and other absolute paths in evidence samples and rules.
+  It also hashes workspace labels. It does not rewrite `raw/`. Known limits
+  are documented in SCHEMA.md. Review output before sharing it.

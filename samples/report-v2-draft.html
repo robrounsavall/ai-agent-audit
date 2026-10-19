@@ -1637,7 +1637,7 @@
     <header class="sh">
       <div class="kicker"><span class="num">/02</span><span class="kicker-label">FINDINGS</span></div>
       <h2 class="h2">19 findings across 10 categories.</h2>
-      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples stay redacted. Secret-scanner hits are grouped by rule and redacted value, with the hit count in the evidence column. Likely test values are labeled and counted as low. Per-hit detail stays in the local CSV.</p>
+      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples are unredacted unless this scan used -Redact. Secret-scanner hits are grouped by rule and sample, with the hit count in the evidence column. Likely test values are labeled and counted as low. Per-hit detail stays in the local CSV.</p>
     </header>
     <div class="sev-bar">
       <div class="hdr">
@@ -1766,7 +1766,7 @@
     <header class="sh" style="margin-top: 48px;">
       <div class="kicker"><span class="num">/03</span><span class="kicker-label">APPENDIX</span></div>
       <h2 class="h2">Evidence index</h2>
-      <p class="sub">Secret-scanner hits collapse to one row per rule and redacted value, with a hit count. Rows labeled likely test value were downgraded to low and kept. Full per-hit detail stays in the local CSV, not in this page.</p>
+      <p class="sub">Secret-scanner hits collapse to one row per rule and sample, with a hit count. Rows labeled likely test value were downgraded to low and kept. Full per-hit detail stays in the local CSV, not in this page.</p>
     </header>
         <div class="appendix-note">
       <strong>Hits are matches, findings are rows. </strong>The largest row is <span class='mono'>Approve clicks are not in Claude Code transcripts. Counts come from imported tool_decision events.</span> with 5 hits. That number can be larger than the finding-row total because one row stands for many matches. Per-hit paths stay in the local CSV.
@@ -2070,7 +2070,7 @@
     <header class="sh" style="margin-top: 36px;">
       <div class="kicker"><span class="num">/09</span><span class="kicker-label">CHAT, SECRETS, GIT</span></div>
       <h2 class="h2">Counts from chat, secrets, and git collectors.</h2>
-      <p class="sub">Transcript text stays in local raw/. This page shows file counts and redacted hit totals.</p>
+      <p class="sub">Transcript text stays in local raw/. This page shows file counts and hit totals. Samples follow the scan's redaction setting.</p>
     </header>
         <div class="chat-grid">
       <div class="side">

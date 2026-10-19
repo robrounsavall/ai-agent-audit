@@ -11,6 +11,9 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Added
 
+- [RUN-AISCAN.md](RUN-AISCAN.md), instructions an AI agent can follow to run
+  one scan without reading transcripts or uploading results. The scan
+  command in that file does not pass `-Redact`.
 - `aiscan summary` prints a safe summary of a finished scan: collector,
   detection status, and each finding's severity, title, category, and
   evidence count. Paths, samples, rules, and raw pointers are left out.
@@ -29,6 +32,9 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Changed
 
+- Docs no longer say the default output has no identifying paths or is
+  redacted. `-Redact` stays off unless you pass it. It masks paths and
+  secrets in evidence and the briefing, and it does not clean `raw/`.
 - `aiscan all` prints the tool version from `git describe --tags` in a
   checkout, and from the `VERSION` file in a release zip. A checkout that is
   not exactly the release tag no longer prints `dev`.

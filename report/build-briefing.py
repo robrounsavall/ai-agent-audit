@@ -4051,7 +4051,7 @@ def build_html(
     <header class="sh">
       <div class="kicker"><span class="num">/03</span><span class="kicker-label">FINDINGS</span></div>
       <h2 class="h2">{sum(counts.values())} findings across {category_count} categories.</h2>
-      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples stay redacted. Secret-scanner hits are grouped by rule and severity, with the hit count in the evidence column. Likely test values are labeled and counted as low. Click a finding title to expand it: the row shows the redacted sample and the files where the scanner recorded the hits.</p>
+      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples are unredacted unless this scan used -Redact. Secret-scanner hits are grouped by rule and severity, with the hit count in the evidence column. Likely test values are labeled and counted as low. Click a finding title to expand it: the row shows the stored sample and the files where the scanner recorded the hits.</p>
     </header>
     <div class="sev-bar">
       <div class="hdr">
@@ -4067,7 +4067,7 @@ def build_html(
     <header class="sh" style="margin-top: 48px;">
       <div class="kicker"><span class="num">/08</span><span class="kicker-label">APPENDIX</span></div>
       <h2 class="h2">Evidence index</h2>
-      <p class="sub">Secret-scanner hits collapse to one row per rule and severity, with a hit count. Rows labeled likely test value were downgraded to low and kept. Expand a finding row above for the redacted sample and the files where the scanner recorded the hits.</p>
+      <p class="sub">Secret-scanner hits collapse to one row per rule and severity, with a hit count. Rows labeled likely test value were downgraded to low and kept. Expand a finding row above for the stored sample and the files where the scanner recorded the hits.</p>
     </header>
     {appendix_note}
     <div class="table-wrap appendix-table" style="max-height: none;">
@@ -4099,7 +4099,7 @@ def build_html(
     <header class="sh" style="margin-top: 36px;">
       <div class="kicker"><span class="num">/05</span><span class="kicker-label">CHAT, SECRETS, GIT</span></div>
       <h2 class="h2">Counts from chat, secrets, and git collectors.</h2>
-      <p class="sub">Transcript text stays in local raw/. This page shows file counts and redacted hit totals.</p>
+      <p class="sub">Transcript text stays in local raw/. This page shows file counts and hit totals. Samples follow the scan's redaction setting.</p>
     </header>
     {render_chat_section(envelopes.get("chat-history"))}
     <div class="two-col">
