@@ -19,6 +19,10 @@ import agent_summary  # noqa: E402
 # a new field ship in both places and the test would still pass.
 ALLOWED_KEYS = {
     "aiscan_version",
+    "run_origin",
+    "launched_by",
+    "started",
+    "reason",
     "collectors",
     "findings",
     "collector_errors",
@@ -160,7 +164,18 @@ class TestAllowList(unittest.TestCase):
 
             self.assertEqual(
                 set(summary),
-                {"aiscan_version", "collectors", "findings", "collector_errors", "coverage_caveats"},
+                {
+                    "aiscan_version",
+                    "run_origin",
+                    "collectors",
+                    "findings",
+                    "collector_errors",
+                    "coverage_caveats",
+                },
+            )
+            self.assertEqual(
+                set(summary["run_origin"]),
+                {"launched_by", "started", "reason"},
             )
             self.assertEqual(summary["aiscan_version"], agent_summary.tool_version())
             self.assertNotIn("/", summary["aiscan_version"])

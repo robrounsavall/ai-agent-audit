@@ -213,7 +213,14 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 # and finding severity / title / category / evidence count only.
 # Titles are masked. No -OutDir uses the newest full scan under
 # %LOCALAPPDATA%\aiscan-results. A newer one-collector folder is skipped.
+# The JSON includes run_origin (who launched the scan, when, and why).
 .\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
+
+# Say who started the scan and why. The line is run-origin.txt in the folder,
+# near the top of the briefing, and in the summary. Secrets and paths in
+# those two fields are masked even without -Redact. -Redact stays off unless
+# you pass it. Leave both off and the line says unknown.
+.\aiscan.ps1 all -OutDir C:\scans\today -Briefing -LaunchedBy "Claude Code" -Reason "comparison baseline"
 
 # Same, with an explicit previous scan folder
 .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Previous C:\scans\2026-10-01 -Briefing

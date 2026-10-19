@@ -113,6 +113,16 @@
     Messages this script prints are scrubbed. Stderr from a collector
     process is not, and can still contain a path.
 
+.PARAMETER LaunchedBy
+    Who or what started this scan, such as a harness name ("Claude Code")
+    or a person's name for a manual run. Overrides the AISCAN_LAUNCHED_BY
+    environment variable. If neither is set, the run origin says unknown.
+    The computer name and the Windows account are not used to fill this in.
+
+.PARAMETER Reason
+    Short note on why this scan was started. Overrides AISCAN_REASON.
+    If neither is set, the run origin says unknown.
+
 .NOTES
     Exit codes: 0 the scan finished, including "platform not detected".
     1 usage error (-Here and -OutDir together). 2 a collector failed,
@@ -169,6 +179,11 @@
     Summary table and errors stay. Paths are relative to that folder, and the
     closing "Evidence kept at" line is omitted. One collector prints that
     summary line instead of the detailed view.
+
+.EXAMPLE
+    .\aiscan.ps1 all -OutDir C:\scans\today -Briefing -LaunchedBy "Claude Code" -Reason "comparison baseline"
+    Records one run-origin line: who launched the scan, the start time, and why.
+    Secrets and paths in those two fields are masked even when -Redact is off.
 #>
 [CmdletBinding()]
 param(
@@ -208,7 +223,11 @@ param(
 
     [string]$HistoryRoot,
 
-    [switch]$AgentMode
+    [switch]$AgentMode,
+
+    [string]$LaunchedBy,
+
+    [string]$Reason
 )
 
 Set-StrictMode -Version Latest
@@ -218,6 +237,18 @@ if ($Here -and $OutDir) {
     Write-Host "-Here and -OutDir are mutually exclusive. Use one output target." -ForegroundColor Red
     exit 1
 }
+
+# Captured here, in the script body. Inside a function, $PSBoundParameters
+# is that function's parameters, not these. A parameter that was not passed
+# must not fall through from an empty string: only a real -LaunchedBy /
+# -Reason wins over the environment variable.
+$script:AiscanLaunchedByGiven = $PSBoundParameters.ContainsKey("LaunchedBy")
+$script:AiscanReasonGiven = $PSBoundParameters.ContainsKey("Reason")
+# Copied into script scope so Write-RunOrigin can read them. A function's
+# own variables would hide the script parameters.
+$script:AiscanLaunchedByValue = $LaunchedBy
+$script:AiscanReasonValue = $Reason
+$script:AiscanScanStarted = ""
 
 # aiscan runs on your own machine, so it shows real rules/paths/samples by default.
 # The collectors read AISCAN_REDACT centrally (sanitize_text). -Redact turns on
@@ -572,7 +603,45 @@ function Format-AiscanText {
     return $out
 }
 
+function Write-RunOrigin {
+    param([string]$Root)
+    # Bookkeeping. A failure warns and the scan continues. The line is
+    # written by run_origin.py (UTF-8, no BOM), the same pattern as other
+    # evidence files. PowerShell 5.1's Set-Content -Encoding UTF8 writes a BOM.
+    if (-not $Root) { return }
+    $originScript = Join-Path $CoreDir "run_origin.py"
+    if (-not (Test-Path -LiteralPath $originScript)) {
+        Write-Host "run_origin.py not found; skipping run origin." -ForegroundColor Yellow
+        return
+    }
+    if (-not $script:AiscanScanStarted) {
+        $script:AiscanScanStarted = [DateTimeOffset]::Now.ToString(
+            "yyyy-MM-ddTHH:mm:sszzz",
+            [System.Globalization.CultureInfo]::InvariantCulture
+        )
+    }
+    # Concatenate instead of interpolating inside quotes, so a value that
+    # contains a double quote stays one argument on Windows PowerShell 5.1.
+    $originArgs = @($originScript, "--root", $Root, "--started", $script:AiscanScanStarted)
+    if ($script:AiscanLaunchedByGiven) {
+        $originArgs += ("--launched-by=" + $script:AiscanLaunchedByValue)
+    }
+    if ($script:AiscanReasonGiven) {
+        $originArgs += ("--reason=" + $script:AiscanReasonValue)
+    }
+    & $Python @originArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Run origin was not written." -ForegroundColor Yellow
+    }
+}
+
 function New-PeekRoot {
+    # Scan start, before collectors. ISO 8601 with a numeric offset.
+    # DateTimeOffset and this format work on Windows PowerShell 5.1.
+    $script:AiscanScanStarted = [DateTimeOffset]::Now.ToString(
+        "yyyy-MM-ddTHH:mm:sszzz",
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
     # -Here/-OutDir make the root persistent (same evidence/raw layout);
     # otherwise fall back to a throwaway temp directory, same as always.
     $root = if ($OutDir) {
@@ -595,6 +664,7 @@ function New-PeekRoot {
     if ($Keep -or $OutDir -or $Here -or $Briefing) {
         Write-OutDirId -Root $root
     }
+    Write-RunOrigin -Root $root
     return $root
 }
 
