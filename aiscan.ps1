@@ -21,6 +21,10 @@
     Defaults to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
+    'summary' reads a finished scan and prints a safe summary (collector,
+    detection, and finding severity, title, category, and evidence count).
+    It does not run collectors. Omit -OutDir to use the newest folder under
+    %LOCALAPPDATA%\aiscan-results.
     'all' runs the 11 offline collectors and prints a combined summary.
     'cloud-agents' and 'telemetry' are not included in 'all'. cloud-agents
     reads CURSOR_API_KEY and never prints that key. telemetry reads export
@@ -147,6 +151,11 @@
     Offline collectors, then a changes envelope versus the previous scan, then the HTML briefing.
 
 .EXAMPLE
+    .\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
+    Safe summary of a scan that already finished. No -OutDir selects the newest
+    folder under %LOCALAPPDATA%\aiscan-results.
+
+.EXAMPLE
     .\aiscan.ps1 all -OutDir C:\scans\today -AgentMode
     Summary table and errors stay. Paths are relative to that folder, and the
     closing "Evidence kept at" line is omitted.
@@ -156,7 +165,7 @@ param(
     [Parameter(Mandatory = $false, Position = 0)]
     [ValidateSet("claude", "cowork", "cursor", "codex", "copilot", "chat-history",
         "git-posture", "secrets-scan", "pii-scan", "grok", "grok-bot",
-        "cloud-agents", "telemetry", "discover", "all")]
+        "cloud-agents", "telemetry", "discover", "all", "summary")]
     [string]$Collector = "all",
 
     [switch]$Json,
@@ -431,6 +440,21 @@ function Invoke-OneCollector {
     return $LASTEXITCODE
 }
 
+function Write-OutDirId {
+    param([string]$Root)
+    # Leaf name only, and only after the folder exists. A later shell rebuilds
+    # $env:LOCALAPPDATA\aiscan-results\<id>. The full path is not printed.
+    # Split-Path -Leaf of a drive root is the drive itself, which is not an id.
+    if (-not $Root) { return }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return }
+    $trimmed = $Root.TrimEnd('\', '/')
+    if (-not $trimmed) { return }
+    $leaf = Split-Path -Leaf $trimmed
+    if (-not $leaf) { return }
+    if ($leaf -match '^[A-Za-z]:\\?$') { return }
+    Write-Host "OUTDIR_ID=$leaf"
+}
+
 # Banner version. core/tool_version.py is the source of truth. The fallback
 # covers a machine where that helper cannot run: VERSION file, then "dev".
 function Get-AiscanVersion {
@@ -547,6 +571,11 @@ function New-PeekRoot {
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $root "evidence") | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $root "raw") | Out-Null
+    # Temp scans are deleted at the end. Print the id only when this folder
+    # will still be there for a later `aiscan summary`.
+    if ($Keep -or $OutDir -or $Here -or $Briefing) {
+        Write-OutDirId -Root $root
+    }
     return $root
 }
 
@@ -757,18 +786,99 @@ function Show-Peek {
     Write-Host ""
 }
 
+# Writes evidence\agent-summary.json. Failures warn and fall through; the
+# scan result is already on disk. Stdout is swallowed so the console table
+# stays the collector summary. Each row is the same exit,has,parsed string
+# the scan exit code uses, prefixed with the collector name. OUTDIR_ID comes
+# from Write-OutDirId.
+function Write-AgentSummary {
+    param(
+        [string]$Root,
+        [string[]]$Names,
+        [string[]]$Rows
+    )
+    $summaryScript = Join-Path $CoreDir "agent_summary.py"
+    if (-not (Test-Path -LiteralPath $summaryScript)) {
+        Write-Host "agent_summary.py not found; skipping agent summary." -ForegroundColor Yellow
+        return
+    }
+    $sumArgs = @($summaryScript, "--evidence-root", $Root, "--write")
+    $nameList = @($Names)
+    $rowList = @($Rows)
+    for ($i = 0; $i -lt $nameList.Count; $i++) {
+        if (-not $nameList[$i] -or -not $rowList[$i]) { continue }
+        $sumArgs += @("--collector-status", ("{0},{1}" -f $nameList[$i], $rowList[$i]))
+    }
+    & $Python @sumArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Agent summary was not written." -ForegroundColor Yellow
+    }
+}
+
 # --- discover: read-only, no temp dir ---
 if ($Collector -eq "discover") {
     & $Python (Join-Path $CoreDir "discover.py")
     exit $LASTEXITCODE
 }
 
+# --- summary: safe fields only, no collectors ---
+if ($Collector -eq "summary") {
+    $summaryScript = Join-Path $CoreDir "agent_summary.py"
+    if (-not (Test-Path -LiteralPath $summaryScript)) {
+        Write-Host "agent_summary.py not found." -ForegroundColor Red
+        exit 1
+    }
+    # Python prints the JSON only. OUTDIR_ID is printed here, after the folder
+    # is known to exist, so a missing path does not get an id.
+    $sumArgs = @($summaryScript, "--write")
+    if ($OutDir) {
+        if (-not (Test-Path -LiteralPath $OutDir -PathType Container)) {
+            Write-Host "Output folder not found." -ForegroundColor Red
+            exit 1
+        }
+        $sumArgs += @("--evidence-root", $OutDir)
+        Write-OutDirId -Root $OutDir
+    }
+    elseif ($Here) {
+        $herePath = (Get-Location).ProviderPath
+        if (-not (Test-Path -LiteralPath $herePath -PathType Container)) {
+            Write-Host "Output folder not found." -ForegroundColor Red
+            exit 1
+        }
+        $sumArgs += @("--evidence-root", $herePath)
+        Write-OutDirId -Root $herePath
+    }
+    else {
+        if (-not $env:LOCALAPPDATA) {
+            Write-Host "LOCALAPPDATA is not set. Pass -OutDir to choose the scan folder." -ForegroundColor Red
+            exit 1
+        }
+        $resultsRoot = Join-Path $env:LOCALAPPDATA "aiscan-results"
+        $picked = & $Python @($summaryScript, "--results-root", $resultsRoot, "--print-id")
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $outLeaf = "$picked".Trim()
+        if (-not $outLeaf) {
+            Write-Host "No scan folders found." -ForegroundColor Red
+            exit 1
+        }
+        $chosen = Join-Path $resultsRoot $outLeaf
+        if (-not (Test-Path -LiteralPath $chosen -PathType Container)) {
+            Write-Host "Output folder not found." -ForegroundColor Red
+            exit 1
+        }
+        $sumArgs += @("--evidence-root", $chosen)
+        Write-OutDirId -Root $chosen
+    }
+    & $Python @sumArgs
+    exit $LASTEXITCODE
+}
+
 # Banner version, also stamped on every evidence envelope via AISCAN_VERSION.
-# After discover returns, so a path listing does not spawn git.
+# After discover and summary return, so a path listing does not spawn git.
 $AiscanVersion = Get-AiscanVersion
 $env:AISCAN_VERSION = $AiscanVersion
 
-# Resolve real history paths once (skipped for the 'discover' command above).
+# Resolve real history paths once (skipped for 'discover' and 'summary').
 # Feeds the shared path overrides into every collector.
 Resolve-Discovery
 
@@ -778,6 +888,7 @@ if ($Collector -eq "all") {
     Write-Host "aiscan $AiscanVersion" -ForegroundColor DarkGray
     $rows = @()
     $statusRows = @()
+    $summaryNames = @()
     foreach ($name in $StdlibOrder) {
         Write-Host "Running $name..." -ForegroundColor Cyan
         $code = Invoke-OneCollector -Name $name -EvidenceRoot $root
@@ -815,10 +926,12 @@ if ($Collector -eq "all") {
             }
         }
         $statusRows += (New-CollectorStatusRow -ExitCode $code -HasEvidence $hasEvidence -Parsed $parsed)
+        $summaryNames += $name
         $rows += [PSCustomObject]@{ Collector = $name; Detected = $detected; Findings = $findings }
     }
     Write-Host ""
     $rows | Format-Table -AutoSize
+    Write-AgentSummary -Root $root -Names $summaryNames -Rows $statusRows
     $script:AiscanBriefingFailed = $false
     if ($Briefing) {
         Invoke-ScanDiff -Root $root
@@ -843,6 +956,8 @@ if (-not $script:StaleEvidenceRemained) {
         if ($null -ne $j) { $parsed = $true }
     }
 }
+$statusRow = New-CollectorStatusRow -ExitCode $code -HasEvidence $hasEvidence -Parsed $parsed
+Write-AgentSummary -Root $root -Names @($Collector) -Rows @($statusRow)
 
 # Exit 2 with a readable envelope means "platform not detected". Exit 2
 # without one is a real failure (argparse errors also exit 2). No file at
@@ -888,4 +1003,4 @@ if ($Briefing -and $parsed -and ($code -eq 0 -or $code -eq 2)) {
     Invoke-AiscanBriefing -Root $root
 }
 Remove-PeekRoot -Root $root
-exit (Get-AiscanScanExitCode -Rows @((New-CollectorStatusRow -ExitCode $code -HasEvidence $hasEvidence -Parsed $parsed)) -BriefingFailed $script:AiscanBriefingFailed)
+exit (Get-AiscanScanExitCode -Rows @($statusRow) -BriefingFailed $script:AiscanBriefingFailed)

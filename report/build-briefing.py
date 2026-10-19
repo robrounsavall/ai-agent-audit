@@ -46,6 +46,7 @@ sys.path.insert(0, str(TEMPLATES_DIR))
 from access_map import build_access_map  # noqa: E402
 from briefing_template import REPORT_V2_CSS, REPORT_V2_JS  # noqa: E402
 from common import (  # noqa: E402
+    DERIVED_EVIDENCE_STEMS,
     SECRET_HIT_TITLE_RE as _SECRET_TITLE_RE,
     _hash_path,
     display_path,
@@ -93,7 +94,10 @@ SUPPORTED_MAJOR = 1
 
 # changes.json is a derived envelope, not a collector. The briefing reads it
 # with load_changes_envelope and must not treat it as another tool.
-_NON_COLLECTOR_ENVELOPES = {"changes"}
+# agent-summary.json and run-status.json are the safe agent rollup. They are
+# not versioned collector envelopes and must not fail the schema check.
+# The stem list lives in core/common.py so the summary and scan diff share it.
+_NON_COLLECTOR_ENVELOPES = set(DERIVED_EVIDENCE_STEMS)
 
 PLATFORM_COLLECTORS = ("claude", "cowork", "cursor", "codex", "copilot", "grok", "grok-bot")
 

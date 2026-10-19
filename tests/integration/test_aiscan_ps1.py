@@ -151,6 +151,7 @@ function python {
     }
     if ($joined -like '*tool_version.py*') { 'dev'; $global:LASTEXITCODE = 0; return }
     if ($joined -like '*run_status.py*') { '0'; $global:LASTEXITCODE = 0; return }
+    if ($joined -like '*agent_summary.py*') { '{}'; $global:LASTEXITCODE = 0; return }
     $root = $null
     for ($i = 0; $i -lt $args.Count; $i++) {
         if ($args[$i] -eq '--evidence-root') { $root = $args[$i + 1] }

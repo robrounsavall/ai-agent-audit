@@ -202,6 +202,7 @@ before sharing it.
 | `cloud-agents` | Official Cloud Agents API, `GET https://api.cursor.com` only, with a user-supplied `CURSOR_API_KEY` | Opt-in. Not part of `aiscan all`. Does not read the Cursor IDE session token or call `cursor.com/api/dashboard`. Does not call `GET /v1/repositories` or the enterprise Admin API. |
 | `telemetry` | Local files only: OTLP JSON / JSON-lines (`--otel-file`) and Splunk JSON or CSV exports (`--splunk-export`) | Opt-in `aiscan telemetry`. Not part of `aiscan all`. Counts tool decisions and usage. Does not store prompts, commands, or secret values. `cost_cents` is copied from a Cursor dashboard usage export and is never estimated from tokens. |
 | `changes` | Derived. Not a collector. `python core/scan_diff.py` compares two evidence roots and writes `evidence/changes.json` | The briefing loader skips this file when it walks collector envelopes and passes it only to the changes section. |
+| `agent-summary` | Derived. Not a collector. `aiscan summary` (and every scan) writes `evidence/agent-summary.json` | Safe fields only: collector, detection, and finding severity, title, category, and evidence count. The briefing loader skips this file and `run-status.json`. |
 
 ## Cloud agent inventory (`cloud-agents`)
 
@@ -273,6 +274,27 @@ Prompt text, tool parameters, and secret-shaped attributes are dropped before an
 `summary.comparison` is `first_scan` when no earlier scan was found, and `diff` otherwise. Count fields include `findings_added`, `findings_resolved`, `new_high_or_critical`, `drift_warnings`, `mcp_servers_added`, `allow_rules_added`, and `counters_moved`. Per-collector before/after counters live under `changes.collectors`. The file does not contain filesystem paths or transcript text.
 
 A collector that previously had data and now reports none is a drift warning, not a clean result. Long-term trends (token lines over months, and so on) belong in Splunk, not in a pile of HTML files. See [docs/scan-history.md](docs/scan-history.md) and [docs/report-v2.md](docs/report-v2.md).
+
+## Agent summary (`agent-summary`)
+
+`evidence/agent-summary.json` is not a collector envelope. `aiscan summary` prints the same JSON, and every scan writes the file. It is the only scan output an agent should read.
+
+| List | Fields |
+|---|---|
+| `collectors` | `collector`, `platform_detected`, `detection_status` |
+| `findings` | `collector`, `severity`, `title`, `category`, `evidence_count` |
+| `collector_errors` | `collector`, `platform_detected`, `detection_status` |
+| `coverage_caveats` | same fields as `findings` |
+
+Findings are sorted by severity (`critical`, `high`, `medium`, `low`, then `unknown`), then real findings before any finding the collector tagged `test_data` (that tag is not copied), then by `evidence_count` descending. Remaining ties break on collector, category, then title. `evidence_count` is the count that collector recorded. Collectors do not share one unit. A severity outside that list is stored as `unknown` and still listed.
+
+The object also has `aiscan_version`, the same string the scan printed (`git describe` in a checkout, the `VERSION` file in a release zip).
+
+`detection_status` is one of `detected`, `not detected`, `parse error`, `not collected`, or `error (exit N)`. A known exit other than 0 is a collector error even when an envelope was written, listed as `error (exit N)`. Exit 0 with no evidence file is `error (exit 0)`, the same rule the scan uses when a collector writes nothing. Exit 2 with a parsed envelope is not an error: collectors use that for "not detected", and the status then follows `platform_detected`. Exit 2 with no file is `error (exit 2)`. An unreadable envelope is `parse error`. When no exit code was stored, status follows `platform_detected`.
+
+Coverage caveats are findings that describe a gap (missing scanner, nothing to scan, a `coverage` tag or id). They appear only in `coverage_caveats`, not in `findings`. A secrets-scan envelope whose `summary.scanner` is `none`, and that has no coverage finding of its own, adds the caveat "No secrets scanner found".
+
+Titles and categories are always masked for paths and secrets, even when the scan itself was unredacted. Paths, samples, rules, and raw pointers are not copied. `evidence/run-status.json` stores exit codes for a later summary. Running `summary` again keeps those exit codes. It is not a collector envelope. The briefing loader skips both files.
 
 ## Versioning
 
