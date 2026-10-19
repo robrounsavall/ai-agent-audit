@@ -541,6 +541,19 @@ def write_raw_outputs(raw_dir: Path, hits: list[dict], rule_counts: Counter, fil
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _same_location(left: Path, right: Path) -> bool:
+    """True when both paths name the same file.
+
+    ``Path.resolve()`` on Windows expands an 8.3 short name such as
+    ``RUNNER~1`` to the long name. A repo root passed in one spelling and
+    scanned in the other is still that repo root.
+    """
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return os.path.normcase(str(left)) == os.path.normcase(str(right))
+
+
 def _same_or_within(path: Path, root: Path) -> bool:
     if path == root:
         return True
@@ -685,7 +698,13 @@ def collect(
     # copies. Repo roots are not walked for .zst. With no stdlib zstd backend
     # the files are counted and not opened.
     staging = Path(tempfile.mkdtemp(prefix="aiscan-secrets-zst-"))
-    zst_sources = [target for target in targets if target not in existing_repo_roots]
+    # Repo roots are not walked for .zst. Compare resolved paths so a Windows
+    # short name and its long name are not treated as two different folders.
+    zst_sources = [
+        target
+        for target in targets
+        if not any(_same_location(target, root) for root in existing_repo_roots)
+    ]
     staged: list[Path] = []
     staged_map: dict[str, str] = {}
     zst_unreadable = 0

@@ -76,6 +76,25 @@ class StagingTests(unittest.TestCase):
                 env, _ok, _hits = ss.collect(root / "raw", [repo], None)
             self.assertEqual(env["summary"]["compressed_files_unreadable"], 0)
 
+    def test_resolved_alias_of_a_repo_root_is_not_walked_for_zst(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real = root / "real-repo"
+            real.mkdir()
+            (real / "data.jsonl.zst").write_bytes(b"x")
+            link = root / "link-repo"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            with (
+                mock.patch.object(compressed, "zstd_backend", return_value=None),
+                mock.patch.object(ss, "find_scanner", return_value=("gitleaks", "fake")),
+                mock.patch.object(ss, "run_gitleaks", return_value=([], None)),
+            ):
+                env, _ok, _hits = ss.collect(root / "raw", [link], None)
+            self.assertEqual(env["summary"]["compressed_files_unreadable"], 0)
+
     @unittest.skipUnless(HAS_ZSTD, "compression.zstd is not available")
     def test_staged_hit_maps_back_and_temp_is_removed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -92,7 +111,10 @@ class StagingTests(unittest.TestCase):
             ):
                 env, ok, hits = ss.collect(root / "raw", [], None, native_roots=[source])
             self.assertTrue(ok)
-            self.assertEqual([hit["file"] for hit in hits], [str(original)])
+            self.assertEqual(
+                [Path(hit["file"]).resolve() for hit in hits],
+                [original.resolve()],
+            )
             self.assertEqual(env["summary"]["compressed_files_staged"], 1)
             self.assertFalse(stage.exists())
 
@@ -129,7 +151,10 @@ class StagingTests(unittest.TestCase):
             ):
                 _env, ok, hits = ss.collect(root / "raw", [root], None, native_roots=[source])
             self.assertTrue(ok)
-            self.assertEqual([hit["file"] for hit in hits], [str(original)])
+            self.assertEqual(
+                [Path(hit["file"]).resolve() for hit in hits],
+                [original.resolve()],
+            )
             self.assertFalse(stage.exists())
 
 

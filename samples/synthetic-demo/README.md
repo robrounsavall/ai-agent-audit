@@ -10,3 +10,4 @@ The report v2 draft (summary, tabs, changes versus samples\synthetic-previous, p
 
 Contains no real paths, identities, or credentials.
 cloud-agents.json is synthetic opt-in evidence for the Cloud Agents API inventory.
+accounts.json uses example.com addresses so the account table renders.

@@ -79,8 +79,12 @@ teams have no inventory of any of it. aiscan answers the first question:
   `https://api.cursor.com` with a key you supply, and it is not part of `all`.
   `telemetry` is also opt-in and not part of `all`. It reads export files you
   already saved. It does not call Splunk.
-- **Credential stores are detected, never opened for values.** `auth.json`
-  and equivalents contribute presence and auth-method only.
+- **Secret values stay out of the report.** The `accounts` collector reads
+  plain identifiers (email, username, organization, plan) and auth method.
+  Token, API key, password, and cookie values are never written. Credential
+  stores are not decrypted. Claude `.credentials.json` is presence only.
+  Cursor's state database is copied, then only the cached email and
+  membership keys are read.
 - **Transcripts stay local.** Raw chat content only ever lands in the local
   `raw/` directory. The `evidence/` layer carries counts, sizes, hashes, and
   samples. Those samples and rule strings are masked only when you pass
@@ -100,6 +104,7 @@ teams have no inventory of any of it. aiscan answers the first question:
 | `copilot` | VS Code / JetBrains Copilot settings | enable state, exclusions, telemetry, public-code suggestion policy |
 | `grok` | `~/.grok/config.toml` + session metadata | permission mode (always-approve/yolo), MCP servers |
 | `grok-bot` | `%APPDATA%\Grok Bot` presence, sizes, and mtimes | desktop app data, secrets-store and lockfile presence, newest activity. Local execution is reported unknown, not absent |
+| `accounts` | Plain identity fields in local config for Claude Code, Codex, Cursor, Copilot, Grok CLI, Grok Bot, git, `gh`, and MCP auth method | signed-in yes/no/unknown, email or username, org, plan, auth method, home-relative source, last sign-in when a timestamp is stored. No token or API key values |
 | `chat-history` | all transcript sources | volume, retention, secret-hit indicators (content stays in local `raw/`) |
 | `git-posture` | repos under `-RepoRoots`, or by default whichever of `~/repos`, `~/code`, `~/src`, `~/projects`, `~/source`, `~/dev`, `~/git`, `~/work`, `~/workspace`, `~/cursor-projects`, `~/Documents/GitHub`, `~/Documents/repos` exist | `.env` in history, hooks, ignore posture, large blobs |
 | `secrets-scan` | chat corpus + repo roots | Betterleaks, gitleaks, or trufflehog findings. Secret samples in evidence are shortened. Full file paths stay in `raw/`. Other paths in evidence are masked only with `-Redact`. Needs one of them installed, see [Prerequisites](#prerequisites) |
@@ -216,7 +221,7 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 # Only scan these repo roots (git-posture, secrets-scan, project MCP configs)
 .\aiscan.ps1 git-posture -RepoRoots C:\Users\me\source -Keep
 
-# Mask usernames/paths/secrets for output you intend to share
+# Mask usernames, paths, secrets, and account emails for output you intend to share
 .\aiscan.ps1 all -Redact
 
 # Paths relative to the scan folder; no "Evidence kept at" line
@@ -295,12 +300,13 @@ python tools\mcp-visibility\mcp_visibility.py --format summary
 Every collector writes one JSON envelope to `evidence/<name>.json`:
 `findings` (severity-ranked), `rules` (normalized allow/deny/ask inventory),
 `summary` (numeric / controlled vocabulary only), `raw_pointers` (local-only
-file references, never share-safe). Without `-Redact`, samples, rules, and
-workspace labels can contain real names and paths. With `-Redact`, workspace
-labels are hashed (`scope_label_redacted`) and path and secret text in
-samples and rules is masked. Transcript text stays in the local `raw/`
-directory either way. [SCHEMA.md](SCHEMA.md) is the contract; collectors
-that violate it are bugs.
+file references, never share-safe). `accounts` also writes an `accounts`
+array of identifiers. Without `-Redact`, samples, rules, workspace labels,
+and those identifiers can contain real names and paths. With `-Redact`,
+workspace labels are hashed (`scope_label_redacted`), path and secret text
+in samples and rules is masked, and emails in that array are replaced with
+`<email>`. Transcript text stays in the local `raw/` directory either way.
+[SCHEMA.md](SCHEMA.md) is the contract; collectors that violate it are bugs.
 
 ## Repo layout (components)
 
@@ -316,6 +322,7 @@ components/
   copilot/
   grok/               # Grok Build (~/.grok), not the Grok Bot desktop app
   grok-bot/           # Grok Bot desktop presence (AppData names, contents unread)
+  accounts/           # signed-in identity per tool (no token values)
   chat-history/
   git-posture/
   secrets-scan/

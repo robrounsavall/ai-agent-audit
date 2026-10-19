@@ -1,0 +1,6 @@
+{
+  "email": "copilot-user@example.com",
+  "organizationLogin": "example-org",
+  "sku": "business",
+  "access_token": "SENTINEL_COPILOT_JSON_TOKEN"
+}
