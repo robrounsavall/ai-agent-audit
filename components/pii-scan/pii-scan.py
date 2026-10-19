@@ -14,6 +14,8 @@ was exactly the validatable, structured set below — all detectable in stdlib.
 
 Entities:
     CREDIT_CARD     IIN prefix + Luhn checksum          critical
+                    a built-in list of common test
+                    card numbers is split out           low
     US_SSN          ddd-dd-dddd + issuance rules        critical
     IBAN_CODE       pattern + mod-97 checksum           critical
     EMAIL_ADDRESS   pattern                             medium
@@ -47,6 +49,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Callable, Iterable
 
+import compressed
 import paths
 from common import (
     add_base_args,
@@ -57,7 +60,9 @@ from common import (
     redact_sample,
     redaction_disabled,
     resolve_raw_root,
+    sanitize_text,
     secret_types_in,
+    sha256_short,
     validate_evidence_root,
 )
 
@@ -75,6 +80,7 @@ TEXT_EXTENSIONS = {
 
 SEVERITY_BY_ENTITY = {
     "CREDIT_CARD": "critical",
+    "TEST_CARD": "low",
     "US_SSN": "critical",
     "IBAN_CODE": "critical",
     "EMAIL_ADDRESS": "medium",
@@ -108,13 +114,52 @@ _CC_PREFIX_RE = re.compile(
 )
 
 
+def _card_digits(raw: str) -> str:
+    return re.sub(r"[ -]", "", raw)
+
+
 def credit_card_ok(raw: str) -> bool:
-    digits = re.sub(r"[ -]", "", raw)
+    digits = _card_digits(raw)
     if not 13 <= len(digits) <= 19:
         return False
     if len(set(digits)) == 1:
         return False
     return bool(_CC_PREFIX_RE.match(digits)) and luhn_ok(digits)
+
+
+# A built-in list of common test card numbers (Visa, Mastercard, Amex,
+# Discover, JCB). They pass the IIN + Luhn checks above, so they are counted
+# apart from other cards. This is the short set that shows up in docs and
+# fixtures, including Stripe's basic per-brand success cards. It is not every
+# published test number; regional and decline cards still rate critical.
+# Diners Club and UnionPay test numbers are omitted because this scanner's
+# IIN list does not match them.
+TEST_PANS = frozenset({
+    "4111111111111111",
+    "4012888888881881",
+    "4222222222222",
+    "4242424242424242",
+    "4000056655665556",
+    "5555555555554444",
+    "2223003122003222",
+    "5200828282828210",
+    "5105105105105100",
+    "5500000000000004",
+    "378282246310005",
+    "371449635398431",
+    "340000000000009",
+    "6011111111111117",
+    "6011000990139424",
+    "6011000000000004",
+    "6011981111111113",
+    "6555900000604105",
+    "3566002020360505",
+    "3530111333300000",
+})
+
+
+def is_test_pan(raw: str) -> bool:
+    return _card_digits(raw) in TEST_PANS
 
 
 def ssn_ok(raw: str) -> bool:
@@ -193,14 +238,26 @@ DETECTORS: dict[str, tuple[re.Pattern, Callable[[str], bool] | None, float]] = {
 DEFAULT_ENTITIES = list(DETECTORS)
 
 
+def _text_suffix(path: Path) -> str:
+    """Extension that decides text-ness. ``a.jsonl.zst`` is judged as ``.jsonl``."""
+    if compressed.is_compressed(path):
+        return compressed.plain_twin(path).suffix.lower()
+    return path.suffix.lower()
+
+
 def iter_text_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        if path.suffix.lower() not in TEXT_EXTENSIONS:
+        if _text_suffix(path) not in TEXT_EXTENSIONS:
+            continue
+        is_zst = compressed.is_compressed(path)
+        # A plain file and its .jsonl.zst twin: scan the plain one only.
+        if is_zst and compressed.plain_twin(path).is_file():
             continue
         try:
-            if path.stat().st_size > MAX_FILE_BYTES:
+            # Compressed size is checked after decompression.
+            if not is_zst and path.stat().st_size > MAX_FILE_BYTES:
                 continue
         except OSError:
             continue
@@ -209,8 +266,12 @@ def iter_text_files(root: Path) -> Iterable[Path]:
 
 def read_text(path: Path) -> str | None:
     try:
+        if compressed.is_compressed(path):
+            return compressed.read_text(path, errors="replace", max_bytes=MAX_FILE_BYTES)
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
+        if compressed.is_compressed(path):
+            raise
         return None
 
 
@@ -235,10 +296,13 @@ def scan_file(path: Path, entities: list[str]) -> tuple[list[dict], int]:
                     if entity == "IP_ADDRESS" and private_ip(value):
                         private_ips += 1
                     continue
+                recorded = entity
+                if entity == "CREDIT_CARD" and is_test_pan(value):
+                    recorded = "TEST_CARD"
                 hits.append(
                     {
                         "file": str(path),
-                        "entity": entity,
+                        "entity": recorded,
                         "score": score,
                         "line": line_no,
                         "sample": value,
@@ -315,11 +379,33 @@ def write_raw_outputs(
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _evidence_target(path: Path) -> str:
+    """Path label for the share-safe envelope.
+
+    Unredacted local runs keep the path so the operator can see what was
+    scanned. -Redact stores a hash only; summary is take-home data.
+    """
+    text = str(path)
+    if redaction_disabled():
+        return text
+    norm = text.rstrip("\\/").replace("\\", "/").lower()
+    return f"<path#{sha256_short(norm)}>"
+
+
+def _target_summary(targets: list[Path]) -> dict:
+    return {
+        "target_count": len(targets),
+        "targets": [_evidence_target(t) for t in targets],
+    }
+
+
 def collect(
     targets: list[Path],
     entities: list[str],
     raw_dir: Path,
     max_samples_per_file: int = 25,
+    *,
+    write_raw: bool = True,
 ) -> tuple[dict, list[dict]]:
     existing_targets = [t for t in targets if t.exists()]
     missing_targets = [t for t in targets if not t.exists()]
@@ -335,7 +421,7 @@ def collect(
                 "pii-scan.target_missing",
                 "low",
                 "PII Exposure",
-                f"Target path not found: {t}",
+                sanitize_text(f"Target path not found: {_evidence_target(t)}"),
                 tags=["env_read"],
             )
         )
@@ -343,13 +429,16 @@ def collect(
     if not existing_targets:
         envelope["findings"] = findings
         envelope["summary"] = {
-            "targets": [str(t) for t in targets],
+            **_target_summary(targets),
             "files_scanned": 0,
             "hits": 0,
+            "compressed_files_unreadable": 0,
         }
         return envelope, []
 
     all_hits: list[dict] = []
+    compressed_unreadable = 0
+    zstd_ok = compressed.zstd_backend() is not None
     files_scanned = 0
     total_hits = 0
     samples_truncated = 0
@@ -368,13 +457,23 @@ def collect(
             file=sys.stderr, flush=True,
         )
         for file_path in target_files:
+            if compressed.is_compressed(file_path) and not zstd_ok:
+                compressed_unreadable += 1
+                continue
             files_scanned += 1
             if files_scanned % 200 == 0:
                 print(
                     f"pii-scan: {files_scanned} files scanned, {total_hits} hits so far",
                     file=sys.stderr, flush=True,
                 )
-            hits, private_ips = scan_file(file_path, entities)
+            try:
+                hits, private_ips = scan_file(file_path, entities)
+            except (OSError, compressed.TooLarge, compressed.DecompressTimeout, compressed.ZstdUnavailable):
+                if compressed.is_compressed(file_path):
+                    compressed_unreadable += 1
+                    files_scanned -= 1
+                    continue
+                raise
             private_ip_total += private_ips
             if not hits:
                 continue
@@ -398,11 +497,38 @@ def collect(
         file=sys.stderr, flush=True,
     )
 
-    write_raw_outputs(raw_dir, all_hits, entity_counts, file_counts, samples_truncated)
+    if compressed_unreadable:
+        if zstd_ok:
+            title = (
+                f"{compressed_unreadable} compressed file(s) (.jsonl.zst) "
+                "could not be read for PII"
+            )
+        else:
+            title = (
+                f"{compressed_unreadable} compressed file(s) (.jsonl.zst) "
+                "were not scanned for PII"
+            )
+        findings.append(make_finding(
+            "pii-scan.compressed_files_unreadable",
+            "low",
+            "PII Exposure",
+            title,
+            evidence_count=compressed_unreadable,
+            tags=["coverage_gap"],
+        ))
+
+    if write_raw:
+        write_raw_outputs(raw_dir, all_hits, entity_counts, file_counts, samples_truncated)
 
     for entity, count in entity_counts.most_common():
         sample_hit = next((h for h in all_hits if h["entity"] == entity), None)
         sample = redact_sample(sample_hit["sample"], entity) if sample_hit else ""
+        if entity == "TEST_CARD":
+            tags = ["pii", "test_data"]
+        elif entity.startswith("SECRET_"):
+            tags = ["pii", "secret"]
+        else:
+            tags = ["pii"]
         findings.append(
             make_finding(
                 f"pii_scan.{entity.lower()}",
@@ -412,15 +538,16 @@ def collect(
                 evidence_count=count,
                 sample_redacted=sample,
                 secret_redacted=entity.startswith("SECRET_"),
-                tags=["pii"] if not entity.startswith("SECRET_") else ["pii", "secret"],
+                tags=tags,
                 raw_evidence_ref="raw/pii-scan/findings.csv",
             )
         )
 
     envelope["findings"] = findings
     envelope["summary"] = {
-        "targets": [str(t) for t in targets],
+        **_target_summary(targets),
         "files_scanned": files_scanned,
+        "compressed_files_unreadable": compressed_unreadable,
         "files_with_hits": len(file_counts),
         "hits": total_hits,
         "sample_rows_stored": len(all_hits),
@@ -495,6 +622,7 @@ def main() -> None:
     envelope, hits = collect(
         targets, entities, raw_dir,
         max_samples_per_file=max(1, args.max_samples_per_file),
+        write_raw=not args.dry_run,
     )
 
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)

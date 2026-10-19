@@ -19,6 +19,26 @@ each collector's `__version__` and appear in the evidence envelopes.
 - Windows PowerShell 5.1 was reading evidence with the ANSI code page and
   discovery JSON with the OEM code page, which mangled non-ASCII text. Evidence
   is read as UTF-8, and discovery JSON escapes non-ASCII paths.
+- On Python 3.14 and newer, compressed Codex session logs (`.jsonl.zst`)
+  are decompressed with the standard-library `compression.zstd` module and
+  scanned (Codex, chat history, PII, and secrets). On older Python they are
+  counted, not opened, and reported as a low finding, "N compressed Codex
+  session logs not scanned". A compressed log that is corrupt, too large,
+  or too slow to unpack is a coverage note, not a failed run. The Codex
+  briefing row uses session activity for last used, and shows the Desktop
+  app's last opened date on its own row.
+- trufflehog is started with `--no-verification` and `--no-update`, so a
+  secrets scan does not check secrets online or phone home for updates.
+- A gitleaks or trufflehog run that fails is a finding. It is no longer
+  reported as zero hits.
+- PII scan counts a built-in list of common test card numbers as a low
+  finding. The briefing calls them "Test card numbers". Other valid card
+  numbers stay critical.
+- With `-Redact`, pii-scan does not write scan-target paths into the
+  evidence file.
+- `--dry-run` does not write the pii-scan or secrets-scan raw files.
+- git-posture does not lazy-fetch missing objects from a partial clone, and
+  reports those repos as a coverage gap.
 
 ## [0.2.0] - 2026-10-15
 
