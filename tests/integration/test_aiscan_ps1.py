@@ -188,5 +188,81 @@ function python {
         self.assertNotIn("parse error", out)
 
 
+def _leak_writer() -> str:
+    # One collector envelope with a hostname, a title, and a sample that must
+    # not show up in the agent-mode summary line.
+    return r"""
+function python {
+    if ($args -contains '-c') { '3.12.3'; return }
+    $joined = $args -join ' '
+    if ($joined -like '*discover.py*') {
+        '{"cli_args":[],"native_dirs":{}}'
+        return
+    }
+    if ($joined -like '*tool_version.py*') { 'dev'; $global:LASTEXITCODE = 0; return }
+    if ($joined -like '*run_status.py*') { '0'; $global:LASTEXITCODE = 0; return }
+    if ($joined -like '*agent_summary.py*') { '{}'; $global:LASTEXITCODE = 0; return }
+    $root = $null
+    for ($i = 0; $i -lt $args.Count; $i++) {
+        if ($args[$i] -eq '--evidence-root') { $root = $args[$i + 1] }
+    }
+    if (-not $root) { $global:LASTEXITCODE = 1; return }
+    $name = [System.IO.Path]::GetFileNameWithoutExtension([string]$args[0])
+    $ev = Join-Path $root 'evidence'
+    New-Item -ItemType Directory -Force -Path $ev | Out-Null
+    $json = '{"collector":"' + $name + '","version":"1.0.0","platform_detected":true,"ran_at":"t","host":"ZZZ-HOST-LEAK","scope_hash":"abcdef123456","summary":{"files":1},"findings":[{"severity":"high","title":"ZZZ-TITLE-LEAK","category":"test","id":"t.1","evidence_count":2,"sample_redacted":"ZZZ-SAMPLE-LEAK"}],"rules":[],"raw_pointers":[]}'
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText((Join-Path $ev ($name + '.json')), $json, $utf8)
+    $global:LASTEXITCODE = 0
+}
+"""
+
+
+@unittest.skipUnless(PWSH, "pwsh is required to run aiscan.ps1")
+class TestSingleCollectorConsole(unittest.TestCase):
+    def _run_claude(self, extra: str) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            return _run(_call(_leak_writer(), f"claude -OutDir '{tmp}' {extra}"))
+
+    def test_detailed_view_includes_host_title_and_sample(self):
+        code, out = self._run_claude("")
+        self.assertEqual(code, 0, out)
+        self.assertIn("host=ZZZ-HOST-LEAK", out)
+        self.assertIn("ZZZ-TITLE-LEAK", out)
+        self.assertIn("ZZZ-SAMPLE-LEAK", out)
+        self.assertIn("Findings (", out)
+
+    def test_agent_mode_prints_only_the_summary_line(self):
+        code, out = self._run_claude("-AgentMode")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("ZZZ-HOST-LEAK", out)
+        self.assertNotIn("ZZZ-TITLE-LEAK", out)
+        self.assertNotIn("ZZZ-SAMPLE-LEAK", out)
+        self.assertNotIn("host=", out)
+        self.assertNotIn("Findings (", out)
+        self.assertIn("Collector", out)
+        self.assertIn("Detected", out)
+        self.assertIn("Findings", out)
+        self.assertIn("claude", out)
+
+    def test_redact_masks_the_hostname_and_keeps_the_detailed_view(self):
+        code, out = self._run_claude("-Redact")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("ZZZ-HOST-LEAK", out)
+        self.assertIn("host=<host>", out)
+        self.assertIn("ZZZ-TITLE-LEAK", out)
+        self.assertIn("ZZZ-SAMPLE-LEAK", out)
+        self.assertIn("Findings (", out)
+
+    def test_agent_mode_with_redact_still_skips_the_detailed_view(self):
+        code, out = self._run_claude("-AgentMode -Redact")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("ZZZ-HOST-LEAK", out)
+        self.assertNotIn("ZZZ-TITLE-LEAK", out)
+        self.assertNotIn("ZZZ-SAMPLE-LEAK", out)
+        self.assertNotIn("host=", out)
+        self.assertNotIn("<host>", out)
+
+
 if __name__ == "__main__":
     unittest.main()
