@@ -503,12 +503,157 @@ def redact_sample(secret: str, secret_type: str = "generic") -> str:
     return f"{secret[:4]}...{secret[-4:]} ({secret_type})"
 
 
+def rule_key(rule: str) -> str:
+    """Normalize a scanner rule id for lookup and grouping.
+
+    Lowercase, and treat spaces and underscores as hyphens, so
+    "AWS Access Token" and "aws-access-token" are the same rule.
+    """
+    text = str(rule or "").strip().lower().replace("_", " ")
+    text = re.sub(r"\s+", "-", text)
+    text = re.sub(r"-+", "-", text).strip("-")
+    return text
+
+
+# One finding title for a secrets-scan rule. The file clause is optional:
+# a hit with no path must not read "across 0 file(s)". The briefing parses
+# this same pattern.
+SECRET_HIT_TITLE_RE = re.compile(
+    r"^Secret detected by (?P<scanner>[A-Za-z0-9_.-]+):\s*(?P<rule>.+?)"
+    r"(?: \((?P<hits>\d+) hit\(s\)(?: across (?P<files>\d+) file\(s\))?\))?$"
+)
+
+
+def format_secret_hit_title(scanner: str, rule: str, hits: int, files: int) -> str:
+    """Title for one secrets-scan finding (one rule and severity)."""
+    title = f"Secret detected by {scanner}: {rule} ({int(hits)} hit(s)"
+    if int(files) > 0:
+        title += f" across {int(files)} file(s)"
+    return title + ")"
+
+
+_REDACTED_SAMPLE_RE = re.compile(r"^(?P<body>.*?)\s+\((?P<kind>[^)]+)\)\s*$")
+
+
+def _sample_compact(sample: str) -> str:
+    text = str(sample or "").strip()
+    match = _REDACTED_SAMPLE_RE.match(text)
+    body = match.group("body").strip() if match else text
+    return re.sub(r"\s+", "", body).lower()
+
+
+def secret_placeholder_reason(rule: str, sample_redacted: str) -> str | None:
+    """Why a redacted secret sample looks like an example, or None.
+
+    Short values that redact to ****REDACTED:...**** are left alone: the
+    letters are gone, so a placeholder cannot be distinguished from a real
+    secret. Callers decide whether to downgrade.
+    """
+    rule_name = str(rule or "").strip().lower()
+    sample = str(sample_redacted or "")
+    compact = _sample_compact(sample)
+    match = _REDACTED_SAMPLE_RE.match(sample.strip())
+    kind = match.group("kind").strip().lower() if match else ""
+    if "redacted" in compact and "..." not in compact:
+        return None
+
+    # Documentation tokens such as YOUR_API_KEY_HERE redact to YOUR...HERE.
+    if re.fullmatch(r"your\.\.\.here", compact):
+        return "redacted sample is YOUR...HERE, a documentation placeholder"
+
+    # curl -u examples. Compared only for this rule, and only for the
+    # redaction windows of admin:admin, admin:password / admin:Password,
+    # admin:pass / admin:PASS, and admin:passwd.
+    if rule_name == "curl-auth-user" or kind == "curl-auth-user":
+        if re.fullmatch(r"admi\.\.\.(dmin|word|pass|sswd)", compact):
+            return (
+                "redacted sample matches an admin:admin, admin:password, "
+                "or admin:PASS example credential"
+            )
+        if re.fullmatch(r"(root|user|test|guest|demo)\.\.\.\1", compact):
+            return "redacted sample matches a repeated example username and password"
+
+    # generic-api-key sometimes matches the scanner's own name. The windows
+    # are what redact_sample keeps of betterleaks, gitleaks, trufflehog, or two
+    # names written together (gitleaks...trufflehog -> gitl...ehog).
+    if rule_name in {"generic-api-key", "generic"} or kind in {"generic-api-key", "generic"}:
+        if compact in {
+            "gitl...ehog", "gitl...eaks", "truf...ehog", "truf...eaks",
+            "bett...eaks", "bett...ehog",
+        }:
+            return "redacted sample matches a literal scanner name (betterleaks, gitleaks, or trufflehog)"
+        if compact in {"betterleaks", "gitleaks", "trufflehog"}:
+            return "sample is a literal scanner name (betterleaks, gitleaks, or trufflehog)"
+        prefix = compact.split("...", 1)[0]
+        if prefix in {"gpl-", "lgpl", "agpl", "gfdl"} or prefix.startswith(("gpl-", "lgpl", "agpl", "gfdl")):
+            return "redacted sample starts with a license name (GPL, LGPL, AGPL, or GFDL)"
+        if re.fullmatch(r"ed25\.\.\.ekey", compact):
+            return "redacted sample matches an ed25519 key-type name, not a secret value"
+    return None
+
+
+def _finding_evidence_count(finding: dict[str, Any]) -> int:
+    """evidence_count, including a real 0. Missing or invalid values count as 1."""
+    if "evidence_count" not in finding or finding.get("evidence_count") is None:
+        return 1
+    try:
+        return int(finding["evidence_count"])
+    except (TypeError, ValueError):
+        return 1
+
+
+def merge_duplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse rows that share a severity and a title.
+
+    evidence_count is the sum. A repeated title otherwise shows up as several
+    findings and swamps the severity counts. Different titles stay separate.
+    """
+    merged: list[dict[str, Any]] = []
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        key = (str(finding.get("severity") or ""), str(finding.get("title") or ""))
+        current = index.get(key)
+        if current is None:
+            current = dict(finding)
+            tags = finding.get("tags")
+            current["tags"] = list(tags) if isinstance(tags, list) else []
+            index[key] = current
+            merged.append(current)
+            continue
+        extra = _finding_evidence_count(finding)
+        base = _finding_evidence_count(current)
+        current["evidence_count"] = base + extra
+        extra_sample = str(finding.get("sample_redacted") or "").strip()
+        have = str(current.get("sample_redacted") or "").strip()
+        parts = [part.strip() for part in have.split(", ") if part.strip()] if have else []
+        if extra_sample and extra_sample not in parts and len(parts) < 5:
+            current["sample_redacted"] = f"{have}, {extra_sample}" if have else extra_sample
+        for tag in finding.get("tags") or []:
+            if tag not in current["tags"]:
+                current["tags"].append(tag)
+        if finding.get("secret_redacted"):
+            current["secret_redacted"] = True
+        for field, pick in (("first_seen", min), ("last_seen", max)):
+            left = str(current.get(field) or "")
+            right = str(finding.get(field) or "")
+            if left and right:
+                current[field] = pick(left, right)
+            elif right and not left:
+                current[field] = right
+    return merged
+
+
 def finish_collector(
     envelope: dict[str, Any],
     evidence_root: Path,
     *,
     dry_run: bool = False,
 ) -> None:
+    findings = envelope.get("findings")
+    if isinstance(findings, list):
+        envelope["findings"] = merge_duplicate_findings(findings)
     if dry_run:
         print(json.dumps(envelope, indent=2, ensure_ascii=False))
         return

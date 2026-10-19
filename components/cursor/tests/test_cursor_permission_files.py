@@ -15,6 +15,7 @@ os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
 
 import bootstrap  # noqa: E402,F401
+from common import finish_collector  # noqa: E402
 import cursor  # noqa: E402
 import cursor_permissions as cperm  # noqa: E402
 import paths  # noqa: E402
@@ -299,6 +300,22 @@ class TestSideFiles(Base):
         dump = json.dumps(env)
         self.assertNotIn("secret allow text", dump)
         self.assertNotIn(SECRET_TOKEN, dump)
+
+    def test_same_project_sandbox_title_merges(self):
+        other = self.repos / "proj2"
+        (other / ".git").mkdir(parents=True)
+        for repo in (self.repo, other):
+            write(repo / ".cursor" / "sandbox.json", {"type": "insecure_none"})
+        env = self.run_collect()
+        # collect() leaves both rows. finish_collector merges same title and severity.
+        root = self.root / "out"
+        root.mkdir()
+        finish_collector(env, root)
+        written = json.loads((root / "evidence" / "cursor.json").read_text(encoding="utf-8"))
+        rows = by_id(written["findings"], "cursor.sandbox.disabled")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["evidence_count"], 2)
+        self.assertIn("project sandbox.json", rows[0]["title"])
 
     def test_camelcase_permissions_and_bad_sandbox(self):
         write(self.home / "permissions.json", {"allowInstructions": ["x"], "blockInstructions": []})

@@ -41,6 +41,10 @@ name = script.name
 rest = argv[1:]
 mode = os.environ.get("AISCAN_TEST_MODE", "")
 real = os.environ["AISCAN_REAL_PYTHON"]
+
+# aiscan.ps1 probes `python -c` for 3.11+ before any collector runs.
+if argv[0] == "-c":
+    sys.exit(subprocess.call([real, *argv]))
 forward = {"tool_version.py", "run_status.py", "scan_diff.py", "build-briefing.py"}
 
 

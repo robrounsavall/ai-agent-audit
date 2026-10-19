@@ -6,8 +6,8 @@ This rev targets the dark editorial template — Geist +
 JetBrains Mono, warm-near-black background, single amber accent, mono `/NN`
 section kickers. Structural change worth flagging:
 
-  - Secret-scanner hits are grouped by rule (and by file, when the finding
-    carries one) in the summary bars, the findings table, and the appendix.
+  - Secret-scanner hits are grouped by rule and severity in the summary bars,
+    the findings table, and the appendix.
     The evidence column is the hit count. Per-hit samples stay in the local CSV.
   - Obvious placeholder or example values are labeled "likely test value"
     and counted as low. They stay in the report.
@@ -46,12 +46,15 @@ sys.path.insert(0, str(TEMPLATES_DIR))
 from access_map import build_access_map  # noqa: E402
 from briefing_template import REPORT_V2_CSS, REPORT_V2_JS  # noqa: E402
 from common import (  # noqa: E402
+    SECRET_HIT_TITLE_RE as _SECRET_TITLE_RE,
     _hash_path,
     display_path,
     mask_secrets,
     redact_paths,
     redact_sample,
     redaction_disabled,
+    rule_key,
+    secret_placeholder_reason,
 )
 from scan_diff import load_changes_envelope  # noqa: E402
 from sections.access_map import render_access_map_section  # noqa: E402
@@ -227,9 +230,6 @@ def _display_redaction_tokens(value: Any) -> str:
 
 
 _TRAILING_COUNT_RE = re.compile(r"^(?P<body>.+?):\s*(?P<count>\d+)\s*$")
-_SECRET_TITLE_RE = re.compile(
-    r"^Secret detected by (?P<scanner>[A-Za-z0-9_.-]+):\s*(?P<rule>.+)$"
-)
 _REDACTED_SAMPLE_RE = re.compile(r"^(?P<body>.*?)\s+\((?P<kind>[^)]+)\)\s*$")
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _KICKER_NUM_RE = re.compile(
@@ -255,6 +255,7 @@ _SECRET_RULE_LABELS = {
 }
 _PII_ENTITY_LABELS = {
     "CREDIT_CARD": "Credit card numbers",
+    "TEST_CARD": "Test card numbers",
     "US_SSN": "US Social Security numbers",
     "IBAN_CODE": "IBANs",
     "EMAIL_ADDRESS": "Email addresses",
@@ -364,15 +365,29 @@ def _display_finding_title(finding: dict[str, Any]) -> str:
     return title
 
 
-def _secret_title_parts(title: str) -> tuple[str, str] | None:
+def _secret_title_base(title: str) -> str:
     base = str(title or "")
     marker = f" · {_PLACEHOLDER_LABEL}"
     if base.endswith(marker):
         base = base[: -len(marker)]
-    match = _SECRET_TITLE_RE.match(base.strip())
+    return base.strip()
+
+
+def _secret_title_match(title: str) -> re.Match[str] | None:
+    return _SECRET_TITLE_RE.match(_secret_title_base(title))
+
+
+def _secret_title_parts(title: str) -> tuple[str, str] | None:
+    match = _secret_title_match(title)
     if not match:
         return None
     return match.group("scanner").strip().lower(), match.group("rule").strip()
+
+
+def _secret_title_grouped(title: str) -> bool:
+    """True when the collector already rolled this rule into one finding."""
+    match = _secret_title_match(title)
+    return bool(match and match.group("hits"))
 
 
 def _redacted_sample_parts(sample: str) -> tuple[str, str]:
@@ -392,54 +407,48 @@ def likely_placeholder_reason(finding: dict[str, Any]) -> str | None:
     """Return an explainable reason when a secret hit looks like an example.
 
     Only scanner hits titled "Secret detected by <scanner>: <rule>" are
-    considered. Short values that redact to ****REDACTED:...**** are left
-    alone: the letters are gone, so a placeholder cannot be distinguished
-    from a real secret. Nothing is deleted; callers relabel and downgrade.
+    considered. Nothing is deleted; callers relabel and downgrade.
     """
     parts = _secret_title_parts(str(finding.get("title") or ""))
     if parts is None:
         return None
     _scanner, rule = parts
-    rule_name = rule.lower()
-    sample = str(finding.get("sample_redacted") or "")
-    compact = _sample_compact(sample)
-    _body, kind = _redacted_sample_parts(sample)
-    if "redacted" in compact and "..." not in compact:
-        return None
+    return secret_placeholder_reason(rule, str(finding.get("sample_redacted") or ""))
 
-    # Documentation tokens such as YOUR_API_KEY_HERE redact to YOUR...HERE.
-    if re.fullmatch(r"your\.\.\.here", compact):
-        return "redacted sample is YOUR...HERE, a documentation placeholder"
 
-    # curl -u examples. Compared only for this rule, and only for the
-    # redaction windows of admin:admin, admin:password / admin:Password,
-    # admin:pass / admin:PASS, and admin:passwd.
-    if rule_name == "curl-auth-user" or kind == "curl-auth-user":
-        if re.fullmatch(r"admi\.\.\.(dmin|word|pass|sswd)", compact):
-            return (
-                "redacted sample matches an admin:admin, admin:password, "
-                "or admin:PASS example credential"
-            )
-        if re.fullmatch(r"(root|user|test|guest|demo)\.\.\.\1", compact):
-            return "redacted sample matches a repeated example username and password"
+def _count_or(value: Any, default: int) -> int:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
-    # generic-api-key sometimes matches the scanner's own name. The windows
-    # are what redact_sample keeps of betterleaks, gitleaks, trufflehog, or two
-    # names written together (gitleaks...trufflehog -> gitl...ehog).
-    if rule_name in {"generic-api-key", "generic"} or kind in {"generic-api-key", "generic"}:
-        if compact in {
-            "gitl...ehog", "gitl...eaks", "truf...ehog", "truf...eaks",
-            "bett...eaks", "bett...ehog",
-        }:
-            return "redacted sample matches a literal scanner name (betterleaks, gitleaks, or trufflehog)"
-        if compact in {"betterleaks", "gitleaks", "trufflehog"}:
-            return "sample is a literal scanner name (betterleaks, gitleaks, or trufflehog)"
-        prefix = compact.split("...", 1)[0]
-        if prefix in {"gpl-", "lgpl", "agpl", "gfdl"} or prefix.startswith(("gpl-", "lgpl", "agpl", "gfdl")):
-            return "redacted sample starts with a license name (GPL, LGPL, AGPL, or GFDL)"
-        if re.fullmatch(r"ed25\.\.\.ekey", compact):
-            return "redacted sample matches an ed25519 key-type name, not a secret value"
-    return None
+
+def _group_is_all_placeholders(finding: dict[str, Any]) -> bool:
+    """True when the collector counted every hit in this rule as a placeholder.
+
+    A grouped row carries one sample. That sample is not enough: the row is
+    downgraded only when placeholder_count equals the hit count. Older rows
+    that have no placeholder_count stay at the collector severity.
+    """
+    if "placeholder_count" not in finding:
+        return False
+    total = _count_or(finding.get("evidence_count"), 0)
+    counted = _count_or(finding.get("placeholder_count"), -1)
+    return total > 0 and counted == total
+
+
+def _placeholder_hit_count(finding: dict[str, Any]) -> int:
+    """Hits that should be labeled as test values for this finding."""
+    title = str(finding.get("title") or "")
+    if _secret_title_grouped(title):
+        if not _group_is_all_placeholders(finding):
+            return 0
+    elif likely_placeholder_reason(finding) is None:
+        return 0
+    count = _count_or(finding.get("evidence_count"), 1)
+    return count if count > 0 else 0
 
 
 def canonical_secret_severity(finding: dict[str, Any]) -> str | None:
@@ -556,10 +565,23 @@ def present_findings(
         parts = _secret_title_parts(str(row.get("title") or ""))
         if parts:
             row["_scanner"], row["_rule"] = parts
-        canon = canonical_secret_severity(row)
-        if canon:
-            row["severity"] = canon
-        reason = likely_placeholder_reason(row)
+        grouped = _secret_title_grouped(str(row.get("title") or ""))
+        if grouped:
+            row["_rule_grouped"] = True
+        # A current secrets-scan envelope already stores the rule-map severity.
+        # Overriding it here made openai/gcp keys high and example/webhook
+        # rules critical, so the HTML disagreed with the summary. Substring
+        # severity stays for older per-hit titles and for pii-scan secret rows.
+        if not grouped:
+            canon = canonical_secret_severity(row)
+            if canon:
+                row["severity"] = canon
+        if grouped and _group_is_all_placeholders(row):
+            reason = likely_placeholder_reason(row) or "every hit in this rule is a placeholder"
+        elif grouped:
+            reason = None
+        else:
+            reason = likely_placeholder_reason(row)
         if reason:
             row["severity"] = "low"
             row["_placeholder_reason"] = reason
@@ -605,7 +627,11 @@ def secret_rule_breakdown(findings: list[dict[str, Any]]) -> list[tuple[str, int
             continue
         saw = True
         _scanner, rule = parts
-        placeholder = likely_placeholder_reason(finding) is not None
+        title = str(finding.get("title") or "")
+        if _secret_title_grouped(title):
+            placeholder = _group_is_all_placeholders(finding)
+        else:
+            placeholder = likely_placeholder_reason(finding) is not None
         counts[(rule, placeholder)] += int(finding.get("evidence_count") or 1)
     if not saw:
         return []
@@ -965,11 +991,7 @@ def render_posture_grid(envelopes: dict[str, dict[str, Any]]) -> str:
         secret_findings = [
             item for item in (secrets_env.get("findings") or []) if isinstance(item, dict)
         ]
-        placeholder_hits = sum(
-            int(item.get("evidence_count") or 1)
-            for item in secret_findings
-            if likely_placeholder_reason(item)
-        )
+        placeholder_hits = sum(_placeholder_hit_count(item) for item in secret_findings)
         placeholder_text = (
             f" {placeholder_hits} look like test values and are labeled low, not dropped."
             if placeholder_hits
@@ -1018,7 +1040,12 @@ def build_tools_table(
         version = disc.get("version") or (env or {}).get("summary", {}).get("version", "unknown")
         if version == "unknown" and env:
             version = env.get("version", "unknown")
-        last_used = disc.get("last_used") or disc.get("last_seen") or "unknown"
+        last_used = (
+            _tool_last_used(key, envelopes)
+            or disc.get("last_used")
+            or disc.get("last_seen")
+            or "unknown"
+        )
         status = collector_status(key, env, runs.get(key))
         if not detected:
             status = "skipped"
@@ -1203,7 +1230,8 @@ def _tool_last_used(key: str, envelopes: dict[str, dict[str, Any]]) -> str:
     if key == "claude":
         return newest("claude_projects")
     if key == "codex":
-        return newest("codex_sessions")
+        recorded = str(((envelopes.get("codex") or {}).get("summary") or {}).get("last_used") or "")
+        return recorded or newest("codex_sessions")
     if key == "cursor":
         return newest("cursor_projects", "cursor_db")
     if key == "grok":
@@ -1241,6 +1269,16 @@ def render_cover_status(
         duration = dur if dur and dur != "unknown" else "-"
         rows.append((label, "detected", duration, _tool_last_used(key, envelopes) or "unknown"))
 
+    # Codex Desktop (Store app) is an install/launch signal for Codex, not a
+    # separate tool, so it does not bump the detected count. Its date is when
+    # the app was last opened (log mtimes); the Codex row stays last used.
+    codex_summary = (envelopes.get("codex") or {}).get("summary") or {}
+    if codex_summary.get("desktop_installed"):
+        codex_label = TOOL_LABELS.get("codex", "codex")
+        index = next((i + 1 for i, row in enumerate(rows) if row[0] == codex_label), len(rows))
+        opened = codex_summary.get("desktop_last_opened") or "unknown"
+        rows.insert(index, ("Codex Desktop app", "installed", "-", f"opened {opened}"))
+
     # Claude Design is not a collector; its usage signal rides in the cowork
     # summary (design window file presence + last-open date).
     cowork_summary = (envelopes.get("cowork") or {}).get("summary") or {}
@@ -1262,7 +1300,7 @@ def render_cover_status(
     )
     row_html = []
     for name, status, measure, detail in rows:
-        status_class = "ok" if status in ("detected", "collected") else "muted"
+        status_class = "ok" if status in ("detected", "collected", "installed") else "muted"
         duration_cell = f"<td>{_esc(measure)}</td>" if show_duration else ""
         row_html.append(
             f"<tr><td><span class='status-dot {status_class}'></span>{_esc(name)}</td>"
@@ -1852,10 +1890,13 @@ class EvidenceContext:
                 continue
             if not _RULE_RE.fullmatch(rule):
                 rule = "unknown rule"
+                index_key = rule
+            else:
+                index_key = rule_key(rule) or rule.lower()
             sample = (row.get("sample_redacted") or "").strip()
             if sample and sample != rule and not _looks_redacted(sample):
                 sample = redact_sample(sample, rule)
-            self._secrets[rule.lower()].append(
+            self._secrets[index_key].append(
                 (
                     _sample_compact(sample),
                     {"path": file, "line": self._line(row.get("line", "")), "sample": sample},
@@ -1904,13 +1945,19 @@ class EvidenceContext:
         for path in finding.get("_files") or []:
             if str(path).strip():
                 add({"path": str(path).strip(), "line": ""})
-        rule = str(finding.get("_rule") or "").lower()
+        rule = rule_key(str(finding.get("_rule") or ""))
         if rule and rule in self._secrets:
-            members = finding.get("_member_samples") or [finding.get("sample_redacted") or ""]
-            wanted = {_sample_compact(str(m)) for m in members}
-            for compact, loc in self._secrets[rule]:
-                if compact in wanted:
+            # Collector-grouped rules are one row for every hit of that rule, so
+            # the card lists every file in the CSV, not only the sample's file.
+            if finding.get("_rule_grouped"):
+                for _compact, loc in self._secrets[rule]:
                     add(dict(loc))
+            else:
+                members = finding.get("_member_samples") or [finding.get("sample_redacted") or ""]
+                wanted = {_sample_compact(str(m)) for m in members}
+                for compact, loc in self._secrets[rule]:
+                    if compact in wanted:
+                        add(dict(loc))
         fid = str(finding.get("id") or "").lower()
         if fid.startswith("pii_scan."):
             candidates = [fid[len("pii_scan."):]]
@@ -2037,7 +2084,7 @@ def render_evidence_card(finding: dict[str, Any], ctx: EvidenceContext) -> str:
         trig.append(_kv("Entity", _esc(_card_text(fid[len("pii_scan."):].upper(), links))))
     members = int(finding.get("_grouped_members") or 0)
     if members > 1:
-        trig.append(_kv("Grouped", _esc(f"{members} scanner rows with the same rule and redacted value")))
+        trig.append(_kv("Grouped", _esc(f"{members} scanner rows with the same rule")))
     if finding.get("_placeholder_reason"):
         trig.append(_kv("Placeholder reason", _esc(_card_text(finding["_placeholder_reason"], links))))
     for key, text in _extra_finding_items(finding, ctx):
@@ -3964,7 +4011,7 @@ def build_html(
     <header class="sh">
       <div class="kicker"><span class="num">/03</span><span class="kicker-label">FINDINGS</span></div>
       <h2 class="h2">{sum(counts.values())} findings across {category_count} categories.</h2>
-      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples stay redacted. Secret-scanner hits are grouped by rule and redacted value, with the hit count in the evidence column. Likely test values are labeled and counted as low. Click a finding title to expand it: the row shows the redacted sample and the file and line where the scanner recorded one.</p>
+      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples stay redacted. Secret-scanner hits are grouped by rule and severity, with the hit count in the evidence column. Likely test values are labeled and counted as low. Click a finding title to expand it: the row shows the redacted sample and the files where the scanner recorded the hits.</p>
     </header>
     <div class="sev-bar">
       <div class="hdr">
@@ -3980,7 +4027,7 @@ def build_html(
     <header class="sh" style="margin-top: 48px;">
       <div class="kicker"><span class="num">/08</span><span class="kicker-label">APPENDIX</span></div>
       <h2 class="h2">Evidence index</h2>
-      <p class="sub">Secret-scanner hits collapse to one row per rule and redacted value, with a hit count. Rows labeled likely test value were downgraded to low and kept. Expand a finding row above for the redacted sample and the file and line where the scanner recorded one.</p>
+      <p class="sub">Secret-scanner hits collapse to one row per rule and severity, with a hit count. Rows labeled likely test value were downgraded to low and kept. Expand a finding row above for the redacted sample and the files where the scanner recorded the hits.</p>
     </header>
     {appendix_note}
     <div class="table-wrap appendix-table" style="max-height: none;">
