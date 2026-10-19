@@ -37,6 +37,37 @@ each collector's `__version__` and appear in the evidence envelopes.
   a short hash so two long names do not share an id. Those ids are not
   reported as resolved and added back.
 
+### Fixed
+
+- With `-Redact`, the closing note says this run's new evidence and briefing
+  are redacted, that `raw\` is not, and that older files already in the folder
+  are left as they were. Without `-Redact`, the previous warning is unchanged.
+- The README asked for Python 3.10+, but collectors import `tomllib` (3.11).
+  It now says 3.11+, and `aiscan.ps1` stops immediately if `python` is older.
+- Windows PowerShell 5.1 was reading evidence with the ANSI code page and
+  discovery JSON with the OEM code page, which mangled non-ASCII text. Evidence
+  is read as UTF-8, and discovery JSON escapes non-ASCII paths.
+- On Python 3.14 and newer, compressed Codex session logs (`.jsonl.zst`)
+  are decompressed with the standard-library `compression.zstd` module and
+  scanned (Codex, chat history, PII, and secrets). On older Python they are
+  counted, not opened, and reported as a low finding, "N compressed Codex
+  session logs not scanned". A compressed log that is corrupt, too large,
+  or too slow to unpack is a coverage note, not a failed run. The Codex
+  briefing row uses session activity for last used, and shows the Desktop
+  app's last opened date on its own row.
+- trufflehog is started with `--no-verification` and `--no-update`, so a
+  secrets scan does not check secrets online or phone home for updates.
+- A gitleaks or trufflehog run that fails is a finding. It is no longer
+  reported as zero hits.
+- PII scan counts a built-in list of common test card numbers as a low
+  finding. The briefing calls them "Test card numbers". Other valid card
+  numbers stay critical.
+- With `-Redact`, pii-scan does not write scan-target paths into the
+  evidence file.
+- `--dry-run` does not write the pii-scan or secrets-scan raw files.
+- git-posture does not lazy-fetch missing objects from a partial clone, and
+  reports those repos as a coverage gap.
+
 ## [0.2.0] - 2026-10-15
 
 ### Added

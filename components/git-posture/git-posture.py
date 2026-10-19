@@ -6,12 +6,16 @@ Usage:
 
 Scans git repos for .env in history, hook presence, .gitignore coverage,
 optional branch protection via gh CLI, and large blobs.
+
+Git commands run with lazy fetch disabled, so a partial clone cannot pull
+missing objects from the network. Those repos are reported as a coverage gap.
 """
 
 from __future__ import annotations
 
 import argparse
 import fnmatch
+import os
 import re
 import shutil
 import subprocess
@@ -84,15 +88,36 @@ def find_git_repos(roots: list[Path]) -> list[Path]:
     return sorted(repos, key=lambda p: str(p))
 
 
-def run_git(repo: Path, *args: str, timeout: int = 120) -> subprocess.CompletedProcess | None:
+def git_local_env() -> dict[str, str]:
+    """Environment for every git subprocess.
+
+    GIT_NO_LAZY_FETCH stops a partial clone from downloading missing objects.
+    GIT_TERMINAL_PROMPT and an empty GIT_ASKPASS stop git from prompting for
+    credentials, which would also reach the network.
+    """
+    env = dict(os.environ)
+    env["GIT_NO_LAZY_FETCH"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ASKPASS"] = ""
+    return env
+
+
+def run_git(
+    repo: Path,
+    *args: str,
+    timeout: int = 120,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess | None:
     try:
         return subprocess.run(
             ["git", "-C", str(repo), *args],
+            input=input_text,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            env=git_local_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -107,6 +132,12 @@ def _is_env_history_path(line: str) -> bool:
     if base != ".env" and not base.startswith(".env."):
         return False
     return not any(base.endswith(suffix) for suffix in _ENV_EXAMPLE_SUFFIXES)
+
+
+def is_partial_clone(repo: Path) -> bool:
+    """True when git would otherwise fetch missing objects from a promisor."""
+    result = run_git(repo, "config", "--get", "extensions.partialclone")
+    return bool(result and result.returncode == 0 and result.stdout.strip())
 
 
 def check_env_in_history(repo: Path) -> bool:
@@ -184,22 +215,13 @@ def check_large_blobs(repo: Path) -> list[tuple[str, int]]:
     rev = run_git(repo, "rev-list", "--objects", "--all")
     if not rev or rev.returncode != 0 or not rev.stdout.strip():
         return large
-    try:
-        proc = subprocess.run(
-            [
-                "git", "-C", str(repo), "cat-file",
-                "--batch-check=%(objecttype) %(objectname) %(objectsize) %(rest)",
-            ],
-            input=rev.stdout,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return large
-    if proc.returncode != 0:
+    proc = run_git(
+        repo,
+        "cat-file",
+        "--batch-check=%(objecttype) %(objectname) %(objectsize) %(rest)",
+        input_text=rev.stdout,
+    )
+    if not proc or proc.returncode != 0:
         return large
     for line in proc.stdout.splitlines():
         parts = line.split(None, 3)
@@ -317,8 +339,11 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
     protection_samples: list[str] = []
     blob_samples: list[str] = []
     largest_blob = 0
+    partial_clones = 0
 
     for repo in repos:
+        if is_partial_clone(repo):
+            partial_clones += 1
         repo_label = repo_display_name(repo)
         repo_sample = redact_scope_label(repo_label, "project")
         env_in_history = check_env_in_history(repo)
@@ -425,6 +450,19 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
             )
         )
 
+    if partial_clones:
+        noun = "clone" if partial_clones == 1 else "clones"
+        findings.append(
+            make_finding(
+                "git.partial_clone",
+                "low",
+                "Git Posture",
+                f"{partial_clones} partial {noun} scanned without fetching missing git objects",
+                evidence_count=partial_clones,
+                tags=["coverage_gap"],
+            )
+        )
+
     envelope["rules"] = rules
     envelope["findings"] = findings
     envelope["summary"] = {
@@ -433,6 +471,7 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
         "no_pre_commit": no_hooks,
         "no_branch_protection": no_protection,
         "large_blobs": large_blob_count,
+        "partial_clones": partial_clones,
         "gh_checked": allow_gh and gh_available(),
     }
     return envelope

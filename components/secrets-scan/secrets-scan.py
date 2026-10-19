@@ -28,9 +28,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
+import compressed
 from common import (
     add_base_args,
     compute_scope_hash,
@@ -394,44 +396,75 @@ def run_betterleaks(target: Path, binary: str, major: int) -> tuple[list[dict], 
     return [], f"exit code {proc.returncode}, no readable report"
 
 
-def run_gitleaks(target: Path, gitleaks: str) -> list[dict]:
-    proc = subprocess.run(
-        [gitleaks, "detect", "--source", str(target), "--no-git", "--report-format", "json", "--report-path", "-"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=600,
-    )
-    out = proc.stdout or ""
-    if not out.strip():
-        return []
+# Gitleaks exits 1 for leaks and for real failures. --exit-code 2 makes a
+# finished scan with leaks distinguishable from a failed run (still exit 1).
+_GITLEAKS_LEAK_EXIT = 2
+
+
+def _scanner_failure(exc: BaseException) -> str:
+    # The exception text can carry a local path. The type name cannot.
+    return type(exc).__name__
+
+
+def run_gitleaks(target: Path, gitleaks: str) -> tuple[list[dict], str | None]:
+    """Return (raw hits, error or None). A readable report is a finished scan."""
     try:
-        data = json.loads(out)
-        return data if isinstance(data, list) else []
-    except json.JSONDecodeError:
-        return []
+        proc = subprocess.run(
+            [
+                gitleaks, "detect", "--source", str(target), "--no-git",
+                "--report-format", "json", "--report-path", "-",
+                "--exit-code", str(_GITLEAKS_LEAK_EXIT),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], _scanner_failure(exc)
+    data = _load_json(proc.stdout or "")
+    if proc.returncode in (0, _GITLEAKS_LEAK_EXIT) and (
+        isinstance(data, list) or not (proc.stdout or "").strip()
+    ):
+        hits = [hit for hit in data if isinstance(hit, dict)] if isinstance(data, list) else []
+        return hits, None
+    # Only the exit code goes into evidence: scanner stderr can carry local paths.
+    return [], f"exit code {proc.returncode}, no readable report"
 
 
-def run_trufflehog(target: Path, trufflehog: str) -> list[dict]:
-    proc = subprocess.run(
-        [trufflehog, "filesystem", str(target), "--json"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=600,
-    )
+def run_trufflehog(target: Path, trufflehog: str) -> tuple[list[dict], str | None]:
+    # --no-verification is the current trufflehog v3 flag (still present in
+    # 3.99) that sets Verify=false. Without it, trufflehog calls provider
+    # APIs. --results only filters printed hits and still verifies.
+    # --no-update skips the update check, which also uses the network.
+    try:
+        proc = subprocess.run(
+            [trufflehog, "filesystem", str(target), "--json", "--no-verification", "--no-update"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], _scanner_failure(exc)
+    # Trufflehog exits 0 when the scan finishes, including when it found
+    # secrets. We do not pass --fail, so a non-zero exit is a failed run.
+    if proc.returncode != 0:
+        return [], f"exit code {proc.returncode}, no readable report"
     hits: list[dict] = []
     for line in (proc.stdout or "").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            hits.append(json.loads(line))
+            parsed = json.loads(line)
         except json.JSONDecodeError:
             continue
-    return hits
+        if isinstance(parsed, dict):
+            hits.append(parsed)
+    return hits, None
 
 
 def normalize_hit(scanner: str, hit: dict) -> dict:
@@ -646,22 +679,73 @@ def collect(
     file_counts: Counter[str] = Counter()
     scan_errors: list[str] = []
 
-    for target in targets:
-        if scanner_kind.startswith("betterleaks"):
-            major = 1 if scanner_kind == "betterleaks-v1" else 2
-            hits, error = run_betterleaks(target, scanner_bin, major)
-            if error:
-                scan_errors.append(error)
-        elif scanner_kind == "gitleaks":
-            hits = run_gitleaks(target, scanner_bin)
+    # Compressed Codex rollouts are opaque to the scanners. Stage decompressed
+    # copies in a temp directory (never next to the originals and never under
+    # raw/), scan them, report the original .zst path, and always delete the
+    # copies. Repo roots are not walked for .zst. With no stdlib zstd backend
+    # the files are counted and not opened.
+    staging = Path(tempfile.mkdtemp(prefix="aiscan-secrets-zst-"))
+    zst_sources = [target for target in targets if target not in existing_repo_roots]
+    staged: list[Path] = []
+    staged_map: dict[str, str] = {}
+    zst_unreadable = 0
+    zstd_ok = compressed.zstd_backend() is not None
+    try:
+        staged, staged_map, zst_unreadable = compressed.stage_compressed(zst_sources, staging)
+        for target in targets + staged:
+            if scanner_kind.startswith("betterleaks"):
+                major = 1 if scanner_kind == "betterleaks-v1" else 2
+                hits, error = run_betterleaks(target, scanner_bin, major)
+                if error:
+                    scan_errors.append(error)
+            elif scanner_kind == "gitleaks":
+                hits, error = run_gitleaks(target, scanner_bin)
+                if error:
+                    scan_errors.append(error)
+            else:
+                hits, error = run_trufflehog(target, scanner_bin)
+                if error:
+                    scan_errors.append(error)
+            for hit in hits:
+                normalized = normalize_hit(scanner_kind, hit)
+                reported = Path(normalized["file"]) if normalized["file"] else None
+                if reported is not None and not reported.is_absolute():
+                    reported = Path(target) / reported
+                if (
+                    reported is not None
+                    and target not in staged
+                    and compressed.is_under(reported, staging)
+                ):
+                    continue
+                normalized["file"] = compressed.map_back(normalized["file"], staged_map, target)
+                all_hits.append(normalized)
+                rule_counts[normalized["rule"]] += 1
+                if normalized["file"]:
+                    file_counts[normalized["file"]] += 1
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    if zst_unreadable:
+        if zstd_ok:
+            title = (
+                f"{zst_unreadable} compressed transcript file(s) (.jsonl.zst) "
+                "could not be read"
+            )
         else:
-            hits = run_trufflehog(target, scanner_bin)
-        for hit in hits:
-            normalized = normalize_hit(scanner_kind, hit)
-            all_hits.append(normalized)
-            rule_counts[normalized["rule"]] += 1
-            if normalized["file"]:
-                file_counts[normalized["file"]] += 1
+            title = (
+                f"{zst_unreadable} compressed transcript file(s) (.jsonl.zst) "
+                "were not scanned for secrets"
+            )
+        coverage_findings.append(
+            make_finding(
+                "secrets-scan.compressed_files_unreadable",
+                "low",
+                "Secrets Exposure",
+                title,
+                evidence_count=zst_unreadable,
+                tags=["coverage_gap"],
+            )
+        )
 
     if raw_out_dir is not None:
         write_raw_outputs(raw_out_dir, all_hits, rule_counts, file_counts)
@@ -673,7 +757,7 @@ def collect(
                 "secrets-scan.scanner_error",
                 "medium",
                 "Secrets Exposure",
-                f"{scanner_name} did not finish on {len(scan_errors)} of {len(targets)} "
+                f"{scanner_name} did not finish on {len(scan_errors)} of {len(targets) + len(staged)} "
                 f"scan targets; hits from those targets are missing ({scan_errors[0]})",
                 tags=["env_read"],
             )
@@ -687,6 +771,8 @@ def collect(
         **({"scanner_mode": scanner_kind} if scanner_kind != scanner_name else {}),
         "hits": len(all_hits),
         "targets": len(targets),
+        "compressed_files_staged": len(staged_map),
+        "compressed_files_unreadable": zst_unreadable,
         **{f"rule_{k}": v for k, v in rule_counts.items()},
     }
     return envelope, True, all_hits
@@ -718,13 +804,17 @@ def main() -> None:
 
     native_roots = [Path(p).expanduser().resolve() for p in args.native_roots] if args.native_roots else None
 
-    raw_out = raw_root / "secrets-scan"
+    # --dry-run prints the envelope and writes nothing, including raw/.
+    # The output folder is still excluded from the scan so a previous run's
+    # findings are not picked up when that folder sits inside a repository.
+    secrets_out = raw_root / "secrets-scan"
+    raw_out = None if args.dry_run else secrets_out
     envelope, tool_ok, _ = collect(
         raw_root,
         repo_roots,
         raw_out,
         native_roots=native_roots,
-        exclude_roots=[evidence_root, evidence_root / "evidence", raw_out],
+        exclude_roots=[evidence_root, evidence_root / "evidence", secrets_out],
     )
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)
 
