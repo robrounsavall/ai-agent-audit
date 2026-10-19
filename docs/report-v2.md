@@ -2,7 +2,7 @@
 
 This page is the HTML briefing. It is one file. Open it in a browser. It does not need the network, a font download, or a web server.
 
-The top of the page is the summary. It tells you which agents were detected, how many findings there are at each severity, and one sentence about what changed since the last scan. If a cloud-agents inventory was collected, the summary also shows how many agents and how many tokens. If a telemetry export included approval decisions, the summary says how many were approved, how many were denied, and how many of the approvals came from a config rule. Token totals are not dollars. A dollar figure appears only when the Cursor dashboard usage export included `cost_cents`, and the page says that number is from that export.
+The top of the page is the summary. Under the title, the first fact is the run origin: who or what launched the scan, when it started, and why. An older folder with no `run-origin.txt` says `unknown` there. The summary also tells you which agents were detected, how many findings there are at each severity, and one sentence about what changed since the last scan. If a cloud-agents inventory was collected, the summary also shows how many agents and how many tokens. If a telemetry export included approval decisions, the summary says how many were approved, how many were denied, and how many of the approvals came from a config rule. Token totals are not dollars. A dollar figure appears only when the Cursor dashboard usage export included `cost_cents`, and the page says that number is from that export.
 
 Under the summary are tabs:
 

@@ -48,6 +48,8 @@ The first time there is no earlier folder, the tool still writes `changes.json`,
 
 ## What the diff flags
 
+`run-origin.txt` (who launched the scan) is not evidence. A missing line, or a different one, is not a change and does not add a finding.
+
 For each collector it records:
 
 - platform newly detected, or no longer detected

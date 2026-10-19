@@ -136,7 +136,31 @@ Tell the user the scan is starting. It can take several minutes on a
 machine with a lot of chat history, so give the command at least a
 15-minute timeout. Don't promise a time.
 
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\aiscan.ps1 all -OutDir $out -Briefing
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\aiscan.ps1 all -OutDir $out -Briefing -LaunchedBy "<harness>" -Reason "<why>"
+
+Replace `<harness>` with your own name: the product that is following this
+file, such as `Claude Code`, `Codex`, or `Cursor`. Replace `<why>` with a
+short reason. Do not leave the angle brackets in the command. Do not fill
+either value from the computer name or the Windows account name. If you
+skip both, the scan writes `unknown`. Pass them when you can.
+
+Examples:
+
+- `-LaunchedBy 'Claude Code' -Reason 'PowerShell 5.1 smoke test for PRs 27/28'`
+- `-LaunchedBy 'Claude Code' -Reason 'comparison baseline'`
+- `-LaunchedBy 'Robert' -Reason 'manual run from RUN-AISCAN.md'`
+
+The last one is for Robert running this file by hand. An agent uses its
+own harness name, not `Robert`. If the name you pass is also the Windows
+account name, the stored line says `<user>`. Path masking treats that word
+as identifying. A harness name such as `Claude Code` is kept as you typed
+it, as long as it is not a path or a secret.
+
+Those two values are stored as one line, `run-origin.txt`, in the output
+folder. The summary JSON includes the same facts as `run_origin`. Secrets
+and file paths in the two values are masked even when you do not pass
+`-Redact`. `-Redact` stays off unless the user asked for redacted output.
+Do not open `run-origin.txt`. Step 6's summary already has the line.
 
 - `-ExecutionPolicy Bypass` here applies only to this one child process.
   It doesn't change the machine's policy.
@@ -221,9 +245,12 @@ With no `-OutDir`, `summary` reads the newest folder under
 
 Read only the JSON that command prints. It lists each collector, whether
 the tool was detected, and each finding's severity, title, category, and
-evidence count. Titles in that JSON are masked even when the scan was
-unredacted. The findings are already sorted critical, high, medium, low,
-then evidence count.
+evidence count. It also has `run_origin` (`launched_by`, `started`,
+`reason`). You may quote those three fields. Titles in that JSON are
+masked even when the scan was unredacted. The findings are already sorted
+critical, high, medium, low, then evidence count. An older folder with no
+origin line has `unknown` in those fields. That is normal. Do not treat it
+as a failed scan.
 
 Do not read samples, rules, raw pointers, the host, or paths from anywhere
 else. Do not open `raw\`, `*.csv`, `*.jsonl`, `summary.md`,

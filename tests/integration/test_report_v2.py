@@ -145,6 +145,48 @@ class TestReportV2(unittest.TestCase):
             html = briefing.build_html(root, customer="Example", operator="Test")
             self.assertNotIn("SENTINEL_AGENT_SUMMARY", html)
 
+    def test_run_origin_is_escaped_near_the_top(self):
+        briefing = _load_briefing()
+        secret = "AKIA" + "0" * 16
+        with self._root() as raw:
+            root = Path(raw)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            (evidence / "codex.json").write_text(
+                json.dumps(_envelope("codex")),
+                encoding="utf-8",
+            )
+            (root / "run-origin.txt").write_text(
+                "launched_by=a&b<c> | started=2026-10-19T23:00:00+00:00 | "
+                "reason=see " + secret + "\n",
+                encoding="utf-8",
+            )
+            html = briefing.build_html(root, customer="Example", operator="Test")
+            self.assertLess(html.find("Run origin"), html.find("EXECUTIVE SUMMARY"))
+            self.assertLess(html.find("Run origin"), html.find("Customer"))
+            self.assertIn("launched_by=a&amp;b&lt;c&gt;", html)
+            self.assertNotIn("a&b<c>", html)
+            self.assertNotIn(secret, html)
+            self.assertNotIn("AKIA", html)
+            self.assertIn("REDACTED:aws_key", html)
+
+    def test_old_folder_without_run_origin_still_builds(self):
+        briefing = _load_briefing()
+        with self._root() as raw:
+            root = Path(raw)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            (evidence / "codex.json").write_text(
+                json.dumps(_envelope("codex")),
+                encoding="utf-8",
+            )
+            self.assertFalse((root / "run-origin.txt").exists())
+            html = briefing.build_html(root, customer="Example", operator="Test")
+            self.assertIn(
+                "launched_by=unknown | started=unknown | reason=unknown",
+                html,
+            )
+
     def test_missing_changes_file_is_a_note(self):
         briefing = _load_briefing()
         with self._root() as raw:

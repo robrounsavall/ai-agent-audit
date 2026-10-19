@@ -58,6 +58,7 @@ from common import (  # noqa: E402
     sanitize_text,
     secret_placeholder_reason,
 )
+from run_origin import format_origin_line, load_run_origin  # noqa: E402
 from scan_diff import load_changes_envelope  # noqa: E402
 from sections.access_map import render_access_map_section  # noqa: E402
 from sections.changes import render_changes_section  # noqa: E402
@@ -4123,6 +4124,8 @@ def build_html(
   </div>
 </section>"""
 
+    # Same line as run-origin.txt. Missing file is an older folder: unknown.
+    origin_line = format_origin_line(load_run_origin(evidence_root))
     title = _esc(f"{customer_name} · AI Coding Tool Exposure Review")
     noindex_meta = '<meta name="robots" content="noindex" />' if local_links else ""
     local_banner = (
@@ -4150,6 +4153,7 @@ def build_html(
       <h1 class="display">AI coding tool exposure<span class="display-period">.</span></h1>
       <p class="lede">{_esc(render_hero_lede(tool_names, counts))}</p>
       <ul class="meta-list">
+        <li><span class="meta-dash">—</span>Run origin · {_esc(origin_line)}</li>
         <li><span class="meta-dash">—</span>Customer · <strong>{_esc(customer_name)}</strong></li>
         <li><span class="meta-dash">—</span>Engagement · {_esc(engagement_date)}</li>
         <li><span class="meta-dash">—</span>Operator · {_esc(operator_name)}</li>

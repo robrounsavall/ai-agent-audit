@@ -219,7 +219,7 @@ before sharing it.
 | `cloud-agents` | Official Cloud Agents API, `GET https://api.cursor.com` only, with a user-supplied `CURSOR_API_KEY` | Opt-in. Not part of `aiscan all`. Does not read the Cursor IDE session token or call `cursor.com/api/dashboard`. Does not call `GET /v1/repositories` or the enterprise Admin API. |
 | `telemetry` | Local files only: OTLP JSON / JSON-lines (`--otel-file`) and Splunk JSON or CSV exports (`--splunk-export`) | Opt-in `aiscan telemetry`. Not part of `aiscan all`. Counts tool decisions and usage. Does not store prompts, commands, or secret values. `cost_cents` is copied from a Cursor dashboard usage export and is never estimated from tokens. |
 | `changes` | Derived. Not a collector. `python core/scan_diff.py` compares two evidence roots and writes `evidence/changes.json` | The briefing loader skips this file when it walks collector envelopes and passes it only to the changes section. |
-| `agent-summary` | Derived. Not a collector. `aiscan summary` (and every scan) writes `evidence/agent-summary.json` | Safe fields only: collector, detection, and finding severity, title, category, and evidence count. The briefing loader skips this file and `run-status.json`. |
+| `agent-summary` | Derived. Not a collector. `aiscan summary` (and every scan) writes `evidence/agent-summary.json` | Safe fields only: collector, detection, and finding severity, title, category, and evidence count, plus optional `run_origin`. The briefing loader skips this file and `run-status.json`. |
 
 ## Cloud agent inventory (`cloud-agents`)
 
@@ -306,6 +306,18 @@ A collector that previously had data and now reports none is a drift warning, no
 Findings are sorted by severity (`critical`, `high`, `medium`, `low`, then `unknown`), then real findings before any finding the collector tagged `test_data` (that tag is not copied), then by `evidence_count` descending. Remaining ties break on collector, category, then title. `evidence_count` is the count that collector recorded. Collectors do not share one unit. A severity outside that list is stored as `unknown` and still listed.
 
 The object also has `aiscan_version`, the same string the scan printed (`git describe` in a checkout, the `VERSION` file in a release zip).
+
+It also has optional `run_origin`:
+
+| Field | Notes |
+|---|---|
+| `launched_by` | Who or what started the scan. From `-LaunchedBy`, else `AISCAN_LAUNCHED_BY`, else `unknown`. |
+| `started` | Scan start time, ISO 8601 with a numeric offset. `unknown` when the folder has no origin line. |
+| `reason` | Why the scan was started. From `-Reason`, else `AISCAN_REASON`, else `unknown`. |
+
+The same three fields are the single line in `run-origin.txt` at the top of the scan folder: `launched_by=<x> | started=<iso> | reason=<y>`. Control characters are removed, each field is capped at 120 characters, and both fields go through `redact_paths` and `mask_secrets` even when `-Redact` is off. A path tail left after `<userprofile>` or `<user>` is dropped, so the rest of the path is not kept. The computer name and the account name are not used to fill a blank. `-Redact` stays off unless the operator sets it.
+
+This file is not a collector envelope and has no `version` of its own. Adding `run_origin` does not bump a schema version. A folder written before the field still loads. `aiscan summary` and the briefing use `unknown` when `run-origin.txt` is missing. `scan_diff.py` does not read the file or this field, so a missing or different origin is not a change.
 
 `detection_status` is one of `detected`, `not detected`, `parse error`, `not collected`, or `error (exit N)`. A known exit other than 0 is a collector error even when an envelope was written, listed as `error (exit N)`. Exit 0 with no evidence file is `error (exit 0)`, the same rule the scan uses when a collector writes nothing. Exit 2 with a parsed envelope is not an error: collectors use that for "not detected", and the status then follows `platform_detected`. Exit 2 with no file is `error (exit 2)`. An unreadable envelope is `parse error`. When no exit code was stored, status follows `platform_detected`.
 

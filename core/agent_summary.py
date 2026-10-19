@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Safe summary of an aiscan scan folder.
 
-Agents read this instead of collector envelopes. The JSON has four lists:
+Agents read this instead of collector envelopes. The JSON has ``run_origin``
+(who started the scan, when, and why) and four lists:
 
 - ``collectors``: collector name, ``platform_detected``, detection status
 - ``findings``: collector, severity, title, category, evidence count.
@@ -184,6 +185,10 @@ def build_agent_summary(
             "detection_status": status,
         })
 
+    # Local import. common snapshots USERPROFILE when it is first imported,
+    # and the sanitizer tests set that variable before they import it.
+    import run_origin
+
     collectors.sort(key=lambda item: item["collector"])
     findings.sort(key=_finding_sort_key)
     caveats.sort(key=_finding_sort_key)
@@ -192,8 +197,10 @@ def build_agent_summary(
         row.pop("_test_data", None)
     for row in caveats:
         row.pop("_test_data", None)
+    # Missing run-origin.txt is an older folder. unknown, not an error.
     return {
         "aiscan_version": tool_version(),
+        "run_origin": run_origin.load_run_origin(root),
         "collectors": collectors,
         "findings": findings,
         "collector_errors": errors,

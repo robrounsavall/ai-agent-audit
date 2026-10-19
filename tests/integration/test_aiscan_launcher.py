@@ -45,7 +45,7 @@ real = os.environ["AISCAN_REAL_PYTHON"]
 # aiscan.ps1 probes `python -c` for 3.11+ before any collector runs.
 if argv[0] == "-c":
     sys.exit(subprocess.call([real, *argv]))
-forward = {"tool_version.py", "run_status.py", "scan_diff.py", "build-briefing.py", "agent_summary.py"}
+forward = {"tool_version.py", "run_status.py", "scan_diff.py", "build-briefing.py", "agent_summary.py", "run_origin.py"}
 
 
 def evidence_file():
@@ -174,16 +174,27 @@ class TestAiscanLauncher(unittest.TestCase):
         env.pop("AISCAN_VERSION", None)
         env.pop("AISCAN_AGENT_MODE", None)
         env.pop("AISCAN_REDACT", None)
+        env.pop("AISCAN_LAUNCHED_BY", None)
+        env.pop("AISCAN_REASON", None)
         return env
 
-    def _run(self, mode: str, *args: str, script: Path = LAUNCHER) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self,
+        mode: str,
+        *args: str,
+        script: Path = LAUNCHER,
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = self._env(mode)
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             [PWSH, "-NoProfile", "-File", str(script), *args],
             check=False,
             capture_output=True,
             text=True,
             timeout=90,
-            env=self._env(mode),
+            env=env,
             cwd=str(script.parent),
         )
 
@@ -319,6 +330,101 @@ class TestAiscanLauncher(unittest.TestCase):
         logged = self.log_path.read_text(encoding="utf-8")
         self.assertIn("discover.py", logged)
         self.assertNotIn("tool_version.py", logged)
+        self.assertNotIn("run_origin.py", logged)
+
+    def test_run_origin_parameter_beats_env(self):
+        out = self.tmp / "origin-param"
+        secret = "AKIA" + "0" * 16
+        proc = self._run(
+            "ok-exit0",
+            "copilot",
+            "-OutDir",
+            str(out),
+            "-LaunchedBy",
+            "Claude Code",
+            "-Reason",
+            "smoke test " + secret,
+            extra_env={
+                "AISCAN_LAUNCHED_BY": "from-env",
+                "AISCAN_REASON": "from-env-reason",
+            },
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn(
+            "(unredacted by default: real secrets / paths / transcript metadata - delete when done)",
+            proc.stdout,
+        )
+        self.assertNotIn("Redaction was on for this run", proc.stdout)
+        text = (out / "run-origin.txt").read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines(), [text.strip()])
+        self.assertIn("launched_by=Claude Code", text)
+        self.assertIn("reason=smoke test ", text)
+        self.assertNotIn("from-env", text)
+        self.assertNotIn(secret, text)
+        self.assertNotIn("AKIA", text)
+        self.assertIn("REDACTED:aws_key", text)
+        raw = (out / "run-origin.txt").read_bytes()
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
+        summary = json.loads((out / "evidence" / "agent-summary.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["run_origin"]["launched_by"], "Claude Code")
+        self.assertNotIn(secret, json.dumps(summary["run_origin"]))
+        self.assertRegex(
+            summary["run_origin"]["started"],
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$",
+        )
+
+    def test_run_origin_env_when_parameters_are_omitted(self):
+        out = self.tmp / "origin-env"
+        proc = self._run(
+            "ok-exit0",
+            "copilot",
+            "-OutDir",
+            str(out),
+            extra_env={
+                "AISCAN_LAUNCHED_BY": "from-env",
+                "AISCAN_REASON": "env reason",
+            },
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        text = (out / "run-origin.txt").read_text(encoding="utf-8")
+        self.assertIn("launched_by=from-env", text)
+        self.assertIn("reason=env reason", text)
+
+    def test_run_origin_unknown_when_nothing_is_set(self):
+        out = self.tmp / "origin-unknown"
+        proc = self._run("ok-exit0", "copilot", "-OutDir", str(out))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        text = (out / "run-origin.txt").read_text(encoding="utf-8")
+        self.assertIn("launched_by=unknown", text)
+        self.assertIn("reason=unknown", text)
+        summary = json.loads((out / "evidence" / "agent-summary.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["run_origin"]["launched_by"], "unknown")
+        self.assertEqual(summary["run_origin"]["reason"], "unknown")
+
+    def test_summary_on_an_old_folder_without_run_origin(self):
+        out = self.tmp / "old-scan"
+        evidence = out / "evidence"
+        evidence.mkdir(parents=True)
+        (evidence / "claude.json").write_text(
+            json.dumps(
+                {
+                    "collector": "claude",
+                    "version": "1.0.0",
+                    "platform_detected": True,
+                    "findings": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        proc = self._run("ok-exit0", "summary", "-OutDir", str(out))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        start = proc.stdout.find("{")
+        self.assertGreaterEqual(start, 0, proc.stdout + proc.stderr)
+        summary = json.loads(proc.stdout[start:])
+        self.assertEqual(summary["run_origin"]["launched_by"], "unknown")
+        self.assertEqual(summary["run_origin"]["started"], "unknown")
+        self.assertEqual(summary["run_origin"]["reason"], "unknown")
+        self.assertFalse((out / "run-origin.txt").exists())
 
 
 if __name__ == "__main__":

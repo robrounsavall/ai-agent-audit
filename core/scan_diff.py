@@ -126,7 +126,11 @@ _RULE_FIELDS = (
 
 
 def load_scan(root: str | Path) -> dict[str, dict[str, Any]]:
-    """Load collector envelopes from ``<root>/evidence``, skipping derived files."""
+    """Load collector envelopes from ``<root>/evidence``, skipping derived files.
+
+    ``run-origin.txt`` sits next to ``evidence/`` and is not a collector.
+    A missing or different origin line is not a change.
+    """
     evidence = Path(root) / "evidence"
     envelopes: dict[str, dict[str, Any]] = {}
     if not evidence.is_dir():
