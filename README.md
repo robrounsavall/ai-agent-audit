@@ -21,7 +21,7 @@ gaps. See [docs/report-v2.md](docs/report-v2.md).
 
 ## Quick start
 
-You need Windows 10/11, PowerShell 5.1+ and Python 3.10+ on PATH. See
+You need Windows 10/11, PowerShell 5.1+ and Python 3.11+ on PATH. See
 [Prerequisites](#prerequisites).
 
 **Option 1: run the latest release without cloning.** In PowerShell:
@@ -68,7 +68,7 @@ teams have no inventory of any of it. aiscan answers the first question:
 - **Transcripts stay local.** Raw chat content only ever lands in the local
   `raw/` directory. The `evidence/` layer carries counts, sizes, hashes, and
   redacted samples — the contract is [SCHEMA.md](SCHEMA.md).
-- Pure stdlib Python: every collector runs on stock Python 3.10+ with no
+- Pure stdlib Python: every collector runs on stock Python 3.11+ with no
   pip install. Small enough to audit before you run it.
 
 ## What it collects
@@ -101,7 +101,10 @@ not in v0.2.0.
 Required:
 
 - Windows 10/11, PowerShell 5.1+
-- Python 3.10+ on PATH
+- Python 3.11+ on PATH (collectors import `tomllib`, which is not in 3.10)
+
+`aiscan.ps1` checks `python` before it scans and stops if that Python is
+older than 3.11.
 
 Every collector runs on that alone: pure stdlib, no pip install.
 
@@ -140,7 +143,7 @@ installer, `get-aiscan.ps1`. The installer downloads the zip to
 `%LOCALAPPDATA%\aiscan\<version>`, checks the SHA256, extracts it, and runs
 `aiscan.ps1` with whatever arguments you give it. No admin rights, and no
 machine-wide execution policy change: only the child PowerShell that runs
-aiscan gets `-ExecutionPolicy Bypass`. Python 3.10+ (and gitleaks, for
+aiscan gets `-ExecutionPolicy Bypass`. Python 3.11+ (and gitleaks, for
 `secrets-scan`) are still needed, as above. Output goes wherever you point
 `-OutDir`, or to a throwaway temp folder if you don't.
 
@@ -181,6 +184,11 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 # Writes evidence\changes.json against the previous sibling scan first.
 .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Briefing
 
+# Safe summary of a scan you already have. Prints collector, detection,
+# and finding severity / title / category / evidence count only.
+# Titles are masked. No -OutDir uses the newest folder under %LOCALAPPDATA%\aiscan-results.
+.\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
+
 # Same, with an explicit previous scan folder
 .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Previous C:\scans\2026-10-01 -Briefing
 
@@ -192,6 +200,9 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 
 # Mask usernames/paths/secrets for output you intend to share
 .\aiscan.ps1 all -Redact
+
+# Paths relative to the scan folder; no "Evidence kept at" line
+.\aiscan.ps1 all -OutDir C:\scans\today -AgentMode
 
 # What would be scanned, reading nothing
 .\aiscan.ps1 discover
@@ -233,6 +244,26 @@ it, or set `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `GROK_HOME`.
 
 More on scan history and telemetry: [docs/scan-history.md](docs/scan-history.md),
 [docs/telemetry-import.md](docs/telemetry-import.md).
+
+## Output and exit codes
+
+The script prints a summary table, then a closing line. `-AgentMode` prints
+paths relative to the scan folder and omits `Evidence kept at`. The table
+and error lines stay. Text a collector writes to its own error stream is
+unchanged, and can still contain a path.
+
+When `-Briefing` writes the HTML and the default browser opens, the script
+prints `Opened briefing in default browser`.
+
+| Exit | Meaning |
+|---|---|
+| 0 | The scan finished. "Platform not detected" is a normal result. |
+| 1 | Usage error. `-Here` and `-OutDir` cannot be used together. |
+| 2 | A collector failed, wrote no evidence file, or wrote a file that is not a readable evidence envelope. |
+| 3 | Every collector was fine and only the briefing failed to generate. Whether the browser opened is separate; a failed open still exits 0 when the HTML was written. |
+
+Comparing this scan with the previous one is a warning when it fails. That
+warning does not change the exit code.
 
 MCP server inventory (Claude, Cursor, Codex, Grok Build and repo-scoped
 configs). This is a separate tool and prints real local paths by default:

@@ -4,10 +4,12 @@ Claude permission and settings collector.
 Usage:
     python claude.py --evidence-root ./audit-run [--scope all] [--dry-run]
 
-Reads ~/.claude/settings.json, settings.local.json, and project-level
-.claude/settings.local.json files. Emits permission rules and security findings,
-including the effective start permission mode (permissions.defaultMode, or the
-implicit auto default) and the Claude Code version seen in transcripts.
+Reads ~/.claude/settings.json and settings.local.json, plus
+<repo>/.claude/settings.json and settings.local.json under the repo roots.
+Project settings live in the repo, not under ~/.claude/projects (that folder
+is transcripts). Emits permission rules and security findings, including the
+effective start permission mode (permissions.defaultMode, or the implicit
+auto default) and the Claude Code version seen in transcripts.
 
 Also reads the Claude desktop app MCP registry (%APPDATA%/Claude/
 claude_desktop_config.json) and flags ~/.claude side artifacts that persist
@@ -37,21 +39,22 @@ from common import (
     add_base_args,
     classify_rule,
     compute_scope_hash,
+    config_has_remote_url,
+    default_repo_roots,
     finish_collector,
-    load_json,
     make_envelope,
     make_finding,
     make_rule,
+    read_json_object,
     sanitize_text,
     secret_types_in,
     validate_evidence_root,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.4.0"
 
 COLLECTOR = "claude"
 
-LOCALHOST_RE = re.compile(r"localhost|127\.0\.0\.1|::1", re.I)
 WILDCARD_BASH_RE = re.compile(r"^Bash\([^)]*\*[^)]*\)$", re.I)
 CURL_WGET_RE = re.compile(r"^Bash\((curl|wget)\s*[:*]", re.I)
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+")
@@ -81,14 +84,16 @@ def safe_url(value: str) -> str:
         return ""
     try:
         parts = urlsplit(text)
+        if not parts.scheme or not parts.netloc:
+            return text[:160]
+        # hostname and port can raise ValueError (bad IPv6, port above 65535).
+        host = parts.hostname or parts.netloc
+        port = parts.port
+        if port:
+            host = f"{host}:{port}"
+        return urlunsplit((parts.scheme, host, parts.path.rstrip("/"), "", ""))
     except ValueError:
-        return text[:160]
-    if not parts.scheme or not parts.netloc:
-        return text[:160]
-    host = parts.hostname or parts.netloc
-    if parts.port:
-        host = f"{host}:{parts.port}"
-    return urlunsplit((parts.scheme, host, parts.path.rstrip("/"), "", ""))
+        return "invalid-endpoint"
 
 
 def truthy(value: object) -> bool:
@@ -182,26 +187,67 @@ def scope_matches(scope_filter: str, scope: str) -> bool:
     return True
 
 
-def discover_settings(
-    scope_filter: str, claude_home: Path, claude_projects: Path
-) -> list[tuple[str, str, Path]]:
-    """Return (scope, scope_label, path) tuples."""
-    found: list[tuple[str, str, Path]] = []
-    for name, scope in (("settings.json", "user"), ("settings.local.json", "user")):
-        path = claude_home / name
-        if path.exists() and scope_matches(scope_filter, scope):
-            found.append((scope, "global", path))
-
-    if claude_projects.exists() and scope_matches(scope_filter, "workspace"):
-        for path in claude_projects.rglob("settings.local.json"):
-            if ".claude" not in path.parts:
-                continue
+def _repo_candidates(repo_roots: list[Path]) -> list[Path]:
+    """Git repos that are a root or a direct child of a root. Same walk as cursor."""
+    found: list[Path] = []
+    seen: set[str] = set()
+    for root in repo_roots:
+        if not root.exists():
+            continue
+        candidates: list[Path] = []
+        if (root / ".git").exists():
+            candidates.append(root)
+        try:
+            for child in root.iterdir():
+                if child.is_dir() and (child / ".git").exists():
+                    candidates.append(child)
+        except OSError:
+            continue
+        for repo in candidates:
             try:
-                rel = path.relative_to(claude_projects)
-                label = rel.parts[0] if rel.parts else "project"
-            except ValueError:
-                label = "project"
-            found.append(("project", label, path))
+                key = str(repo.resolve()).lower()
+            except OSError:
+                key = str(repo).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(repo)
+    return found
+
+
+def discover_settings(
+    scope_filter: str,
+    claude_home: Path,
+    repo_roots: list[Path],
+) -> list[tuple[str, str, Path]]:
+    """Return (scope, scope_label, path) for user and project Claude settings.
+
+    Project files are <repo>/.claude/settings.json and settings.local.json.
+    ~/.claude/projects is the transcript store and is not searched.
+    """
+    found: list[tuple[str, str, Path]] = []
+    seen: set[str] = set()
+
+    def add(scope: str, label: str, path: Path) -> None:
+        if not path.is_file() or not scope_matches(scope_filter, scope):
+            return
+        try:
+            key = str(path.resolve()).lower()
+        except OSError:
+            key = str(path).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        found.append((scope, label, path))
+
+    for name in ("settings.json", "settings.local.json"):
+        add("user", "global", claude_home / name)
+
+    if scope_matches(scope_filter, "project"):
+        for repo in _repo_candidates(repo_roots):
+            label = repo.name or "project"
+            for name in ("settings.json", "settings.local.json"):
+                add("project", label, repo / ".claude" / name)
     return found
 
 
@@ -282,7 +328,7 @@ def extract_rules_from_settings(
     rules: list[dict] = []
     findings: list[dict] = []
     if scope == "project":
-        settings_source = "project settings.local.json"
+        settings_source = f"project {source_path.name}"
         source_kind = "project_config"
     else:
         settings_source = source_path.name
@@ -418,19 +464,17 @@ def extract_rules_from_settings(
     mcp_servers = data.get("mcpServers") or data.get("enabledMcpjsonServers") or {}
     if isinstance(mcp_servers, dict):
         for server_name, config in mcp_servers.items():
-            config_text = str(config)
-            if config_text and not LOCALHOST_RE.search(config_text):
-                if "url" in config_text.lower() or "http" in config_text.lower():
-                    findings.append(
-                        make_finding(
-                            "claude.mcp.external_server",
-                            "high",
-                            "MCP Tooling",
-                            "Claude MCP server may point outside localhost",
-                            sample_redacted=f"mcpServers.{server_name}",
-                            tags=["mcp_external"],
-                        )
+            if config_has_remote_url(config):
+                findings.append(
+                    make_finding(
+                        "claude.mcp.external_server",
+                        "high",
+                        "MCP Tooling",
+                        "Claude MCP server may point outside localhost",
+                        sample_redacted=f"mcpServers.{server_name}",
+                        tags=["mcp_external"],
                     )
+                )
             if isinstance(config, dict):
                 rules.append(
                     make_rule(
@@ -473,12 +517,28 @@ def desktop_config_path() -> Path:
     return APPDATA / "Claude" / "claude_desktop_config.json"
 
 
+def _read_settings_object(path: Path) -> tuple[dict | None, str | None]:
+    """(data, None) parsed, (None, None) missing, (None, reason) unusable."""
+    return read_json_object(path)
+
+
 def collect_desktop_mcp(config_path: Path) -> tuple[list[dict], list[dict], int]:
     """Parse mcpServers from the Claude desktop app config, if present."""
-    if not config_path.exists():
+    data, err = _read_settings_object(config_path)
+    if err:
+        return [], [
+            make_finding(
+                "claude.config.parse_error",
+                "low",
+                "General Tooling",
+                "Claude desktop config is present but could not be parsed",
+                sample_redacted=err,
+                tags=["config_parse_error"],
+            )
+        ], 0
+    if not data:
         return [], [], 0
-    data = load_json(config_path)
-    servers = (data or {}).get("mcpServers")
+    servers = data.get("mcpServers")
     if not isinstance(servers, dict) or not servers:
         return [], [], 0
     rules, findings = extract_rules_from_settings(
@@ -552,15 +612,24 @@ def scan_side_artifacts(claude_home: Path) -> list[dict]:
     return findings
 
 
-def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
-    settings_files = discover_settings(scope_filter, tp.claude_home, tp.claude_projects)
+def collect(
+    scope_filter: str,
+    tp: paths.ToolPaths,
+    repo_roots: list[Path] | None = None,
+) -> dict:
+    roots = list(repo_roots) if repo_roots is not None else default_repo_roots()
+    settings_files = discover_settings(scope_filter, tp.claude_home, roots)
     desktop_config = desktop_config_path()
+    desktop_present = desktop_config.is_file()
+    code_home = tp.claude_home.exists()
     scanned_paths = [str(p) for _, _, p in settings_files]
-    if desktop_config.exists():
+    if desktop_present:
         scanned_paths.append(str(desktop_config))
     scope_hash = compute_scope_hash(scanned_paths or [str(tp.claude_home)])
 
-    platform_detected = tp.claude_home.exists()
+    # A Desktop-only install has no Claude Code home. Project settings in a
+    # repo also count, so a missing home does not skip the scan.
+    platform_detected = code_home or desktop_present or bool(settings_files)
     envelope = make_envelope(
         COLLECTOR,
         __version__,
@@ -576,13 +645,17 @@ def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
     all_findings: list[dict] = []
     seen_finding_ids: set[str] = set()
     settings_envs: list[tuple[str, dict]] = []
+    parse_reasons: list[str] = []
     user_mode = ""
     user_mode_key = ""
     auto_disabled = False
     bypass_disabled = False
 
     for scope, scope_label, path in settings_files:
-        data = load_json(path)
+        data, err = _read_settings_object(path)
+        if err:
+            parse_reasons.append(err)
+            continue
         if not data:
             continue
         if scope == "user" and path.name == "settings.json":
@@ -604,9 +677,31 @@ def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
     desktop_rules, desktop_findings, desktop_servers = collect_desktop_mcp(desktop_config)
     all_rules.extend(desktop_rules)
     for finding in desktop_findings:
+        if finding["id"] == "claude.config.parse_error":
+            reason = str(finding.get("sample_redacted") or "unreadable")
+            parse_reasons.append(reason)
+            continue
         if finding["id"] not in seen_finding_ids:
             seen_finding_ids.add(finding["id"])
             all_findings.append(finding)
+
+    if parse_reasons:
+        unique: list[str] = []
+        for reason in parse_reasons:
+            if reason not in unique:
+                unique.append(reason)
+        seen_finding_ids.add("claude.config.parse_error")
+        all_findings.append(
+            make_finding(
+                "claude.config.parse_error",
+                "low",
+                "General Tooling",
+                "Claude settings file is present but could not be parsed",
+                evidence_count=len(parse_reasons),
+                sample_redacted="; ".join(unique)[:180],
+                tags=["config_parse_error"],
+            )
+        )
 
     for finding in scan_side_artifacts(tp.claude_home):
         if finding["id"] not in seen_finding_ids:
@@ -651,7 +746,9 @@ def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
 
     version = detect_claude_code_version(tp.claude_projects)
     user_in_scope = scope_matches(scope_filter, "user")
-    if user_in_scope and not user_mode and not auto_disabled:
+    # The implicit auto default is a Claude Code behavior. Desktop-only
+    # installs have no Claude Code home and must not be reported as auto.
+    if user_in_scope and code_home and not user_mode and not auto_disabled:
         sample = (
             "permissions.defaultMode=unset; implicit default=auto "
             f"(Claude Code 2.1.283+); version={version or 'unknown'}"
@@ -681,6 +778,8 @@ def collect(scope_filter: str, tp: paths.ToolPaths) -> dict:
 
     if not user_in_scope:
         mode_label, mode_source = "", "not scanned (scope)"
+    elif not code_home:
+        mode_label, mode_source = "", "not scanned (no Claude Code home)"
     elif user_mode:
         mode_label = user_mode
         if user_mode == "auto" and auto_disabled:
@@ -741,11 +840,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Claude permission collector")
     add_base_args(parser)
     paths.add_path_args(parser)
+    parser.add_argument(
+        "--repo-roots",
+        default=None,
+        help="Comma-separated repo scan roots for project .claude/settings.json "
+        "and settings.local.json (default: common code dirs under the user profile)",
+    )
     args = parser.parse_args()
     evidence_root = validate_evidence_root(args.evidence_root)
     tp = paths.resolve_from_args(args)
 
-    envelope = collect(args.scope, tp)
+    if args.repo_roots:
+        repo_roots = [Path(p.strip()) for p in args.repo_roots.split(",") if p.strip()]
+    else:
+        repo_roots = default_repo_roots()
+
+    envelope = collect(args.scope, tp, repo_roots=repo_roots)
     if not envelope["platform_detected"]:
         finish_collector(envelope, evidence_root, dry_run=args.dry_run)
         sys.exit(2)

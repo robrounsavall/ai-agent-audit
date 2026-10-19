@@ -81,6 +81,19 @@ def _pill(severity: str) -> str:
     return f'<span class="pill {label}">{_esc(label)}</span>'
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and not value.strip():
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 def _fmt_num(value: Any) -> str:
     if value is None:
         return "—"
@@ -186,13 +199,13 @@ def _headline(summary: dict[str, Any], location_rows: list[tuple[str, str, str]]
             "Providers sometimes move tokens or transcripts off the machine. "
             "Resolved findings on a quiet collector are not evidence the issue is fixed.",
         )
-    if int(summary.get("new_high_or_critical") or 0) > 0:
+    if _as_int(summary.get("new_high_or_critical")) > 0:
         return (
             "New high-severity findings since the last scan.",
             "High and critical items that were not in the previous scan, "
             "plus anything else that was added or removed.",
         )
-    changed = int(summary.get("collectors_changed") or 0)
+    changed = _as_int(summary.get("collectors_changed"))
     if changed:
         return (
             "What changed since the last scan.",
@@ -217,7 +230,7 @@ def _non_mcp_allow_count(collectors: dict[str, Any], side: str) -> int:
                 continue
             if str(rule.get("rule_type") or "") == "mcp_tool":
                 continue
-            total += int(rule.get("count") or 1)
+            total += _as_int(rule.get("count") or 1, 1)
     return total
 
 
@@ -234,7 +247,7 @@ def _metric_strip(summary: dict[str, Any], allow_added: int) -> str:
         parts.append(
             "<div>"
             f'<div class="lbl">{_esc(label)}</div>'
-            f'<div class="v{tone_cls}">{_esc(int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0)}</div>'
+            f'<div class="v{tone_cls}">{_esc(_as_int(value))}</div>'
             "</div>"
         )
     return f'<div class="sev-strip">{"".join(parts)}</div>'
@@ -434,7 +447,7 @@ def _diff_section(env: dict[str, Any]) -> str:
             + "</p></div>"
         )
     flagged = len([f for f in (env.get("findings") or []) if isinstance(f, dict)])
-    drift_n = int(summary.get("drift_warnings") or 0)
+    drift_n = _as_int(summary.get("drift_warnings"))
     parts.append(_block(
         "Flagged since the last scan",
         f"{flagged} change finding" if flagged == 1 else f"{flagged} change findings",
@@ -454,17 +467,17 @@ def _diff_section(env: dict[str, Any]) -> str:
     parts.append(_block(
         "Findings",
         (
-            f"{int(summary.get('findings_added') or 0)} added · "
-            f"{int(summary.get('findings_resolved') or 0)} resolved · "
-            f"{int(summary.get('findings_severity_changed') or 0)} severity changed"
+            f"{_as_int(summary.get('findings_added'))} added · "
+            f"{_as_int(summary.get('findings_resolved'))} resolved · "
+            f"{_as_int(summary.get('findings_severity_changed'))} severity changed"
         ),
         _table(["Change", "Severity", "Collector", "Finding"], finding_rows),
     ))
     parts.append(_block(
         "MCP servers",
         (
-            f"{int(summary.get('mcp_servers_added') or 0)} added · "
-            f"{int(summary.get('mcp_servers_removed') or 0)} removed"
+            f"{_as_int(summary.get('mcp_servers_added'))} added · "
+            f"{_as_int(summary.get('mcp_servers_removed'))} removed"
         ),
         _table(["Change", "Collector", "Server"], _named_rows(collectors, "mcp_servers")),
     ))
@@ -480,7 +493,7 @@ def _diff_section(env: dict[str, Any]) -> str:
     ))
     parts.append(_block(
         "Summary counters",
-        f"{int(summary.get('counters_moved') or 0)} moved",
+        f"{_as_int(summary.get('counters_moved'))} moved",
         _table(["Collector", "Counter", "Before", "After"], _counter_rows(collectors)),
     ))
     if not any(part for part in parts[3:]):

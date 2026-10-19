@@ -13,12 +13,14 @@ Run:
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
@@ -26,6 +28,7 @@ os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
 import bootstrap  # noqa: E402,F401
 
 import codex  # noqa: E402
+import compressed  # noqa: E402
 import paths  # noqa: E402
 
 AWS_KEY = "AKIA" + "B" * 16
@@ -167,6 +170,79 @@ class TestCollectAgainstFixtures(unittest.TestCase):
         )
         self.assertNotIn(secret, sample)
         self.assertNotIn("AKIA", sample)
+
+    def test_compressed_session_logs_are_counted_not_read(self):
+        self._write_session(
+            "rollout-a.jsonl",
+            [{
+                "timestamp": "2026-05-20T10:00:00Z",
+                "payload": {
+                    "type": "message",
+                    "content": 'Approved command prefixes: ["git status"]',
+                },
+            }],
+        )
+        # Not valid zstd. The collector must count these and not try to open them.
+        (self.sessions / "rollout-b.jsonl.zst").write_bytes(b"not-a-real-archive")
+        nested = self.sessions / "2026" / "05"
+        nested.mkdir(parents=True)
+        (nested / "rollout-c.jsonl.zst").write_bytes(b"\x28\xb5\x2f\xfd")
+        # A plain .zst that is not a session log is not part of the count.
+        (self.sessions / "notes.zst").write_bytes(b"nope")
+
+        opened: list[str] = []
+        real_path_open = Path.open
+        real_open = builtins.open
+
+        def spy_path_open(self, *args, **kwargs):
+            opened.append(str(self))
+            return real_path_open(self, *args, **kwargs)
+
+        def spy_open(file, *args, **kwargs):
+            if isinstance(file, (str, Path)):
+                opened.append(str(file))
+            return real_open(file, *args, **kwargs)
+
+        # Force the pre-3.14 path even when this interpreter has compression.zstd.
+        with (
+            mock.patch.object(compressed, "zstd_backend", return_value=None),
+            mock.patch.object(Path, "open", spy_path_open),
+            mock.patch("builtins.open", spy_open),
+        ):
+            env = codex.collect(self.tp)
+        self.assertTrue(any(name.endswith(".jsonl") and not name.endswith(".jsonl.zst") for name in opened))
+        self.assertFalse(any(name.endswith(".jsonl.zst") for name in opened))
+        self.assertEqual(env["summary"]["session_files"], 1)
+        self.assertEqual(env["summary"]["compressed_session_files"], 2)
+        hits = [f for f in env["findings"] if f["id"] == "codex.sessions.compressed_not_scanned"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["severity"], "low")
+        self.assertEqual(hits[0]["evidence_count"], 2)
+        self.assertEqual(hits[0]["title"], "2 compressed Codex session logs not scanned")
+        self.assertEqual(hits[0]["tags"], ["coverage_gap"])
+        self.assertTrue(any(r["rule"] == "git status" for r in env["rules"]))
+        blob = json.dumps(env)
+        self.assertNotIn("rollout-b", blob)
+        self.assertNotIn("rollout-c", blob)
+
+    def test_one_compressed_log_uses_singular_title(self):
+        (self.sessions / "only.jsonl.zst").write_bytes(b"x")
+        with mock.patch.object(compressed, "zstd_backend", return_value=None):
+            env = codex.collect(self.tp)
+        hits = [f for f in env["findings"] if f["id"] == "codex.sessions.compressed_not_scanned"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["title"], "1 compressed Codex session log not scanned")
+        self.assertEqual(env["summary"]["compressed_session_files"], 1)
+        self.assertEqual(env["summary"]["session_files"], 0)
+
+    def test_no_finding_when_no_compressed_logs(self):
+        self._write_session("rollout-a.jsonl", [])
+        env = codex.collect(self.tp)
+        self.assertEqual(env["summary"]["compressed_session_files"], 0)
+        self.assertNotIn(
+            "codex.sessions.compressed_not_scanned",
+            [f["id"] for f in env["findings"]],
+        )
 
 
 if __name__ == "__main__":

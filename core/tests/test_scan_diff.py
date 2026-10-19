@@ -182,8 +182,9 @@ class TestDiffContent(unittest.TestCase):
         self.assertEqual(env["collector"], "changes")
         self.assertEqual(env["version"], "1.0.0")
         for key in (
-            "collector", "version", "ran_at", "host", "platform_detected",
-            "scope_hash", "summary", "findings", "rules", "raw_pointers",
+            "collector", "version", "aiscan_version", "ran_at", "host",
+            "platform_detected", "scope_hash", "summary", "findings", "rules",
+            "raw_pointers",
         ):
             self.assertIn(key, env)
         self.assertEqual(env["summary"]["comparison"], "diff")
@@ -478,6 +479,34 @@ class TestHistorySelection(unittest.TestCase):
                     scan_diff.main(["--current", str(current), "--history-root", str(root / "nope")]),
                     1,
                 )
+
+    def test_agent_mode_prints_changes_relative_and_keeps_error_paths(self):
+        import tempfile
+        previous = os.environ.get("AISCAN_AGENT_MODE")
+        os.environ["AISCAN_AGENT_MODE"] = "1"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                current = root / "only"
+                _write(current, "claude", ran_at="2026-10-07T00:00:00+00:00")
+                buf = io.StringIO()
+                with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+                    code = scan_diff.main(["--current", str(current)])
+                self.assertEqual(code, 0)
+                text = buf.getvalue()
+                self.assertIn("Wrote " + str(Path("evidence") / "changes.json"), text)
+                self.assertNotIn(str(current), text)
+
+                missing = root / "missing"
+                err = io.StringIO()
+                with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                    self.assertEqual(scan_diff.main(["--current", str(missing)]), 1)
+                self.assertIn(str(missing), err.getvalue())
+        finally:
+            if previous is None:
+                os.environ.pop("AISCAN_AGENT_MODE", None)
+            else:
+                os.environ["AISCAN_AGENT_MODE"] = previous
 
 
 class TestRenderer(unittest.TestCase):

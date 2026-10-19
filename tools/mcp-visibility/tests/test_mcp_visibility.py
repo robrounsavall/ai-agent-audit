@@ -305,6 +305,26 @@ class TestPureHelpers(unittest.TestCase):
         self.assertFalse(src.parse_ok)
         self.assertEqual(records, [])
 
+    def test_non_list_args_and_bad_ipv6_do_not_raise(self):
+        self.assertIsNone(mcp.extract_url({"args": 5}))
+        cfg = {"args": 5, "url": "http://[::1"}
+        self.assertEqual(mcp.extract_url(cfg), "http://[::1")
+        self.assertEqual(mcp.endpoint_locality("http://[::1"), "unknown")
+        status, _evidence, keys, _secret = mcp.classify_auth(cfg)
+        self.assertIsInstance(status, str)
+        self.assertEqual(keys, [])
+        record = mcp.ServerRecord(
+            server_name="odd",
+            platform="cursor",
+            scope="user",
+            source_file=Path("mcp.json"),
+            source_kind="mcp_json",
+            config=cfg,
+        )
+        row = record.as_dict()
+        self.assertEqual(row["endpoint_locality"], "unknown")
+        self.assertEqual(row["args"], [])
+
 
 class TestRedactPathBoundary(unittest.TestCase):
     def test_short_home_does_not_eat_a_longer_directory(self):

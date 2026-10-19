@@ -153,7 +153,11 @@ def _render_cell(cell: dict[str, Any], column_id: str) -> str:
         if mcp_count is None:
             meta_bits.append("MCP not recorded")
         else:
-            meta_bits.append(f"{int(mcp_count)} MCP")
+            try:
+                shown = int(mcp_count)
+            except (TypeError, ValueError, OverflowError):
+                shown = 0
+            meta_bits.append(f"{shown} MCP")
     return (
         f"<td class='access-cell access-cell--{_esc(value)}'>"
         f"<a class='pill {pill}' href='#{_esc(anchor)}'>{_esc(value)}</a>"

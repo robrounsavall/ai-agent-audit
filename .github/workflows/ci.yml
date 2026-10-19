@@ -37,6 +37,27 @@ jobs:
         run: |
           .\scripts\test-component.ps1 -Name ${{ matrix.component }}
 
+  # Python 3.14 ships compression.zstd. The real-decompression tests skip
+  # when that module cannot be imported (the 3.11 job above).
+  zstd-py314:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Assert stdlib zstd backend
+        run: python -c "import compression.zstd"
+      - name: Zstd component tests
+        shell: pwsh
+        run: |
+          $failed = 0
+          foreach ($component in @("core", "codex", "chat-history", "pii-scan", "secrets-scan", "integration")) {
+            .\scripts\test-component.ps1 -Name $component
+            if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          }
+          exit $failed
+
   mcp-visibility:
     runs-on: windows-latest
     steps:

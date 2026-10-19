@@ -207,17 +207,17 @@ def render_approvals_section(env: dict[str, Any] | None) -> str:
         _tile("Denials", _count(summary, "denials"), "reject"),
         _tile(
             "Config rule",
-            int(config.get("approvals") or _count(summary, "config_approvals")),
+            _count(config, "approvals") or _count(summary, "config_approvals"),
             "no prompt",
         ),
         _tile(
             "User",
-            int(user.get("approvals") or _count(summary, "user_approvals")),
+            _count(user, "approvals") or _count(summary, "user_approvals"),
             "prompted",
         ),
         _tile(
             "Hook",
-            int(hook.get("approvals") or _count(summary, "hook_approvals")),
+            _count(hook, "approvals") or _count(summary, "hook_approvals"),
             "hook",
         ),
     ]
