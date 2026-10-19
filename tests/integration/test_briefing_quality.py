@@ -54,6 +54,25 @@ def _secret(rule: str, sample: str, severity: str = "high", **extra) -> dict:
     return row
 
 
+class TestPiiTitles(unittest.TestCase):
+    def setUp(self):
+        self.briefing = _load_briefing()
+
+    def test_test_card_finding_uses_a_plain_label(self):
+        title = self.briefing._display_finding_title({
+            "id": "pii_scan.test_card",
+            "title": "TEST_CARD detected (2 hit(s) across 1 file(s))",
+            "evidence_count": 2,
+            "tags": ["pii", "test_data"],
+        })
+        self.assertEqual(title, "Test card numbers across 1 file")
+
+    def test_lowercase_test_card_title_is_not_rewritten(self):
+        # The envelope title has to stay in the ENTITY detected (...) form.
+        raw = "test card numbers detected (2 hit(s) across 1 file(s))"
+        self.assertIsNone(self.briefing._plain_pii_title(raw))
+
+
 class TestSecretPresentation(unittest.TestCase):
     def setUp(self):
         self.briefing = _load_briefing()
@@ -263,6 +282,43 @@ class TestBriefingHtmlQuality(unittest.TestCase):
         self.assertIn(f"Cursor composer over by {over} days", html)
         self.assertNotIn("Claude Code over by", html)
         self.assertNotIn("1 files", html)
+
+
+class CodexActivityTests(unittest.TestCase):
+    """Cover: Codex last used from the codex summary; Desktop last opened as its own row."""
+
+    def test_cover_summary_and_desktop(self):
+        from collections import Counter
+
+        mod = _load_briefing()
+        envelopes = {"codex": _envelope("codex", summary={
+            "last_used": "2026-10-04",
+            "desktop_installed": True,
+            "desktop_last_opened": "2026-10-15",
+        })}
+        html = mod.render_cover_status(envelopes, {}, Counter())
+        self.assertIn("2026-10-04", html)
+        self.assertIn("Codex Desktop app", html)
+        self.assertIn("opened 2026-10-15", html)
+        self.assertLess(html.index("2026-10-04"), html.index("Codex Desktop app"))
+        self.assertIn("<strong>1</strong>", html)
+        self.assertEqual(mod._tool_last_used("codex", envelopes), "2026-10-04")
+
+    def test_no_desktop_row_when_not_installed(self):
+        from collections import Counter
+
+        mod = _load_briefing()
+        envelopes = {"codex": _envelope("codex", summary={"last_used": "2026-10-04"})}
+        html = mod.render_cover_status(envelopes, {}, Counter())
+        self.assertNotIn("Codex Desktop app", html)
+        self.assertNotIn("opened", html)
+
+    def test_tools_table_last_used_not_dead(self):
+        mod = _load_briefing()
+        envelopes = {"codex": _envelope("codex", summary={"last_used": "2026-10-04"})}
+        rows = mod.build_tools_table(envelopes, None, {})
+        codex_row = next(row for row in rows if row["key"] == "codex")
+        self.assertEqual(codex_row["last_used"], "2026-10-04")
 
 
 if __name__ == "__main__":
