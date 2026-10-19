@@ -179,7 +179,7 @@ class TestCollectGrouping(unittest.TestCase):
             (root / "chat-history").mkdir()
             out = root / "secrets-scan"
             with mock.patch.object(ss, "find_scanner", return_value=("gitleaks", "gitleaks")), mock.patch.object(
-                ss, "run_gitleaks", return_value=raw
+                ss, "run_gitleaks", return_value=(raw, None)
             ):
                 envelope, ok, hits = ss.collect(root, [], out)
             self.assertTrue(ok)
@@ -204,7 +204,7 @@ class TestOutputDirExcluded(unittest.TestCase):
 
         def fake_gitleaks(target, _bin):
             seen.append(Path(target).resolve())
-            return []
+            return [], None
 
         with mock.patch.object(ss, "find_scanner", return_value=("gitleaks", "gitleaks")), mock.patch.object(
             ss, "run_gitleaks", side_effect=fake_gitleaks
