@@ -8,9 +8,15 @@ envelope (``collector`` = ``changes``) plus a ``changes`` object that holds the
 per-collector diff.
 
 History is just a directory of past scan folders. When ``--previous`` is
-omitted, the most recent sibling folder under ``--history-root`` (default: the
-parent of ``--current``) is chosen by the latest ``ran_at`` strictly before
-the current scan. ``changes.json`` is never used as a timestamp source.
+omitted, an earlier sibling under ``--history-root`` (default: the parent of
+``--current``) is chosen by the latest ``ran_at`` strictly before the current
+scan. A sibling with the same collector names wins over a smaller one. A
+sibling with fewer than half as many collectors is skipped, so a
+one-collector retry does not become the baseline for a full scan.
+``changes.json`` is never used as a timestamp source.
+
+A current scan that contains only one collector does not write a diff unless
+``--previous`` is set. An explicit ``--previous`` folder is compared as given.
 
 A collector that used to report data and now reports nothing, or is no longer
 detected, is flagged as possible data-location drift. A collector version
@@ -21,6 +27,8 @@ Public entry points for the integration step
 ``run(current_root, previous_root=None, history_root=None, dry_run=False)``
     Resolve the previous scan if needed, build the envelope, and write
     ``evidence/changes.json`` unless ``dry_run`` is set. Returns the envelope.
+    Returns None and writes nothing when the current scan has one collector
+    and ``previous_root`` was not passed.
 
 ``main(argv=None)``
     CLI. Exit 0 on success, 1 on a bad path.
@@ -31,7 +39,9 @@ Public entry points for the integration step
     an empty scan.
 
 ``resolve_previous(current_root, history_root=None)``
-    Pick the previous scan folder, or None.
+    Pick the previous scan folder, or None. Prefers the newest earlier
+    scan with the same collectors. Otherwise the newest that is not
+    much smaller. See ``baseline_too_small``.
 
 ``load_scan(root)``
     Load ``evidence/*.json`` except ``changes.json``. Keyed by collector name.
@@ -179,23 +189,45 @@ def _latest_ran_at(envelopes: dict[str, dict[str, Any]]) -> tuple[datetime | Non
     return best, raw
 
 
+def baseline_too_small(candidate_count: int, current_count: int) -> bool:
+    """True when ``candidate_count`` is fewer than half of ``current_count``.
+
+    A one-collector retry is too small to be the baseline for a full scan
+    (1 compared with 11). Exactly half is still eligible (2 compared with 4,
+    6 compared with 11). An empty current scan does not reject candidates.
+    """
+    if current_count <= 0:
+        return False
+    return candidate_count * 2 < current_count
+
+
 def resolve_previous(
     current_root: str | Path,
     history_root: str | Path | None = None,
 ) -> Path | None:
-    """Pick the newest sibling scan whose ``ran_at`` is strictly earlier.
+    """Pick an earlier sibling scan to compare against, or None.
 
     ``history_root`` defaults to the parent of ``current_root``. Folders
     without collector evidence are ignored. A sibling whose latest ``ran_at``
     is the same as or later than the current scan is ignored, so a newer
     folder sitting next to an older re-diff is not treated as the baseline.
+    ``changes.json`` is not a timestamp.
+
+    Among the remaining folders, the newest one with the same collector names
+    as this scan wins. If none match, the newest that is not
+    ``baseline_too_small`` wins. A one-collector retry is not the baseline
+    for a full scan. Pass ``--previous`` to compare against a specific folder
+    anyway; this function is only the automatic pick.
     """
     current_resolved = Path(current_root).resolve()
     history = Path(history_root).resolve() if history_root else current_resolved.parent
     if not history.is_dir():
         return None
-    current_when, _current_raw = _latest_ran_at(load_scan(current_resolved))
-    best: tuple[datetime, str, Path] | None = None
+    current_scan = load_scan(current_resolved)
+    current_when, _current_raw = _latest_ran_at(current_scan)
+    current_names = set(current_scan)
+    exact: tuple[datetime, str, Path] | None = None
+    fallback: tuple[datetime, str, Path] | None = None
     try:
         children = list(history.iterdir())
     except OSError:
@@ -209,15 +241,24 @@ def resolve_previous(
             continue
         if resolved == current_resolved:
             continue
-        when, _raw = _latest_ran_at(load_scan(resolved))
+        envelopes = load_scan(resolved)
+        when, _raw = _latest_ran_at(envelopes)
         if when is None:
             continue
         if current_when is not None and when >= current_when:
             continue
         candidate = (when, child.name, resolved)
-        if best is None or (candidate[0], candidate[1]) > (best[0], best[1]):
-            best = candidate
-    return best[2] if best else None
+        names = set(envelopes)
+        if names == current_names:
+            if exact is None or (candidate[0], candidate[1]) > (exact[0], exact[1]):
+                exact = candidate
+            continue
+        if baseline_too_small(len(names), len(current_names)):
+            continue
+        if fallback is None or (candidate[0], candidate[1]) > (fallback[0], fallback[1]):
+            fallback = candidate
+    chosen = exact or fallback
+    return chosen[2] if chosen else None
 
 
 def _as_dict_list(value: Any) -> list[dict[str, Any]]:
@@ -880,9 +921,15 @@ def run(
     history_root: str | Path | None = None,
     *,
     dry_run: bool = False,
-) -> dict[str, Any]:
-    """Resolve, diff, and write ``evidence/changes.json`` unless ``dry_run``."""
+) -> dict[str, Any] | None:
+    """Resolve, diff, and write ``evidence/changes.json`` unless ``dry_run``.
+
+    Returns None without writing when this scan has one collector and
+    ``previous_root`` was not passed. A retry must not replace a diff.
+    """
     current_path = Path(current_root)
+    if previous_root is None and len(load_scan(current_path)) == 1:
+        return None
     if previous_root is None:
         resolved = resolve_previous(current_path, history_root)
     else:
@@ -905,7 +952,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--previous",
         default=None,
-        help="Evidence root for the prior scan. If omitted, pick the latest earlier sibling under --history-root",
+        help=(
+            "Evidence root for the prior scan. If omitted, pick the newest earlier "
+            "sibling with the same collectors, or else the newest that has at least "
+            "half as many. A one-collector scan writes nothing unless this is set"
+        ),
     )
     parser.add_argument(
         "--history-root",
@@ -951,6 +1002,13 @@ def main(argv: list[str] | None = None) -> int:
         args.history_root,
         dry_run=args.dry_run,
     )
+    if envelope is None:
+        print(
+            "Single-collector scan: not writing a diff. "
+            "Pass --previous to compare against a chosen baseline.",
+            file=sys.stderr,
+        )
+        return 0
     summary = envelope.get("summary") or {}
     if summary.get("comparison") == "first_scan":
         print(

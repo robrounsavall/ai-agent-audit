@@ -21,9 +21,12 @@ so PowerShell 5.1 does not have to pass a ``python -c`` string.
     python core/agent_summary.py --evidence-root <scan folder>
     python core/agent_summary.py --results-root <parent of scan folders>
 
-``--results-root`` picks the newest child folder that contains ``evidence``.
-A child named ``yyyyMMdd-HHmmss`` is dated from that name. Any other child
-is dated from its modification time.
+``--results-root`` picks the newest child folder that contains
+``evidence`` and has at least half as many collectors as the largest child
+here. A newer one-collector retry does not hide a full scan, and a newer
+scan missing one collector is still eligible. A child named
+``yyyyMMdd-HHmmss`` is dated from that name. Any other child is dated from
+its modification time. If every child is the same size, the newest wins.
 """
 
 from __future__ import annotations
@@ -71,12 +74,20 @@ _NO_SCANNER_CATEGORY = "Secrets Exposure"
 
 
 def newest_scan_dir(results_root: str | Path) -> Path | None:
-    """Return the newest scan folder under ``results_root``, or None.
+    """Return the newest full scan folder under ``results_root``, or None.
 
     A scan folder is a child directory that contains ``evidence``. Timestamp
     names (``yyyyMMdd-HHmmss``, local time) sort by that clock. Other names
     sort by modification time. The later moment wins. Equal moments use the
     folder name.
+
+    A folder is eligible when it has at least half as many collectors as the
+    largest child, the same cutoff ``scan_diff`` uses for an automatic
+    baseline. Derived files (``changes.json``, ``agent-summary.json``,
+    ``run-status.json``) do not count. A newer one-collector retry is
+    skipped when a larger scan is present. A newer scan missing one
+    collector is still eligible. If every folder is empty, or they are all
+    the same size, the newest folder is used.
     """
     root = Path(results_root)
     if not root.is_dir():
@@ -98,8 +109,31 @@ def newest_scan_dir(results_root: str | Path) -> Path | None:
         candidates.append((when, child.name, child))
     if not candidates:
         return None
-    candidates.sort(key=lambda item: (item[0], item[1]))
-    return candidates[-1][2]
+    pool = _full_scan_candidates(candidates)
+    pool.sort(key=lambda item: (item[0], item[1]))
+    return pool[-1][2]
+
+
+def _full_scan_candidates(
+    candidates: list[tuple[float, str, Path]],
+) -> list[tuple[float, str, Path]]:
+    """Keep folders with at least half as many collectors as the largest.
+
+    Same cutoff as ``scan_diff.baseline_too_small``: fewer than half is too
+    small, and exactly half still counts. The largest folder itself always
+    qualifies, so a non-empty list of real scans is never dropped.
+    """
+    from scan_diff import baseline_too_small, load_scan
+
+    counts = {path: len(load_scan(path)) for _when, _name, path in candidates}
+    largest = max(counts.values(), default=0)
+    if largest <= 0:
+        return candidates
+    eligible = [
+        item for item in candidates
+        if not baseline_too_small(counts[item[2]], largest)
+    ]
+    return eligible or candidates
 
 
 def _folder_when(path: Path) -> float:
@@ -277,7 +311,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--results-root",
-        help="Parent of scan folders. The newest child that contains evidence/ is used.",
+        help=(
+            "Parent of scan folders. The newest child with at least half as "
+            "many collectors as the largest child is used, so a one-collector "
+            "retry is skipped."
+        ),
     )
     parser.add_argument(
         "--write",

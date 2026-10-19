@@ -37,7 +37,7 @@ C:\scans\
       changes.json
 ```
 
-When you run a briefing, aiscan compares the folder you just scanned with the previous one and writes `changes.json` into the new folder before it builds the HTML. If you pass `-Previous`, that folder is the baseline. If you do not, the tool looks at the other folders next to this one and picks the one whose evidence time is the latest time still earlier than this scan.
+When you run a briefing, aiscan compares the folder you just scanned with the previous one and writes `changes.json` into the new folder before it builds the HTML. If you pass `-Previous`, that folder is the baseline, even if it is smaller. If you do not, the tool looks at the other folders next to this one and prefers the newest earlier scan with the same collectors. An older scan with that same collector set is preferred over a newer one missing a collector. A scan with fewer than half as many collectors is skipped. A one-collector run does not write a diff unless `-Previous` is set.
 
 `changes.json` is the list of what was added, what went away, and which collector went quiet. The Changes tab reads that file. The other tabs do not treat it as another agent.
 

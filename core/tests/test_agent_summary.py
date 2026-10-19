@@ -593,6 +593,81 @@ class TestNewestFolder(unittest.TestCase):
             os.utime(custom, (100, 100))
             self.assertEqual(agent_summary.newest_scan_dir(root).name, "20900101-000000")
 
+    def test_newer_partial_does_not_hide_the_full_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            first = parent / "20261001-000000"
+            partial = parent / "20261005-000000"
+            second = parent / "20261007-000000"
+            for name in ("claude", "cursor", "codex", "copilot"):
+                _write_envelope(first, name)
+            _write_envelope(
+                first,
+                "claude",
+                findings=[_finding("low", "Full finding", "General Tooling", 1)],
+            )
+            _write_envelope(
+                partial,
+                "codex",
+                findings=[_finding("high", "Partial finding", "Shell Execution", 2)],
+            )
+            self.assertEqual(agent_summary.newest_scan_dir(parent).name, "20261001-000000")
+            out = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(io.StringIO()):
+                code = agent_summary.main(["--results-root", str(parent)])
+            self.assertEqual(code, 0)
+            summary = json.loads(out.getvalue())
+            titles = [row["title"] for row in summary["findings"]]
+            self.assertIn("Full finding", titles)
+            self.assertNotIn("Partial finding", titles)
+            collectors = {row["collector"] for row in summary["collectors"]}
+            self.assertEqual(collectors, {"claude", "cursor", "codex", "copilot"})
+
+            for name in ("claude", "cursor", "codex", "copilot"):
+                _write_envelope(second, name)
+            _write_envelope(
+                second,
+                "claude",
+                findings=[_finding("medium", "Later full finding", "General Tooling", 1)],
+            )
+            self.assertEqual(agent_summary.newest_scan_dir(parent).name, "20261007-000000")
+            out = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(io.StringIO()):
+                code = agent_summary.main(["--results-root", str(parent), "--print-id"])
+            self.assertEqual(code, 0)
+            self.assertEqual(out.getvalue().strip(), "20261007-000000")
+
+    def test_older_extra_collector_does_not_win_forever(self):
+        names = (
+            "claude", "cowork", "cursor", "codex", "copilot", "chat-history",
+            "git-posture", "secrets-scan", "grok", "grok-bot", "pii-scan",
+            "accounts",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            older = parent / "20261001-000000"
+            newer = parent / "20261007-000000"
+            for name in names:
+                _write_envelope(older, name)
+            for name in names[:-1]:
+                _write_envelope(newer, name)
+            self.assertEqual(
+                agent_summary.newest_scan_dir(parent).name, "20261007-000000"
+            )
+
+    def test_newer_scan_missing_one_collector_is_not_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            older = parent / "20261001-000000"
+            newer = parent / "20261007-000000"
+            for name in ("claude", "cursor", "codex", "copilot"):
+                _write_envelope(older, name)
+            for name in ("claude", "cursor", "codex"):
+                _write_envelope(newer, name)
+            self.assertEqual(
+                agent_summary.newest_scan_dir(parent).name, "20261007-000000"
+            )
+
     def test_ignores_directories_without_evidence_and_missing_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

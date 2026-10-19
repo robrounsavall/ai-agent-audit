@@ -16,8 +16,10 @@
     Folder that contains an evidence\ directory from a real scan.
 
 .PARAMETER Previous
-    Earlier evidence root. When omitted on a real scan, scan_diff picks the
-    newest earlier sibling under the parent of -EvidenceRoot (or -HistoryRoot).
+    Earlier evidence root. When omitted on a real scan, scan_diff prefers the
+    newest earlier sibling with the same collectors, and skips a sibling with
+    fewer than half as many. A one-collector evidence root writes no diff
+    unless -Previous is set. -Previous is used as given.
 
 .PARAMETER HistoryRoot
     Folder of dated scan directories. Used only when -Previous is omitted.

@@ -23,8 +23,9 @@
     'discover' is read-only and writes nothing.
     'summary' reads a finished scan and prints a safe summary (collector,
     detection, and finding severity, title, category, and evidence count).
-    It does not run collectors. Omit -OutDir to use the newest folder under
-    %LOCALAPPDATA%\aiscan-results.
+    It does not run collectors. Omit -OutDir to use the newest scan under
+    %LOCALAPPDATA%\aiscan-results that has at least half as many collectors
+    as the largest run there. A newer one-collector folder is skipped.
     'all' runs the 12 offline collectors and prints a combined summary.
     'accounts' reports which identity each tool is signed in as. It stores
     emails and plan names, never token or API key values. -Redact stays off
@@ -95,7 +96,9 @@
 .PARAMETER Previous
     Evidence root of the prior scan. When -Briefing is set, aiscan runs
     core\\scan_diff.py against this folder before building the HTML. Omit to
-    let scan_diff pick the newest earlier sibling of -OutDir.
+    let scan_diff pick the newest earlier sibling with the same collectors,
+    or else the newest that has at least half as many. A one-collector run
+    does not write a diff unless -Previous is set. -Previous is used as given.
 
 .PARAMETER HistoryRoot
     Folder of dated scan directories. Passed to scan_diff as --history-root
@@ -158,7 +161,8 @@
 .EXAMPLE
     .\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
     Safe summary of a scan that already finished. No -OutDir selects the newest
-    folder under %LOCALAPPDATA%\aiscan-results.
+    full scan under %LOCALAPPDATA%\aiscan-results. A newer one-collector
+    folder is skipped.
 
 .EXAMPLE
     .\aiscan.ps1 all -OutDir C:\scans\today -AgentMode
@@ -1059,7 +1063,14 @@ if ($Briefing -and -not $parsed) {
     Write-Host "Briefing skipped because $Collector did not write a readable evidence file." -ForegroundColor Yellow
 }
 if ($Briefing -and $parsed -and ($code -eq 0 -or $code -eq 2)) {
-    Invoke-ScanDiff -Root $root
+    # A one-collector retry must not become the next full scan's baseline,
+    # and it must not replace a diff already in this folder.
+    if ($Previous) {
+        Invoke-ScanDiff -Root $root
+    }
+    else {
+        Write-Host "Single-collector run: not comparing with an earlier scan. Pass -Previous to choose a baseline." -ForegroundColor DarkGray
+    }
     Invoke-AiscanBriefing -Root $root
 }
 Remove-PeekRoot -Root $root

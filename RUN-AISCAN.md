@@ -123,13 +123,15 @@ drives:
 
     $out = Join-Path $env:LOCALAPPDATA ("aiscan-results\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 
-Stop if `$out` already exists. Later runs in the same `aiscan-results`
-folder let the report show what changed since the last scan.
+Stop if `$out` already exists. Later full runs in the same `aiscan-results`
+folder let the report show what changed since the last full scan. A
+one-collector folder in that directory is not used as the baseline.
 
 A kept scan prints `OUTDIR_ID=<folder name>` and nothing else from the
 path. For the folder above, that name is the timestamp, and the folder is
 `$env:LOCALAPPDATA\aiscan-results\<that id>`. `.\aiscan.ps1 summary` with
-no `-OutDir` reads the newest folder there.
+no `-OutDir` reads the newest full scan there. A newer one-collector
+folder is skipped.
 
 ## 5. Run the scan
 Tell the user the scan is starting. It can take several minutes on a
@@ -186,7 +188,10 @@ machine with a lot of chat history, so give the command at least a
     finding count). It does not print the hostname, finding titles, or
     samples. Without `-AgentMode`, the detailed view still prints those.
     With `-Redact` and without `-AgentMode`, the hostname in that view is
-    masked as `<host>`. Then report.
+    masked as `<host>`. That folder is a partial scan. It is not the
+    comparison baseline for the next full scan, and `summary` with no
+    `-OutDir` still prefers a scan that has at least half as many
+    collectors as the largest folder there. Then report.
   - `pii-scan` can show `error (exit 2)` when it has no chat export and no
     native chat folder to scan. Report that as nothing to scan. Do not
     treat it as a bug to patch.
@@ -232,8 +237,8 @@ set in this window:
 
     .\aiscan.ps1 summary -OutDir $out
 
-With no `-OutDir`, `summary` reads the newest folder under
-`$env:LOCALAPPDATA\aiscan-results`.
+With no `-OutDir`, `summary` reads the newest full scan under
+`$env:LOCALAPPDATA\aiscan-results`. A newer one-collector folder is skipped.
 
 Read only the JSON that command prints. It lists each collector, whether
 the tool was detected, and each finding's severity, title, category, and
