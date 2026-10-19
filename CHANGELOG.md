@@ -104,6 +104,17 @@ each collector's `__version__` and appear in the evidence envelopes.
   that has at least half as many collectors as the largest folder there,
   so a newer one-collector folder is skipped and a scan missing one
   collector is not. An explicit previous folder is still compared as given.
+- `pii-scan` 1.3.1 used a 5 MiB cap. Compressed logs over that cap were
+  reported as "could not be read", and plain files over 5 MiB were skipped
+  with no note. It now uses the shared 64 MiB limit and 30 second unpack
+  budget. A file over that cap, plain or compressed, is a low coverage
+  finding: "N file(s) not scanned (too large)", with the count in the title
+  and in `evidence_count`. Corrupt or timed-out compressed files are still
+  "could not be read".
+- Two pii finding ids used the prefix `pii-scan.` while every other pii
+  finding uses `pii_scan.`. They are now `pii_scan.target_missing` and
+  `pii_scan.compressed_files_unreadable`. Each id changes once. The next
+  diff can show the old id as resolved and the new id as added.
 - The process exits 2 when a collector errors, writes no evidence file, or
   writes a file that is not a readable envelope. It exits 3 when the only
   failure is the briefing. A normal run, including "platform not detected",
