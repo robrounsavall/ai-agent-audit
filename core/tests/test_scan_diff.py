@@ -432,6 +432,7 @@ class TestHistorySelection(unittest.TestCase):
             previous = root / "2026-10-01"
             current = root / "2026-10-07"
             _write(previous, "claude", ran_at="2026-10-01T00:00:00+00:00", summary={"total_messages": 1})
+            _write(previous, "cursor", ran_at="2026-10-01T00:00:00+00:00")
             _write(
                 current,
                 "claude",
@@ -439,6 +440,7 @@ class TestHistorySelection(unittest.TestCase):
                 summary={"total_messages": 4},
                 findings=[_finding("claude.new_high", "critical", "New critical")],
             )
+            _write(current, "cursor", ran_at="2026-10-07T00:00:00+00:00")
             buf = io.StringIO()
             err = io.StringIO()
             with redirect_stdout(buf), redirect_stderr(err):
@@ -463,6 +465,7 @@ class TestHistorySelection(unittest.TestCase):
             root = Path(tmp)
             current = root / "only"
             _write(current, "claude", ran_at="2026-10-07T00:00:00+00:00")
+            _write(current, "cursor", ran_at="2026-10-07T00:00:00+00:00")
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 code = scan_diff.main(["--current", str(current)])
             self.assertEqual(code, 0)
@@ -489,6 +492,7 @@ class TestHistorySelection(unittest.TestCase):
                 root = Path(tmp)
                 current = root / "only"
                 _write(current, "claude", ran_at="2026-10-07T00:00:00+00:00")
+                _write(current, "cursor", ran_at="2026-10-07T00:00:00+00:00")
                 buf = io.StringIO()
                 with redirect_stdout(buf), redirect_stderr(io.StringIO()):
                     code = scan_diff.main(["--current", str(current)])
@@ -507,6 +511,129 @@ class TestHistorySelection(unittest.TestCase):
                 os.environ.pop("AISCAN_AGENT_MODE", None)
             else:
                 os.environ["AISCAN_AGENT_MODE"] = previous
+
+    def test_size_rule_keeps_half_and_skips_less(self):
+        self.assertFalse(scan_diff.baseline_too_small(2, 4))
+        self.assertTrue(scan_diff.baseline_too_small(1, 4))
+        self.assertTrue(scan_diff.baseline_too_small(1, 11))
+        self.assertFalse(scan_diff.baseline_too_small(6, 11))
+        # 5 is fewer than half of 11.
+        self.assertTrue(scan_diff.baseline_too_small(5, 11))
+        self.assertFalse(scan_diff.baseline_too_small(1, 1))
+        self.assertFalse(scan_diff.baseline_too_small(0, 0))
+
+    def test_exact_collector_set_beats_a_newer_smaller_run(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            full = root / "2026-10-01"
+            half = root / "2026-10-05"
+            current = root / "2026-10-07"
+            for name in ("claude", "cursor", "codex", "copilot"):
+                _write(full, name, ran_at="2026-10-01T00:00:00+00:00")
+                _write(current, name, ran_at="2026-10-07T00:00:00+00:00")
+            _write(half, "claude", ran_at="2026-10-05T00:00:00+00:00")
+            _write(half, "cursor", ran_at="2026-10-05T00:00:00+00:00")
+            self.assertEqual(scan_diff.resolve_previous(current, root), full.resolve())
+
+    def test_half_size_is_used_when_nothing_matches(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            half = root / "2026-10-01"
+            tiny = root / "2026-10-05"
+            current = root / "2026-10-07"
+            for name in ("claude", "cursor", "codex", "copilot"):
+                _write(current, name, ran_at="2026-10-07T00:00:00+00:00")
+            _write(half, "claude", ran_at="2026-10-01T00:00:00+00:00")
+            _write(half, "cursor", ran_at="2026-10-01T00:00:00+00:00")
+            _write(tiny, "codex", ran_at="2026-10-05T00:00:00+00:00")
+            self.assertEqual(scan_diff.resolve_previous(current, root), half.resolve())
+
+    def test_full_then_partial_then_full_skips_the_partial(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            names = ["claude", "cursor", "codex", "copilot"]
+            first = root / "2026-10-01"
+            partial = root / "2026-10-05"
+            second = root / "2026-10-07"
+            for name in names:
+                _write(first, name, ran_at="2026-10-01T00:00:00+00:00", summary={"total_messages": 2})
+                _write(
+                    second,
+                    name,
+                    ran_at="2026-10-07T00:00:00+00:00",
+                    summary={"total_messages": 3},
+                    findings=[_finding(f"{name}.kept", "low", "Kept")],
+                )
+            _write(
+                first,
+                "claude",
+                ran_at="2026-10-01T00:00:00+00:00",
+                summary={"total_messages": 2},
+                findings=[_finding("claude.kept", "low", "Kept")],
+            )
+            _write(
+                partial,
+                "codex",
+                ran_at="2026-10-05T00:00:00+00:00",
+                summary={"total_messages": 9},
+                findings=[_finding("codex.only", "high", "Only in the retry")],
+            )
+
+            self.assertEqual(scan_diff.resolve_previous(second, root), first.resolve())
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = scan_diff.main(["--current", str(second)])
+            self.assertEqual(code, 0)
+            written = json.loads((second / "evidence" / "changes.json").read_text(encoding="utf-8"))
+            self.assertEqual(written["summary"]["previous_label"], "2026-10-01")
+            collectors = written["changes"]["collectors"]
+            self.assertEqual(collectors["cursor"]["platform"]["change"], "unchanged")
+            resolved = {
+                item["id"]
+                for entry in collectors.values()
+                for item in entry["findings"]["resolved"]
+            }
+            self.assertNotIn("codex.only", resolved)
+            self.assertNotIn("claude.kept", resolved)
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = scan_diff.main(["--current", str(second), "--previous", str(partial)])
+            self.assertEqual(code, 0)
+            explicit = json.loads((second / "evidence" / "changes.json").read_text(encoding="utf-8"))
+            self.assertEqual(explicit["summary"]["previous_label"], "2026-10-05")
+            self.assertEqual(
+                explicit["changes"]["collectors"]["cursor"]["platform"]["change"],
+                "newly_detected",
+            )
+            explicit_resolved = {
+                item["id"]
+                for entry in explicit["changes"]["collectors"].values()
+                for item in entry["findings"]["resolved"]
+            }
+            self.assertIn("codex.only", explicit_resolved)
+
+            sentinel = {"collector": "changes", "summary": {"marker": "keep-me"}}
+            (partial / "evidence" / "changes.json").write_text(
+                json.dumps(sentinel), encoding="utf-8"
+            )
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                code = scan_diff.main(["--current", str(partial), "--dry-run"])
+            self.assertEqual(code, 0)
+            self.assertIn("not writing a diff", err.getvalue())
+            self.assertEqual(
+                json.loads((partial / "evidence" / "changes.json").read_text(encoding="utf-8")),
+                sentinel,
+            )
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = scan_diff.main(["--current", str(partial), "--previous", str(first)])
+            self.assertEqual(code, 0)
+            forced = json.loads((partial / "evidence" / "changes.json").read_text(encoding="utf-8"))
+            self.assertEqual(forced["summary"]["previous_label"], "2026-10-01")
+            self.assertNotEqual(forced["summary"].get("marker"), "keep-me")
 
 
 class TestRenderer(unittest.TestCase):

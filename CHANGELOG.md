@@ -93,6 +93,17 @@ each collector's `__version__` and appear in the evidence envelopes.
   summary line (collector, detected, finding count). With `-Redact` and
   without `-AgentMode`, that view masks the hostname as `<host>`.
   `-Redact` stays off unless you pass it.
+- A one-collector run was used as the comparison baseline when it was the
+  newest earlier folder. The next full scan then reported collectors as
+  newly detected or no longer detected, and findings as resolved. Auto-pick
+  now prefers an earlier scan with the same collectors, including an older
+  one over a newer scan that is missing a collector, and skips a scan with
+  fewer than half as many. A one-collector run does not write a diff
+  unless you pass `--previous` (or `-Previous`). `aiscan summary` with no
+  `-OutDir` uses the newest scan under `%LOCALAPPDATA%\aiscan-results`
+  that has at least half as many collectors as the largest folder there,
+  so a newer one-collector folder is skipped and a scan missing one
+  collector is not. An explicit previous folder is still compared as given.
 - The process exits 2 when a collector errors, writes no evidence file, or
   writes a file that is not a readable envelope. It exits 3 when the only
   failure is the briefing. A normal run, including "platform not detected",

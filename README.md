@@ -204,12 +204,14 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 .\aiscan.ps1 claude
 
 # Persistent output + HTML briefing.
-# Writes evidence\changes.json against the previous sibling scan first.
+# Writes evidence\changes.json against the previous full sibling scan.
+# A one-collector folder is not the baseline. Pass -Previous to force one.
 .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Briefing
 
 # Safe summary of a scan you already have. Prints collector, detection,
 # and finding severity / title / category / evidence count only.
-# Titles are masked. No -OutDir uses the newest folder under %LOCALAPPDATA%\aiscan-results.
+# Titles are masked. No -OutDir uses the newest full scan under
+# %LOCALAPPDATA%\aiscan-results. A newer one-collector folder is skipped.
 .\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
 
 # Same, with an explicit previous scan folder

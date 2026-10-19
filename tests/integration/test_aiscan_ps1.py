@@ -218,6 +218,41 @@ function python {
 """
 
 
+def _briefing_writer(log_path: Path) -> str:
+    log = str(log_path).replace("'", "''")
+    return f"""
+function python {{
+    if ($args -contains '-c') {{ '3.12.3'; return }}
+    $joined = $args -join ' '
+    if ($joined -like '*scan_diff.py*') {{
+        Add-Content -LiteralPath '{log}' -Value $joined -Encoding utf8
+        $global:LASTEXITCODE = 0
+        return
+    }}
+    if ($joined -like '*build-briefing.py*') {{ $global:LASTEXITCODE = 1; return }}
+    if ($joined -like '*discover.py*') {{
+        '{{"cli_args":[],"native_dirs":{{}}}}'
+        return
+    }}
+    if ($joined -like '*tool_version.py*') {{ 'dev'; $global:LASTEXITCODE = 0; return }}
+    if ($joined -like '*run_status.py*') {{ '0'; $global:LASTEXITCODE = 0; return }}
+    if ($joined -like '*agent_summary.py*') {{ '{{}}'; $global:LASTEXITCODE = 0; return }}
+    $root = $null
+    for ($i = 0; $i -lt $args.Count; $i++) {{
+        if ($args[$i] -eq '--evidence-root') {{ $root = $args[$i + 1] }}
+    }}
+    if (-not $root) {{ $global:LASTEXITCODE = 1; return }}
+    $name = [System.IO.Path]::GetFileNameWithoutExtension([string]$args[0])
+    $ev = Join-Path $root 'evidence'
+    New-Item -ItemType Directory -Force -Path $ev | Out-Null
+    $json = '{{"collector":"' + $name + '","version":"1.0.0","platform_detected":true,"findings":[],"summary":{{}}}}'
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText((Join-Path $ev ($name + '.json')), $json, $utf8)
+    $global:LASTEXITCODE = 0
+}}
+"""
+
+
 @unittest.skipUnless(PWSH, "pwsh is required to run aiscan.ps1")
 class TestSingleCollectorConsole(unittest.TestCase):
     def _run_claude(self, extra: str) -> tuple[int, str]:
@@ -262,6 +297,40 @@ class TestSingleCollectorConsole(unittest.TestCase):
         self.assertNotIn("ZZZ-SAMPLE-LEAK", out)
         self.assertNotIn("host=", out)
         self.assertNotIn("<host>", out)
+
+
+@unittest.skipUnless(PWSH, "pwsh is required to run aiscan.ps1")
+class TestSingleCollectorDiff(unittest.TestCase):
+    def test_briefing_does_not_diff_unless_previous_is_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = root / "scan"
+            log = root / "calls.txt"
+            previous = root / "earlier"
+            (previous / "evidence").mkdir(parents=True)
+            code, text = _run(_call(
+                _briefing_writer(log),
+                f"claude -OutDir '{out}' -Briefing",
+            ))
+            # Briefing generation is stubbed to fail so the test does not try
+            # to open a browser. The stubbed run_status helper reports exit 0.
+            self.assertEqual(code, 0, text)
+            self.assertIn("not comparing with an earlier scan", text)
+            self.assertIn("Briefing generation failed", text)
+            self.assertFalse(log.exists())
+            self.assertFalse((out / "evidence" / "changes.json").exists())
+
+            code, text = _run(_call(
+                _briefing_writer(log),
+                f"claude -OutDir '{out}' -Briefing -Previous '{previous}'",
+            ))
+            self.assertEqual(code, 0, text)
+            self.assertNotIn("not comparing with an earlier scan", text)
+            self.assertIn("Briefing generation failed", text)
+            self.assertTrue(log.is_file(), text)
+            logged = log.read_text(encoding="utf-8")
+            self.assertIn("scan_diff.py", logged)
+            self.assertIn("--previous", logged)
 
 
 if __name__ == "__main__":

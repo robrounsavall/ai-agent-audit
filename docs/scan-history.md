@@ -26,13 +26,23 @@ From the repo (or anywhere `core` is on `PYTHONPATH`):
 python core/scan_diff.py --current C:\scans\2026-10-07
 ```
 
-With `--previous` omitted, the tool looks at sibling folders under the parent of `--current` (override that with `--history-root`) and picks the one whose evidence `ran_at` is the latest time still earlier than this scan. It ignores folders that are not scans, and it ignores `changes.json` so a later diff cannot make an old folder look newer.
+With `--previous` omitted, the tool looks at sibling folders under the parent of `--current` (override that with `--history-root`) and considers the ones whose evidence `ran_at` is strictly earlier than this scan. It ignores folders that are not scans, and it ignores `changes.json` so a later diff cannot make an old folder look newer.
+
+It then picks a baseline in this order:
+
+1. The newest earlier scan that has the same collectors as this scan. An older scan with that same collector set is preferred over a newer one missing a collector.
+2. If none match, the newest earlier scan that has at least half as many collectors. Fewer than half is too small: a one-collector retry is not the baseline for a full scan. Exactly half still counts (2 collectors can baseline a 4-collector scan; 6 can baseline an 11-collector scan).
+3. If every earlier folder is too small, the result is a first scan.
+
+A scan that itself has only one collector does not write `changes.json` unless you pass `--previous`. That keeps a retry from replacing a diff already in the folder.
 
 To point at a specific baseline:
 
 ```
 python core/scan_diff.py --current C:\scans\2026-10-07 --previous C:\scans\2026-10-01
 ```
+
+`--previous` is used as given, even when that folder has fewer collectors.
 
 `--dry-run` prints the result and does not write a file. Otherwise the tool writes `C:\scans\2026-10-07\evidence\changes.json`.
 
