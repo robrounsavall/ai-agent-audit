@@ -19,6 +19,12 @@ chat-history run produced one) plus every native chat location that exists
 (Claude projects, Codex sessions, Cursor projects, Grok sessions). Pass
 `--target DIR` (repeatable) to scan something else.
 
+A file over the shared 64 MiB cap (plain size, or unpacked size for
+`.jsonl.zst`) is not scanned. The evidence lists those files once, as a low
+finding, "N file(s) not scanned (too large)". Compressed files that are
+corrupt or too slow to unpack stay a separate "could not be read" note.
+The decompress time limit is the shared 30 seconds.
+
 | | |
 |---|---|
 | Evidence | `evidence/pii-scan.json` |

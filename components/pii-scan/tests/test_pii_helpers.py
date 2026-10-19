@@ -273,6 +273,8 @@ class TestTestCardNumbers(unittest.TestCase):
         self.assertEqual(hidden["summary"]["target_count"], 2)
         self.assertTrue(all(label.startswith("<path#") for label in hidden["summary"]["targets"]))
         self.assertIn("Target path not found:", hidden["findings"][0]["title"])
+        self.assertEqual(hidden["findings"][0]["id"], "pii_scan.target_missing")
+        self.assertFalse(any(f["id"].startswith("pii-scan.") for f in hidden["findings"]))
         self.assertIn("ZZZTARGETSENTINEL", json.dumps(shown["summary"]["targets"]))
 
     def test_dry_run_does_not_write_raw_files(self):

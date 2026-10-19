@@ -69,7 +69,7 @@ from common import (
 # Major stays 1: the envelope version doubles as the evidence schema major
 # (build-briefing.py gates on it) and the envelope shape is unchanged. The
 # Presidio->stdlib engine swap is internal to the collector.
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 COLLECTOR = "pii-scan"
 
@@ -88,7 +88,9 @@ SEVERITY_BY_ENTITY = {
     "IP_ADDRESS": "medium",
 }
 
-MAX_FILE_BYTES = 5 * 1024 * 1024
+# Same ceiling as secrets-scan and the other collectors: 64 MiB unpacked,
+# and the shared 30 s decompress budget inside compressed.read_text.
+MAX_FILE_BYTES = compressed.MAX_DECOMPRESSED_BYTES
 
 
 # --------------------------------------------------------------------------- #
@@ -255,13 +257,27 @@ def iter_text_files(root: Path) -> Iterable[Path]:
         # A plain file and its .jsonl.zst twin: scan the plain one only.
         if is_zst and compressed.plain_twin(path).is_file():
             continue
-        try:
-            # Compressed size is checked after decompression.
-            if not is_zst and path.stat().st_size > MAX_FILE_BYTES:
+        if not is_zst:
+            # Oversize plain files are still yielded. collect() counts them
+            # instead of skipping them with no note. Stat failures are skipped.
+            try:
+                path.stat()
+            except OSError:
                 continue
-        except OSError:
-            continue
         yield path
+
+
+def _plain_file_too_large(path: Path) -> bool:
+    """True when a plain file is over the shared byte cap.
+
+    Compressed files are judged after unpack, inside ``read_text``.
+    """
+    if compressed.is_compressed(path):
+        return False
+    try:
+        return path.stat().st_size > MAX_FILE_BYTES
+    except OSError:
+        return False
 
 
 def read_text(path: Path) -> str | None:
@@ -418,7 +434,7 @@ def collect(
     for t in missing_targets:
         findings.append(
             make_finding(
-                "pii-scan.target_missing",
+                "pii_scan.target_missing",
                 "low",
                 "PII Exposure",
                 sanitize_text(f"Target path not found: {_evidence_target(t)}"),
@@ -433,11 +449,13 @@ def collect(
             "files_scanned": 0,
             "hits": 0,
             "compressed_files_unreadable": 0,
+            "files_too_large": 0,
         }
         return envelope, []
 
     all_hits: list[dict] = []
     compressed_unreadable = 0
+    files_too_large = 0
     zstd_ok = compressed.zstd_backend() is not None
     files_scanned = 0
     total_hits = 0
@@ -460,6 +478,9 @@ def collect(
             if compressed.is_compressed(file_path) and not zstd_ok:
                 compressed_unreadable += 1
                 continue
+            if _plain_file_too_large(file_path):
+                files_too_large += 1
+                continue
             files_scanned += 1
             if files_scanned % 200 == 0:
                 print(
@@ -468,7 +489,11 @@ def collect(
                 )
             try:
                 hits, private_ips = scan_file(file_path, entities)
-            except (OSError, compressed.TooLarge, compressed.DecompressTimeout, compressed.ZstdUnavailable):
+            except compressed.TooLarge:
+                files_too_large += 1
+                files_scanned -= 1
+                continue
+            except (OSError, compressed.DecompressTimeout, compressed.ZstdUnavailable):
                 if compressed.is_compressed(file_path):
                     compressed_unreadable += 1
                     files_scanned -= 1
@@ -509,11 +534,21 @@ def collect(
                 "were not scanned for PII"
             )
         findings.append(make_finding(
-            "pii-scan.compressed_files_unreadable",
+            "pii_scan.compressed_files_unreadable",
             "low",
             "PII Exposure",
             title,
             evidence_count=compressed_unreadable,
+            tags=["coverage_gap"],
+        ))
+
+    if files_too_large:
+        findings.append(make_finding(
+            "pii_scan.files_too_large",
+            "low",
+            "PII Exposure",
+            f"{files_too_large} file(s) not scanned (too large)",
+            evidence_count=files_too_large,
             tags=["coverage_gap"],
         ))
 
@@ -548,6 +583,7 @@ def collect(
         **_target_summary(targets),
         "files_scanned": files_scanned,
         "compressed_files_unreadable": compressed_unreadable,
+        "files_too_large": files_too_large,
         "files_with_hits": len(file_counts),
         "hits": total_hits,
         "sample_rows_stored": len(all_hits),
