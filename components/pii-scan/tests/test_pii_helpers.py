@@ -249,10 +249,12 @@ class TestTestCardNumbers(unittest.TestCase):
                 envelope, _hits = pii.collect([corpus], ["CREDIT_CARD"], raw)
             finding = envelope["findings"][0]
             csv_text = (raw / "findings.csv").read_text(encoding="utf-8")
+        # A 16-digit card is shorter than 24 characters, so -Redact masks it
+        # completely instead of keeping a first-four/last-four window.
         self.assertNotIn(pan, finding["sample_redacted"])
-        self.assertIn("4242...4242", finding["sample_redacted"])
+        self.assertIn("****REDACTED:TEST_CARD****", finding["sample_redacted"])
         self.assertNotIn(pan, csv_text)
-        self.assertIn("4242...4242", csv_text)
+        self.assertIn("****REDACTED:TEST_CARD****", csv_text)
 
     def test_redact_hides_target_paths_in_the_envelope(self):
         with tempfile.TemporaryDirectory() as td:

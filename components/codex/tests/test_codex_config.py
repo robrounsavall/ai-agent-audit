@@ -23,6 +23,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
@@ -145,6 +146,18 @@ class TestParseConfigToml(unittest.TestCase):
                          "exporter": {"otlp-http": {"endpoint": "http://localhost:14318"}}}}
         _, findings = self.parse(data)
         self.assertIn("codex.telemetry.log_user_prompt_configured", ids(findings))
+
+    def test_otel_summary_masks_endpoint_path_when_redacting(self):
+        endpoint = "https://otel.example/home/" + "zzotel" + "/v1"
+        data = {"protocol": "http/protobuf", "exporter": {"otlp-http": {"endpoint": endpoint}}}
+        with patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+            summary = codex.otel_exporter_summary(data)
+        self.assertNotIn("zzotel", summary["destination"])
+        self.assertIn("otel.example", summary["destination"])
+        self.assertEqual(summary["protocol"], "http/protobuf")
+        with patch.dict(os.environ, {"AISCAN_REDACT": ""}):
+            plain = codex.otel_exporter_summary(data)
+        self.assertIn("zzotel", plain["destination"])
 
     def test_apps_auto_approve(self):
         data = {"apps": {"gmail": {"enabled": True,

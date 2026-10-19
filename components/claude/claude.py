@@ -46,6 +46,7 @@ from common import (
     make_finding,
     make_rule,
     read_json_object,
+    sanitize_text,
     secret_types_in,
     validate_evidence_root,
 )
@@ -168,9 +169,9 @@ def claude_otel_summary(settings_envs: list[tuple[str, dict]]) -> dict[str, obje
 
     return {
         "enabled": enabled,
-        "destination": destination,
-        "protocol": protocol,
-        "service_name": service_name,
+        "destination": sanitize_text(destination),
+        "protocol": sanitize_text(protocol),
+        "service_name": sanitize_text(service_name),
         "headers_configured": headers_configured,
         "sources": sorted(set(source_labels)),
     }

@@ -24,6 +24,7 @@ from pathlib import Path
 
 from common import (
     add_base_args,
+    clip_sanitized,
     compute_scope_hash,
     default_repo_roots,
     finish_collector,
@@ -392,7 +393,9 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
             large_blob_count += 1
             if size > largest_blob:
                 largest_blob = size
-            blob_samples.append(f"{size // (1024 * 1024)}MB {blob_name[:40]}")
+            blob_samples.append(
+                f"{size // (1024 * 1024)}MB {clip_sanitized(blob_name, 40)}"
+            )
 
     # One finding per check. Repeating the same title once per repo made the
     # severity counts and the top of the report list the same issue many times.

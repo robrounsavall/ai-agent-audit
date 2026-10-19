@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS_DIR))
@@ -323,6 +324,19 @@ class TestPureHelpers(unittest.TestCase):
         row = record.as_dict()
         self.assertEqual(row["endpoint_locality"], "unknown")
         self.assertEqual(row["args"], [])
+
+
+class TestRedactPathBoundary(unittest.TestCase):
+    def test_short_home_does_not_eat_a_longer_directory(self):
+        home = Path("/tmp") / ("zzhome" + "dev")
+        longer_name = "zzhome" + "developer"
+        with patch.object(mcp.Path, "home", return_value=home):
+            short = mcp.redact_path(str(home / "proj"))
+            longer = mcp.redact_path(str(home.parent / longer_name / "proj"))
+        self.assertTrue(short.startswith("<userprofile>"))
+        self.assertNotIn("zzhomedev", short)
+        self.assertNotIn("<userprofile>eloper", longer)
+        self.assertIn(longer_name, longer)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ from codex_permissions import collect_permissions
 from common import (
     add_base_args,
     classify_rule,
+    clip_sanitized,
     compute_scope_hash,
     finish_collector,
     is_loopback_url,
@@ -37,6 +38,7 @@ from common import (
     make_rule,
     nested_text,
     parse_iso,
+    sanitize_text,
     secret_types_in,
     sha256_short,
     validate_evidence_root,
@@ -102,9 +104,9 @@ def otel_exporter_summary(otel: dict) -> dict[str, str | bool]:
         else:
             exporter_type = ",".join(sorted(str(k) for k in exporter.keys() if str(k).lower() != "headers"))
     return {
-        "destination": destination,
-        "protocol": protocol,
-        "exporter_type": exporter_type,
+        "destination": sanitize_text(destination),
+        "protocol": sanitize_text(protocol),
+        "exporter_type": sanitize_text(exporter_type),
         "headers_configured": "headers" in exporter if isinstance(exporter, dict) else False,
     }
 
@@ -686,7 +688,7 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None, localapp
                                     "high",
                                     "Shell Execution",
                                     "Codex approval request escalated sandbox permissions",
-                                    command[:80] if command else "require_escalated",
+                                    clip_sanitized(command, 80) if command else "require_escalated",
                                     ts,
                                     ["unbounded_glob"],
                                 )
@@ -712,7 +714,7 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None, localapp
                                     "high",
                                     "Network Egress",
                                     "Codex escalated approval for network command",
-                                    command[:80],
+                                    clip_sanitized(command, 80),
                                     ts,
                                     ["network_egress"],
                                 )
@@ -722,7 +724,7 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None, localapp
                                     "high",
                                     "Data Access",
                                     "Codex command may write outside project root",
-                                    command[:80],
+                                    clip_sanitized(command, 80),
                                     ts,
                                     ["env_read"],
                                 )
@@ -751,7 +753,6 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None, localapp
                                     confidence="medium",
                                 )
                             )
-
             except (OSError, compressed.TooLarge, compressed.DecompressTimeout, compressed.ZstdUnavailable):
                 if compressed.is_compressed(jsonl):
                     compressed_unreadable += 1

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 BRIEFING_PATH = ROOT / "report" / "build-briefing.py"
@@ -434,6 +436,84 @@ class TestBriefingHtmlQuality(unittest.TestCase):
         self.assertIn(f"Cursor composer over by {over} days", html)
         self.assertNotIn("Claude Code over by", html)
         self.assertNotIn("1 files", html)
+
+
+class TestRedactionHardening(unittest.TestCase):
+    def test_sample_format_accepts_new_redact_sample_shapes(self):
+        briefing = _load_briefing()
+        short = "k" * 10
+        short_out = briefing.redact_sample(short, "demo")
+        self.assertEqual(short_out, "****REDACTED:demo****")
+        self.assertTrue(briefing._looks_redacted(short_out))
+        self.assertFalse(briefing._looks_redacted(short))
+        long_out = briefing.redact_sample("START" + ("m" * 30) + "END!!", "demo")
+        self.assertTrue(briefing._looks_redacted(long_out))
+        self.assertTrue(briefing._looks_redacted("ab12...cd34 (generic-api-key)"))
+        self.assertTrue(briefing._looks_redacted("****REDACTED:x****"))
+
+    def test_severity_class_rejects_attribute_injection(self):
+        briefing = _load_briefing()
+        quote_break = "low' onclick='alert(1)"
+        rows, _note = briefing.render_appendix_grouped([{
+            "severity": quote_break,
+            "title": "Synthetic row",
+            "evidence_count": 1,
+            "_collector": "demo",
+        }])
+        self.assertNotIn("onclick", rows)
+        self.assertNotIn(quote_break, rows)
+        self.assertIn("class='pill low'", rows)
+        high_rows, _note = briefing.render_appendix_grouped([{
+            "severity": "High",
+            "title": "Synthetic high",
+            "evidence_count": 1,
+        }])
+        self.assertIn("class='pill high'", high_rows)
+
+        env = {
+            "copilot": _envelope(
+                "copilot",
+                platform_detected=True,
+                rules=[],
+                findings=[{
+                    "id": "demo.posture",
+                    "severity": quote_break,
+                    "category": "Shell Execution",
+                    "title": "Synthetic posture",
+                    "sample_redacted": "",
+                }],
+            )
+        }
+        html = briefing.render_permissions_section(env)
+        self.assertNotIn("onclick", html)
+        self.assertIn("class='pill low'", html)
+
+        _tabs, panels = briefing.render_findings_section([{
+            "id": "demo.row",
+            "severity": 'high" onmouseover="alert(1)',
+            "category": "Shell Execution",
+            "title": "Synthetic finding",
+            "evidence_count": 1,
+            "sample_redacted": "",
+        }])
+        self.assertNotIn("onmouseover", panels)
+        self.assertIn('class="pill low"', panels)
+
+    def test_telemetry_card_masks_endpoint_path_when_redacting(self):
+        briefing = _load_briefing()
+        dest = "https://otel.example/home/" + "zzotel" + "/v1"
+        summary = {
+            "otel_enabled": True,
+            "otel_destination": dest,
+            "otel_protocol": "http/protobuf",
+        }
+        with patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+            html = briefing._render_telemetry_summary("claude", summary)
+        self.assertNotIn("zzotel", html)
+        self.assertIn("otel.example", html)
+        with patch.dict(os.environ, {"AISCAN_REDACT": ""}):
+            plain = briefing._render_telemetry_summary("claude", summary)
+        self.assertIn("zzotel", plain)
 
 
 class CodexActivityTests(unittest.TestCase):

@@ -121,16 +121,21 @@ class TestGroupSecretHits(unittest.TestCase):
         self.assertEqual(findings[0]["placeholder_count"], 0)
 
     def test_placeholder_count_is_every_example_hit(self):
+        # Longer than 24 characters so the redacted sample is still YOUR...HERE.
+        # YOUR_API_KEY_HERE is fully masked and cannot be told from a real secret.
+        long_key = "YOUR" + ("_" * 24) + "HERE"
+        long_token = "YOUR" + ("_" * 25) + "HERE"
         findings = ss.group_secret_hits(
             [
-                _hit("generic-api-key", "a.txt", "YOUR_API_KEY_HERE"),
-                _hit("generic-api-key", "b.txt", "YOUR_TOKEN_HERE"),
+                _hit("generic-api-key", "a.txt", long_key),
+                _hit("generic-api-key", "b.txt", long_token),
                 _hit("generic-api-key", "c.txt", "abcd1234" * 4),
+                _hit("generic-api-key", "d.txt", "YOUR_API_KEY_HERE"),
             ],
             "gitleaks",
         )
         self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0]["evidence_count"], 3)
+        self.assertEqual(findings[0]["evidence_count"], 4)
         self.assertEqual(findings[0]["placeholder_count"], 2)
         self.assertEqual(findings[0]["severity"], "high")
 
