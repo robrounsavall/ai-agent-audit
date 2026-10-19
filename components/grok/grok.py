@@ -17,7 +17,6 @@ import argparse
 import json
 import re
 import sys
-import tomllib
 from pathlib import Path
 
 import paths
@@ -27,16 +26,19 @@ from common import (
     compute_scope_hash,
     default_repo_roots,
     finish_collector,
+    is_loopback_url,
     load_json,
     make_envelope,
     make_finding,
     make_rule,
     parse_iso,
+    read_json_object,
+    read_toml_table,
     secret_types_in,
     validate_evidence_root,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.3.0"
 
 COLLECTOR = "grok"
 
@@ -58,11 +60,9 @@ MCP_EVENT_TYPES = frozenset(
 )
 
 
-def _is_localhost(url: str) -> bool:
-    if not url:
-        return False
-    lower = url.lower()
-    return any(host in lower for host in ("localhost", "127.0.0.1", "::1"))
+def _is_localhost(url: object) -> bool:
+    """True only when url is a string whose host is exactly loopback."""
+    return is_loopback_url(url)
 
 
 def _mcp_args_secret(server_id: str, server_config: dict) -> dict | None:
@@ -173,7 +173,7 @@ def parse_config_toml(data: dict) -> tuple[list[dict], list[dict], dict]:
             )
 
             url = server_config.get("url", "")
-            if url and not _is_localhost(url):
+            if isinstance(url, str) and url.strip() and not _is_localhost(url):
                 findings.append(
                     make_finding(
                         "grok.mcp.non_localhost",
@@ -265,11 +265,30 @@ def parse_config_toml(data: dict) -> tuple[list[dict], list[dict], dict]:
     return (rules, findings, extras)
 
 
+_SESSION_MARKERS = (
+    "summary.json",
+    "chat_history.jsonl",
+    "updates.jsonl",
+    "events.jsonl",
+    "signals.json",
+)
+
+
 def _session_dirs(grok_sessions: Path):
+    """Session directories, including ones whose summary.json is missing."""
     if not grok_sessions.exists():
         return
-    for summary_path in grok_sessions.rglob("summary.json"):
-        yield summary_path.parent
+    seen: set[str] = set()
+    for name in _SESSION_MARKERS:
+        for path in grok_sessions.rglob(name):
+            if not path.is_file():
+                continue
+            parent = path.parent
+            key = str(parent)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield parent
 
 
 def _scan_events_mcp(events_path: Path) -> tuple[dict[str, str], int]:
@@ -335,30 +354,36 @@ def collect_session_inventory(grok_sessions: Path) -> tuple[dict, list[dict], li
     total_context_tokens = 0
     total_tool_calls = 0
     sandbox_off_sessions = 0
+    sandbox_unknown_sessions = 0
     runtime_servers: dict[str, str] = {}
     mcp_runtime_events = 0
 
     for session_dir in _session_dirs(grok_sessions):
         session_count += 1
-        summary = load_json(session_dir / "summary.json") or {}
-        model_id = summary.get("current_model_id")
-        if model_id:
-            model_counts[str(model_id)] = model_counts.get(str(model_id), 0) + 1
-        num_messages = summary.get("num_messages")
-        if isinstance(num_messages, int):
-            total_messages += num_messages
-        created_at = parse_iso(summary.get("created_at"))
-        if created_at:
-            dates.append(created_at)
-
-        sandbox = str(summary.get("sandbox_profile") or "").strip().lower()
-        if sandbox:
-            sandbox_counts[sandbox] = sandbox_counts.get(sandbox, 0) + 1
-            if sandbox in SANDBOX_OFF_VALUES:
-                sandbox_off_sessions += 1
+        summary, _summary_err = read_json_object(session_dir / "summary.json")
+        if not isinstance(summary, dict):
+            # Missing, unreadable, or not an object. That is unknown, not off.
+            sandbox_counts["unknown"] = sandbox_counts.get("unknown", 0) + 1
+            sandbox_unknown_sessions += 1
         else:
-            sandbox_counts["unset"] = sandbox_counts.get("unset", 0) + 1
-            sandbox_off_sessions += 1
+            model_id = summary.get("current_model_id")
+            if model_id:
+                model_counts[str(model_id)] = model_counts.get(str(model_id), 0) + 1
+            num_messages = summary.get("num_messages")
+            if isinstance(num_messages, int):
+                total_messages += num_messages
+            created_at = parse_iso(summary.get("created_at"))
+            if created_at:
+                dates.append(created_at)
+
+            sandbox = str(summary.get("sandbox_profile") or "").strip().lower()
+            if sandbox:
+                sandbox_counts[sandbox] = sandbox_counts.get(sandbox, 0) + 1
+                if sandbox in SANDBOX_OFF_VALUES:
+                    sandbox_off_sessions += 1
+            else:
+                sandbox_counts["unset"] = sandbox_counts.get("unset", 0) + 1
+                sandbox_off_sessions += 1
 
         for name in ("chat_history.jsonl", "updates.jsonl", "events.jsonl"):
             f = session_dir / name
@@ -428,6 +453,7 @@ def collect_session_inventory(grok_sessions: Path) -> tuple[dict, list[dict], li
         "total_tool_calls": total_tool_calls,
         "sandbox_profile_distribution": sandbox_counts,
         "sandbox_off_sessions": sandbox_off_sessions,
+        "sandbox_unknown_sessions": sandbox_unknown_sessions,
         "tools_used_distribution": tools_used,
         "mcp_runtime_servers": len(runtime_servers),
         "mcp_runtime_events": mcp_runtime_events,
@@ -562,32 +588,48 @@ def collect(tp: paths.ToolPaths, repo_roots: list[Path] | None = None) -> dict:
 
     config_toml_parsed = False
     config_extras: dict = {}
+    config_parse_reasons: list[str] = []
     if config_toml.exists():
-        try:
-            with open(config_toml, "rb") as f:
-                config_data = tomllib.load(f)
+        config_data, config_err = read_toml_table(config_toml)
+        if config_err or config_data is None:
+            config_parse_reasons.append(config_err or "unreadable")
+        else:
             config_rules, config_findings, config_extras = parse_config_toml(config_data)
             rules.extend(config_rules)
             _add_findings(config_findings)
             config_toml_parsed = True
-        except (tomllib.TOMLDecodeError, OSError):
-            pass
 
     project_config_parsed = 0
     for pcfg in project_configs:
-        try:
-            with open(pcfg, "rb") as f:
-                project_data = tomllib.load(f)
-            project_rules, project_findings, _ = parse_config_toml(project_data)
-            for r in project_rules:
-                r["scope"] = "project"
-                if not r.get("settings_source"):
-                    r["settings_source"] = "project config.toml"
-            rules.extend(project_rules)
-            _add_findings(project_findings)
-            project_config_parsed += 1
-        except (tomllib.TOMLDecodeError, OSError):
+        project_data, project_err = read_toml_table(pcfg)
+        if project_err or project_data is None:
+            config_parse_reasons.append(project_err or "unreadable")
             continue
+        project_rules, project_findings, _ = parse_config_toml(project_data)
+        for r in project_rules:
+            r["scope"] = "project"
+            if not r.get("settings_source"):
+                r["settings_source"] = "project config.toml"
+        rules.extend(project_rules)
+        _add_findings(project_findings)
+        project_config_parsed += 1
+
+    if config_parse_reasons:
+        unique_reasons: list[str] = []
+        for reason in config_parse_reasons:
+            if reason not in unique_reasons:
+                unique_reasons.append(reason)
+        _add_findings([
+            make_finding(
+                "grok.config.parse_error",
+                "low",
+                "General Tooling",
+                "Grok config.toml is present but could not be parsed",
+                evidence_count=len(config_parse_reasons),
+                sample_redacted="; ".join(unique_reasons)[:180],
+                tags=["config_parse_error"],
+            )
+        ])
 
     session_summary, session_findings, runtime_mcp_rules = collect_session_inventory(
         grok_sessions

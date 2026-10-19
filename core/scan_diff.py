@@ -69,6 +69,8 @@ from pathlib import Path
 from typing import Any
 
 from common import (
+    DERIVED_EVIDENCE_STEMS,
+    display_path,
     hostname_short,
     load_json,
     make_envelope,
@@ -124,13 +126,13 @@ _RULE_FIELDS = (
 
 
 def load_scan(root: str | Path) -> dict[str, dict[str, Any]]:
-    """Load collector envelopes from ``<root>/evidence``, skipping changes.json."""
+    """Load collector envelopes from ``<root>/evidence``, skipping derived files."""
     evidence = Path(root) / "evidence"
     envelopes: dict[str, dict[str, Any]] = {}
     if not evidence.is_dir():
         return envelopes
     for path in sorted(evidence.glob("*.json")):
-        if path.name == CHANGES_FILENAME or path.stem == COLLECTOR:
+        if path.stem in DERIVED_EVIDENCE_STEMS or path.stem == COLLECTOR:
             continue
         data = load_json(path)
         if not isinstance(data, dict):
@@ -252,11 +254,26 @@ def _rule_key(rule: dict[str, Any]) -> tuple[str, ...]:
     ))
 
 
+# Free text copied out of a previous envelope. Short labels (decision, risk,
+# platform) stay as stored so the diff keys remain stable.
+_RULE_TEXT_FIELDS = ("scope_label_redacted", "rule", "command_or_tool_redacted")
+
+
 def _rule_public(rule: dict[str, Any]) -> dict[str, Any]:
+    """Copy the fields the changes file shows.
+
+    Free-text fields go through the current scan's redaction policy. A
+    redacted scan otherwise republishes paths and secrets from an older
+    unredacted scan.
+    """
     public: dict[str, Any] = {}
     for field in _RULE_FIELDS:
-        if field in rule:
-            public[field] = rule.get(field)
+        if field not in rule:
+            continue
+        value = rule.get(field)
+        if field in _RULE_TEXT_FIELDS and isinstance(value, str):
+            value = sanitize_text(value)
+        public[field] = value
     return public
 
 
@@ -447,7 +464,7 @@ def _finding_brief(finding: dict[str, Any]) -> dict[str, str]:
     return {
         "id": str(finding.get("id") or ""),
         "severity": str(finding.get("severity") or "low").lower(),
-        "title": str(finding.get("title") or ""),
+        "title": sanitize_text(str(finding.get("title") or "")),
         "category": str(finding.get("category") or ""),
     }
 
@@ -492,7 +509,7 @@ def _diff_collector(
             continue
         severity_changed.append({
             "id": fid,
-            "title": str(curr_findings[fid].get("title") or ""),
+            "title": sanitize_text(str(curr_findings[fid].get("title") or "")),
             "category": str(curr_findings[fid].get("category") or ""),
             "before": before,
             "after": after,
@@ -508,8 +525,12 @@ def _diff_collector(
 
     prev_mcp = mcp_server_names(previous)
     curr_mcp = mcp_server_names(current)
-    mcp_added = [curr_mcp[key] for key in sorted(curr_mcp) if key not in prev_mcp]
-    mcp_removed = [prev_mcp[key] for key in sorted(prev_mcp) if key not in curr_mcp]
+    mcp_added = [
+        sanitize_text(curr_mcp[key]) for key in sorted(curr_mcp) if key not in prev_mcp
+    ]
+    mcp_removed = [
+        sanitize_text(prev_mcp[key]) for key in sorted(prev_mcp) if key not in curr_mcp
+    ]
 
     prev_numbers = numeric_counters(previous.get("summary")) if previous else {}
     curr_numbers = numeric_counters(current.get("summary")) if current else {}
@@ -941,7 +962,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print(json.dumps(envelope, indent=2, ensure_ascii=False))
     else:
-        print(f"Wrote {current / 'evidence' / CHANGES_FILENAME}")
+        print(f"Wrote {display_path(current / 'evidence' / CHANGES_FILENAME, current)}")
     return 0
 
 

@@ -23,6 +23,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
@@ -117,8 +118,20 @@ class TestParseConfigToml(unittest.TestCase):
         self.assertTrue(any(r["rule_type"] == "mcp_tool" for r in rules))
 
     def test_mcp_localhost_no_external_finding(self):
-        data = {"mcp_servers": {"local": {"url": "http://localhost:9000"}}}
-        _, findings = self.parse(data)
+        for url in ("http://localhost:9000", "http://127.0.0.1:9", "http://[::1]:8080"):
+            _, findings = self.parse({"mcp_servers": {"local": {"url": url}}})
+            self.assertNotIn("codex.mcp.external_server", ids(findings), url)
+
+    def test_mcp_lookalike_host_is_external(self):
+        for url in (
+            "http://localhost.evil.example/mcp",
+            "https://evil.example/mcp?h=127.0.0.1",
+        ):
+            _, findings = self.parse({"mcp_servers": {"remote": {"url": url}}})
+            self.assertIn("codex.mcp.external_server", ids(findings), url)
+
+    def test_mcp_non_string_url_does_not_raise(self):
+        _rules, findings = self.parse({"mcp_servers": {"x": {"url": 5}}})
         self.assertNotIn("codex.mcp.external_server", ids(findings))
 
     def test_mcp_env_secret_masked(self):
@@ -133,6 +146,18 @@ class TestParseConfigToml(unittest.TestCase):
                          "exporter": {"otlp-http": {"endpoint": "http://localhost:14318"}}}}
         _, findings = self.parse(data)
         self.assertIn("codex.telemetry.log_user_prompt_configured", ids(findings))
+
+    def test_otel_summary_masks_endpoint_path_when_redacting(self):
+        endpoint = "https://otel.example/home/" + "zzotel" + "/v1"
+        data = {"protocol": "http/protobuf", "exporter": {"otlp-http": {"endpoint": endpoint}}}
+        with patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+            summary = codex.otel_exporter_summary(data)
+        self.assertNotIn("zzotel", summary["destination"])
+        self.assertIn("otel.example", summary["destination"])
+        self.assertEqual(summary["protocol"], "http/protobuf")
+        with patch.dict(os.environ, {"AISCAN_REDACT": ""}):
+            plain = codex.otel_exporter_summary(data)
+        self.assertIn("zzotel", plain["destination"])
 
     def test_apps_auto_approve(self):
         data = {"apps": {"gmail": {"enabled": True,
@@ -159,6 +184,15 @@ class TestParseConfigToml(unittest.TestCase):
         self.assertTrue(rules)
         for r in rules:
             self.assertEqual(r.get("source_kind"), "user_config")
+
+
+class TestSafeUrl(unittest.TestCase):
+    def test_out_of_range_port_is_a_marker(self):
+        self.assertEqual(codex.safe_url("https://logs.example:99999"), "invalid-endpoint")
+        self.assertEqual(
+            codex.safe_url("https://logs.example:4318/v1/traces"),
+            "https://logs.example:4318/v1/traces",
+        )
 
 
 if __name__ == "__main__":

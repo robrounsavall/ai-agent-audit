@@ -65,7 +65,7 @@ class TestCollectPermissionMode(unittest.TestCase):
             with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
                 claude, "desktop_config_path", return_value=root / "missing.json"
             ), mock.patch.object(claude, "read_registry_env", return_value={}):
-                return claude.collect(scope, tp)
+                return claude.collect(scope, tp, repo_roots=[])
 
     def by_id(self, envelope):
         return {f["id"]: f for f in envelope["findings"]}

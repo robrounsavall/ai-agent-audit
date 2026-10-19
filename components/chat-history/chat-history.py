@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote
 
+import compressed
 import paths
 from common import (
     APPDATA,
@@ -35,7 +36,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "chat-history"
 
@@ -102,6 +103,39 @@ def get_content_text(content, include_tool_details=False):
             parts.append(escape_md_fence(content))
 
     return "\n\n".join(p for p in parts if p and p.strip()).strip()
+
+
+def _json_object(raw: str) -> dict | None:
+    """One JSON value, or None when it is not an object. Never raises."""
+    try:
+        obj = json.loads(raw)
+    except (json.JSONDecodeError, ValueError, RecursionError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _message_parts(message) -> tuple[object, str]:
+    """Content and role from a message that may be an object or a plain string."""
+    if isinstance(message, dict):
+        return message.get("content"), str(message.get("role") or "")
+    if isinstance(message, str):
+        return message, ""
+    return None, ""
+
+
+def _sqlite_ro_uri(path: Path) -> str:
+    """Read-only SQLite URI. Encodes #, ?, and % so they stay in the path."""
+    return Path(path).resolve().as_uri() + "?mode=ro&immutable=1"
+
+
+def read_text_lines(path: Path, problems: list | None = None) -> list[str] | None:
+    """Lines from a UTF-8 file. A BOM is accepted. A bad byte is reported, not fatal."""
+    try:
+        return path.read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeDecodeError):
+        if problems is not None:
+            problems.append("unreadable")
+        return None
 
 
 def parse_iso(s):
@@ -236,46 +270,47 @@ def export_buckets(buckets, tool_name, folder_name, output_root):
     }
 
 
-def collect_claude(buckets, include_tool_details, root, metrics=None):
+def collect_claude(buckets, include_tool_details, root, metrics=None, problems=None):
     if not root.exists():
         return
     metrics = metrics if metrics is not None else {}
     for jsonl in root.rglob("*.jsonl"):
         relative = jsonl.relative_to(root)
         workspace = relative.parts[0] if relative.parts else ""
-        try:
-            lines = jsonl.read_text(encoding="utf-8").splitlines()
-        except OSError:
+        lines = read_text_lines(jsonl, problems)
+        if lines is None:
             continue
         for raw in lines:
+            obj = _json_object(raw)
+            if obj is None:
+                continue
             try:
-                obj = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            subtype = obj.get("subtype")
-            if subtype in CLAUDE_PERMISSION_SUBTYPES:
-                metrics[f"claude_{subtype}s"] = int(metrics.get(f"claude_{subtype}s", 0)) + 1
-                if subtype == "permission_response" and obj.get("granted") is True:
-                    metrics["claude_granted_permission_responses"] = (
-                        int(metrics.get("claude_granted_permission_responses", 0)) + 1
+                subtype = obj.get("subtype")
+                if subtype in CLAUDE_PERMISSION_SUBTYPES:
+                    metrics[f"claude_{subtype}s"] = int(metrics.get(f"claude_{subtype}s", 0)) + 1
+                    if subtype == "permission_response" and obj.get("granted") is True:
+                        metrics["claude_granted_permission_responses"] = (
+                            int(metrics.get("claude_granted_permission_responses", 0)) + 1
+                        )
+                permission_mode = obj.get("permissionMode")
+                if isinstance(permission_mode, str) and permission_mode.strip():
+                    mode_key = metric_token(permission_mode)
+                    metrics[f"claude_permission_mode_{mode_key}"] = (
+                        int(metrics.get(f"claude_permission_mode_{mode_key}", 0)) + 1
                     )
-            permission_mode = obj.get("permissionMode")
-            if isinstance(permission_mode, str) and permission_mode.strip():
-                mode_key = metric_token(permission_mode)
-                metrics[f"claude_permission_mode_{mode_key}"] = (
-                    int(metrics.get(f"claude_permission_mode_{mode_key}", 0)) + 1
-                )
-                metrics["claude_permission_mode_events_total"] = (
-                    int(metrics.get("claude_permission_mode_events_total", 0)) + 1
-                )
-            if obj.get("type") not in ("user", "assistant") or not obj.get("timestamp"):
+                    metrics["claude_permission_mode_events_total"] = (
+                        int(metrics.get("claude_permission_mode_events_total", 0)) + 1
+                    )
+                if obj.get("type") not in ("user", "assistant") or not obj.get("timestamp"):
+                    continue
+                ts = parse_iso(obj["timestamp"])
+                if ts is None:
+                    continue
+                content, role = _message_parts(obj.get("message"))
+                text = get_content_text(content, include_tool_details)
+                add_entry(buckets, ts, "Claude", role, text, str(jsonl), workspace)
+            except (TypeError, ValueError, AttributeError, RecursionError):
                 continue
-            ts = parse_iso(obj["timestamp"])
-            if ts is None:
-                continue
-            msg = obj.get("message", {})
-            text = get_content_text(msg.get("content"), include_tool_details)
-            add_entry(buckets, ts, "Claude", msg.get("role", ""), text, str(jsonl), workspace)
 
 
 def claude_history_roots(tp: paths.ToolPaths) -> list[Path]:
@@ -293,37 +328,55 @@ def claude_history_roots(tp: paths.ToolPaths) -> list[Path]:
     return unique
 
 
-def collect_claude_roots(buckets, include_tool_details, roots: list[Path], metrics=None):
+def collect_claude_roots(buckets, include_tool_details, roots: list[Path], metrics=None, problems=None):
     for root in roots:
-        collect_claude(buckets, include_tool_details, root, metrics=metrics)
+        collect_claude(buckets, include_tool_details, root, metrics=metrics, problems=problems)
 
 
-def collect_codex(buckets, include_tool_details, root):
+def collect_codex(buckets, include_tool_details, root, problems=None):
     if not root.exists():
         return
-    for jsonl in root.rglob("*.jsonl"):
+    for jsonl in compressed.jsonl_files(root):
         try:
-            lines = jsonl.read_text(encoding="utf-8").splitlines()
+            if compressed.is_compressed(jsonl):
+                # Without stdlib zstd this raises before the file is opened.
+                # The codex collector reports that coverage gap.
+                text = compressed.read_text(
+                    jsonl, errors="replace", max_bytes=compressed.MAX_DECOMPRESSED_BYTES
+                )
+                lines = text.splitlines()
+            else:
+                # A bad byte is reported and this file is skipped. Other files continue.
+                lines = read_text_lines(jsonl, problems)
+                if lines is None:
+                    continue
         except OSError:
             continue
+        except (compressed.ZstdUnavailable, compressed.TooLarge, compressed.DecompressTimeout, UnicodeError):
+            if compressed.is_compressed(jsonl):
+                continue
+            raise
         for raw in lines:
+            obj = _json_object(raw)
+            if obj is None:
+                continue
             try:
-                obj = json.loads(raw)
-            except json.JSONDecodeError:
+                payload = obj.get("payload")
+                if obj.get("type") != "event_msg" or not isinstance(payload, dict):
+                    continue
+                ptype = payload.get("type")
+                if ptype not in ("user_message", "agent_message"):
+                    continue
+                role = "user" if ptype == "user_message" else "assistant"
+                ts = parse_iso(obj.get("timestamp")) or datetime.fromtimestamp(jsonl.stat().st_mtime)
+                message = payload.get("message")
+                text = (
+                    str(message) if isinstance(message, str) and message
+                    else get_content_text(payload, include_tool_details)
+                )
+                add_entry(buckets, ts, "Codex", role, text, str(jsonl))
+            except (TypeError, ValueError, AttributeError, RecursionError):
                 continue
-            if obj.get("type") != "event_msg" or not obj.get("payload"):
-                continue
-            payload = obj["payload"]
-            ptype = payload.get("type")
-            if ptype not in ("user_message", "agent_message"):
-                continue
-            role = "user" if ptype == "user_message" else "assistant"
-            ts = parse_iso(obj.get("timestamp")) or datetime.fromtimestamp(jsonl.stat().st_mtime)
-            text = (
-                str(payload["message"]) if payload.get("message")
-                else get_content_text(payload, include_tool_details)
-            )
-            add_entry(buckets, ts, "Codex", role, text, str(jsonl))
 
 
 def grok_workspace_label(slug):
@@ -332,7 +385,7 @@ def grok_workspace_label(slug):
     return m.group(1) if m else decoded
 
 
-def collect_grok(buckets, include_tool_details, root):
+def collect_grok(buckets, include_tool_details, root, problems=None):
     """
     Grok chat_history.jsonl: role-tagged messages (`type`: system/user/
     assistant), content is a list of {type: text, text: ...} or a plain
@@ -348,31 +401,34 @@ def collect_grok(buckets, include_tool_details, root):
         session_dir = jsonl.parent
         workspace = grok_workspace_label(session_dir.parent.name)
         summary = {}
-        try:
-            summary_path = session_dir / "summary.json"
-            if summary_path.exists():
-                summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            summary = {}
+        summary_path = session_dir / "summary.json"
+        if summary_path.is_file():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                summary = {}
+                if problems is not None:
+                    problems.append("unreadable")
         start_ts = parse_iso(summary.get("created_at")) if isinstance(summary, dict) else None
         end_ts = parse_iso(summary.get("updated_at")) if isinstance(summary, dict) else None
         fallback_ts = datetime.fromtimestamp(jsonl.stat().st_mtime)
-        try:
-            lines = jsonl.read_text(encoding="utf-8").splitlines()
-        except OSError:
+        lines = read_text_lines(jsonl, problems)
+        if lines is None:
             continue
         messages = []
         for raw in lines:
+            obj = _json_object(raw)
+            if obj is None:
+                continue
             try:
-                obj = json.loads(raw)
-            except json.JSONDecodeError:
+                role = obj.get("type")
+                if role not in ("user", "assistant"):
+                    continue
+                text = get_content_text(obj.get("content"), include_tool_details)
+                if text:
+                    messages.append((role, text))
+            except (TypeError, ValueError, AttributeError, RecursionError):
                 continue
-            role = obj.get("type")
-            if role not in ("user", "assistant"):
-                continue
-            text = get_content_text(obj.get("content"), include_tool_details)
-            if text:
-                messages.append((role, text))
 
         if start_ts and end_ts and end_ts > start_ts and len(messages) > 1:
             span = (end_ts - start_ts).total_seconds()
@@ -397,7 +453,7 @@ def cursor_workspace_label(slug):
     return m.group(1) if m else slug
 
 
-def collect_cursor_transcripts(buckets, include_tool_details, root):
+def collect_cursor_transcripts(buckets, include_tool_details, root, problems=None):
     if not root.exists():
         return
     for project_dir in root.iterdir():
@@ -416,31 +472,41 @@ def collect_cursor_transcripts(buckets, include_tool_details, root):
                 continue
             file_time = datetime.fromtimestamp(jsonl.stat().st_mtime)
             last_known_ts = file_time
-            try:
-                lines = jsonl.read_text(encoding="utf-8").splitlines()
-            except OSError:
+            lines = read_text_lines(jsonl, problems)
+            if lines is None:
                 continue
             for raw in lines:
+                obj = _json_object(raw)
+                if obj is None:
+                    continue
                 try:
-                    obj = json.loads(raw)
-                except json.JSONDecodeError:
+                    role = obj.get("role")
+                    if role not in ("user", "assistant"):
+                        continue
+                    content, _message_role = _message_parts(obj.get("message"))
+                    ts = last_known_ts
+                    if role == "user":
+                        parsed = parse_cursor_embedded_timestamp(content)
+                        if parsed:
+                            ts = parsed
+                            last_known_ts = parsed
+                    text = get_content_text(content, include_tool_details)
+                    add_entry(buckets, ts, "Cursor", role, text, str(jsonl), workspace)
+                except (TypeError, ValueError, AttributeError, RecursionError):
                     continue
-                if obj.get("role") not in ("user", "assistant"):
-                    continue
-                ts = last_known_ts
-                if obj["role"] == "user":
-                    parsed = parse_cursor_embedded_timestamp(obj.get("message", {}).get("content"))
-                    if parsed:
-                        ts = parsed
-                        last_known_ts = parsed
-                text = get_content_text(obj.get("message", {}).get("content"), include_tool_details)
-                add_entry(buckets, ts, "Cursor", obj["role"], text, str(jsonl), workspace)
 
 
 def cursor_composer_workspace(composer):
-    ws = composer.get("workspaceIdentifier", {})
-    fs = ws.get("uri", {}).get("fsPath", "")
-    if not fs:
+    if not isinstance(composer, dict):
+        return ""
+    ws = composer.get("workspaceIdentifier")
+    if not isinstance(ws, dict):
+        return ""
+    uri = ws.get("uri")
+    if not isinstance(uri, dict):
+        return ""
+    fs = uri.get("fsPath", "")
+    if not isinstance(fs, str) or not fs:
         return ""
     parts = fs.replace("\\", "/").rstrip("/").split("/")
     try:
@@ -453,10 +519,9 @@ def cursor_composer_workspace(composer):
 def collect_cursor_composer(buckets, db):
     if not db.exists():
         return
-    uri = "file:" + str(db).replace("\\", "/") + "?mode=ro&immutable=1"
     try:
-        con = sqlite3.connect(uri, uri=True)
-    except sqlite3.Error as e:
+        con = sqlite3.connect(_sqlite_ro_uri(db), uri=True)
+    except (sqlite3.Error, OSError, ValueError) as e:
         print(f"  Warning: cannot open state.vscdb: {e}", file=sys.stderr)
         return
     cur = con.cursor()
@@ -465,16 +530,36 @@ def collect_cursor_composer(buckets, db):
         row = cur.fetchone()
         if not row or row[0] is None:
             return
-        composers = json.loads(row[0]).get("allComposers", [])
+        try:
+            header = json.loads(row[0])
+        except (json.JSONDecodeError, ValueError, RecursionError):
+            return
+        composers = header.get("allComposers", []) if isinstance(header, dict) else []
+        if not isinstance(composers, list):
+            return
         for composer in composers:
-            cid = composer.get("composerId", "")
+            if not isinstance(composer, dict):
+                continue
+            cid = str(composer.get("composerId") or "")
             workspace = cursor_composer_workspace(composer)
             cur.execute("SELECT value FROM cursorDiskKV WHERE key=?", (f"composerData:{cid}",))
             cd_row = cur.fetchone()
             if not cd_row or cd_row[0] is None:
                 continue
-            headers = json.loads(cd_row[0]).get("fullConversationHeadersOnly", [])
+            try:
+                composer_data = json.loads(cd_row[0])
+            except (json.JSONDecodeError, ValueError, RecursionError):
+                continue
+            headers = (
+                composer_data.get("fullConversationHeadersOnly", [])
+                if isinstance(composer_data, dict)
+                else []
+            )
+            if not isinstance(headers, list):
+                continue
             for h in headers:
+                if not isinstance(h, dict):
+                    continue
                 bid = h.get("bubbleId")
                 if not bid:
                     continue
@@ -489,14 +574,19 @@ def collect_cursor_composer(buckets, db):
                 brow = cur.fetchone()
                 if not brow or brow[0] is None:
                     continue
-                b = json.loads(brow[0])
-                text = b.get("text", "").strip()
+                try:
+                    bubble = json.loads(brow[0])
+                except (json.JSONDecodeError, ValueError, RecursionError):
+                    continue
+                if not isinstance(bubble, dict):
+                    continue
+                text = str(bubble.get("text") or "").strip()
                 if not text:
                     continue
-                ts = parse_iso(b.get("createdAt"))
+                ts = parse_iso(bubble.get("createdAt"))
                 if ts is None:
                     continue
-                role = "user" if b.get("type") == 1 else "assistant"
+                role = "user" if bubble.get("type") == 1 else "assistant"
                 add_entry(buckets, ts, "Cursor", role, text, f"composerData:{cid}", workspace)
     except sqlite3.Error as e:
         print(f"  Warning: cursor composer collection failed: {e}", file=sys.stderr)
@@ -530,6 +620,7 @@ def build_evidence(
     tp: paths.ToolPaths,
     claude_roots: list[Path] | None = None,
     metrics: dict | None = None,
+    parse_problems: list | None = None,
 ) -> dict:
     claude_roots = claude_roots or [tp.claude_projects]
     scanned = [
@@ -657,6 +748,19 @@ def build_evidence(
         for key, value in sorted(metrics.items()):
             if isinstance(value, int):
                 envelope["summary"][key] = value
+    if parse_problems:
+        envelope["summary"]["parse_errors"] = len(parse_problems)
+        findings.append(
+            make_finding(
+                "chat_history.parse_error",
+                "low",
+                "General Tooling",
+                "Chat history skipped files that could not be decoded",
+                evidence_count=len(parse_problems),
+                sample_redacted=f"files={len(parse_problems)}",
+                tags=["config_parse_error"],
+            )
+        )
     envelope["findings"] = findings
     envelope["raw_pointers"] = raw_pointers
     return envelope
@@ -675,16 +779,49 @@ def main():
     tp = paths.resolve_from_args(args)
     claude_roots = claude_history_roots(tp)
 
-    sources = [
-        ("Claude", defaultdict(list), lambda b: collect_claude_roots(b, args.include_tool_details, claude_roots, metrics=metrics), "claude"),
-        ("Codex", defaultdict(list), lambda b: collect_codex(b, args.include_tool_details, tp.codex_sessions), "codex"),
-        ("Cursor", defaultdict(list), lambda b: collect_cursor_transcripts(b, args.include_tool_details, tp.cursor_projects), "cursor"),
-        ("Cursor Composer", defaultdict(list), lambda b: collect_cursor_composer(b, tp.cursor_db), "cursor-composer"),
-        ("Grok", defaultdict(list), lambda b: collect_grok(b, args.include_tool_details, tp.grok_sessions), "grok"),
-    ]
-
     results = []
     metrics: dict = {}
+    parse_problems: list[str] = []
+    sources = [
+        (
+            "Claude",
+            defaultdict(list),
+            lambda b: collect_claude_roots(
+                b, args.include_tool_details, claude_roots, metrics=metrics, problems=parse_problems
+            ),
+            "claude",
+        ),
+        (
+            "Codex",
+            defaultdict(list),
+            lambda b: collect_codex(
+                b, args.include_tool_details, tp.codex_sessions, problems=parse_problems
+            ),
+            "codex",
+        ),
+        (
+            "Cursor",
+            defaultdict(list),
+            lambda b: collect_cursor_transcripts(
+                b, args.include_tool_details, tp.cursor_projects, problems=parse_problems
+            ),
+            "cursor",
+        ),
+        (
+            "Cursor Composer",
+            defaultdict(list),
+            lambda b: collect_cursor_composer(b, tp.cursor_db),
+            "cursor-composer",
+        ),
+        (
+            "Grok",
+            defaultdict(list),
+            lambda b: collect_grok(
+                b, args.include_tool_details, tp.grok_sessions, problems=parse_problems
+            ),
+            "grok",
+        ),
+    ]
     for tool_name, buckets, collector, folder in sources:
         print(f"Collecting {tool_name}...", end=" ", flush=True)
         collector(buckets)
@@ -714,7 +851,9 @@ def main():
         results.append(r)
         print(f"{r['files']} files, {r['entries']} entries")
 
-    envelope = build_evidence(results, raw_root, tp, claude_roots=claude_roots, metrics=metrics)
+    envelope = build_evidence(
+        results, raw_root, tp, claude_roots=claude_roots, metrics=metrics, parse_problems=parse_problems
+    )
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)
 
     if not envelope["platform_detected"]:

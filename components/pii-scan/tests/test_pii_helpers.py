@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
@@ -97,7 +101,8 @@ class TestScanFile(unittest.TestCase):
         hits, _ = self._scan("clean line\nreach me at bob@example.com\ncard 4111 1111 1111 1111\n")
         by_entity = {h["entity"]: h for h in hits}
         self.assertEqual(by_entity["EMAIL_ADDRESS"]["line"], 2)
-        self.assertEqual(by_entity["CREDIT_CARD"]["line"], 3)
+        self.assertEqual(by_entity["TEST_CARD"]["line"], 3)
+        self.assertNotIn("CREDIT_CARD", by_entity)
 
     def test_private_ips_counted_not_hits(self):
         hits, private_ips = self._scan("hosts: 127.0.0.1 and 192.168.1.5 and 8.8.8.8\n")
@@ -124,10 +129,171 @@ class TestScanFile(unittest.TestCase):
 class TestSeverity(unittest.TestCase):
     def test_severity_for_known(self):
         self.assertEqual(pii.severity_for("CREDIT_CARD"), "critical")
+        self.assertEqual(pii.severity_for("TEST_CARD"), "low")
         self.assertEqual(pii.severity_for("US_SSN"), "critical")
         self.assertEqual(pii.severity_for("EMAIL_ADDRESS"), "medium")
         # Unknown entities (e.g. SECRET_*) default to medium.
         self.assertEqual(pii.severity_for("SECRET_AWS_KEY"), "medium")
+
+
+def _synthetic_visa() -> str:
+    """Luhn-valid Visa that is not a published test PAN."""
+    body = "491699999999999"
+    for digit in "0123456789":
+        candidate = body + digit
+        if pii.luhn_ok(candidate) and candidate not in pii.TEST_PANS:
+            return candidate
+    raise AssertionError("could not build a synthetic visa")
+
+
+class TestTestCardNumbers(unittest.TestCase):
+    def test_published_list_passes_checks_and_is_recognized(self):
+        self.assertGreaterEqual(len(pii.TEST_PANS), 8)
+        for number in pii.TEST_PANS:
+            self.assertTrue(pii.credit_card_ok(number), number)
+            self.assertTrue(pii.is_test_pan(number), number)
+        # Spaces and dashes are the forms that show up in docs.
+        self.assertTrue(pii.is_test_pan("4242-4242-4242-4242"))
+        self.assertTrue(pii.is_test_pan("4111 1111 1111 1111"))
+        self.assertTrue(pii.is_test_pan("5500-0000-0000-0004"))
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "cards.txt"
+            path.write_text("\n".join(sorted(pii.TEST_PANS)) + "\n", encoding="utf-8")
+            hits, _ = pii.scan_file(path, ["CREDIT_CARD"])
+        self.assertEqual(len(hits), len(pii.TEST_PANS))
+        self.assertTrue(all(hit["entity"] == "TEST_CARD" for hit in hits))
+
+    def test_synthetic_card_is_not_a_test_pan(self):
+        number = _synthetic_visa()
+        self.assertTrue(pii.credit_card_ok(number))
+        self.assertFalse(pii.is_test_pan(number))
+        self.assertFalse(pii.is_test_pan("4111111111111112"))
+
+    def test_scan_splits_test_cards_from_other_cards(self):
+        number = _synthetic_visa()
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "corpus.md"
+            path.write_text(
+                "4111 1111 1111 1111\n"
+                "4242424242424242\n"
+                f"{number}\n",
+                encoding="utf-8",
+            )
+            hits, _ = pii.scan_file(path, ["CREDIT_CARD"])
+        by_entity: dict[str, list[str]] = {}
+        for hit in hits:
+            by_entity.setdefault(hit["entity"], []).append(hit["sample"])
+        self.assertEqual(len(by_entity["TEST_CARD"]), 2)
+        self.assertEqual(len(by_entity["CREDIT_CARD"]), 1)
+        self.assertNotIn(number, by_entity["TEST_CARD"])
+
+    def test_collect_rates_test_cards_low_and_others_critical(self):
+        number = _synthetic_visa()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "notes.md").write_text(
+                "4111111111111111\n4242424242424242\n" + number + "\n",
+                encoding="utf-8",
+            )
+            (corpus / "more.txt").write_text("5500000000000004\n", encoding="utf-8")
+            envelope, _hits = pii.collect([corpus], ["CREDIT_CARD"], root / "raw")
+        by_id = {finding["id"]: finding for finding in envelope["findings"]}
+        test_cards = by_id["pii_scan.test_card"]
+        other = by_id["pii_scan.credit_card"]
+        self.assertEqual(test_cards["severity"], "low")
+        self.assertEqual(test_cards["evidence_count"], 3)
+        self.assertEqual(
+            test_cards["title"],
+            "TEST_CARD detected (3 hit(s) across 2 file(s))",
+        )
+        self.assertEqual(test_cards["tags"], ["pii", "test_data"])
+        self.assertNotIn("4111111111111111", test_cards["sample_redacted"])
+        self.assertNotIn("4242424242424242", test_cards["sample_redacted"])
+        self.assertEqual(other["severity"], "critical")
+        self.assertEqual(other["evidence_count"], 1)
+        self.assertEqual(
+            other["title"],
+            "CREDIT_CARD detected (1 hit(s) across 1 file(s))",
+        )
+        self.assertNotIn(number, other["title"])
+        self.assertNotIn(number, other["sample_redacted"])
+        self.assertEqual(envelope["summary"]["entity_TEST_CARD"], 3)
+        self.assertEqual(envelope["summary"]["entity_CREDIT_CARD"], 1)
+
+    def test_only_test_cards_do_not_raise_a_critical_finding(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "notes.md").write_text(
+                "card 378282246310005 and 6011-0000-0000-0004\n",
+                encoding="utf-8",
+            )
+            envelope, _hits = pii.collect([corpus], ["CREDIT_CARD"], root / "raw")
+        self.assertEqual([f["id"] for f in envelope["findings"]], ["pii_scan.test_card"])
+        self.assertEqual(envelope["findings"][0]["severity"], "low")
+        self.assertEqual(envelope["findings"][0]["evidence_count"], 2)
+        self.assertIn("test_data", envelope["findings"][0]["tags"])
+
+    def test_redacted_csv_masks_the_test_card_sample(self):
+        pan = "4242424242424242"
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "notes.md").write_text(pan + "\n", encoding="utf-8")
+            raw = root / "raw"
+            with mock.patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+                envelope, _hits = pii.collect([corpus], ["CREDIT_CARD"], raw)
+            finding = envelope["findings"][0]
+            csv_text = (raw / "findings.csv").read_text(encoding="utf-8")
+        # A 16-digit card is shorter than 24 characters, so -Redact masks it
+        # completely instead of keeping a first-four/last-four window.
+        self.assertNotIn(pan, finding["sample_redacted"])
+        self.assertIn("****REDACTED:TEST_CARD****", finding["sample_redacted"])
+        self.assertNotIn(pan, csv_text)
+        self.assertIn("****REDACTED:TEST_CARD****", csv_text)
+
+    def test_redact_hides_target_paths_in_the_envelope(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            present = root / "ZZZTARGETSENTINEL"
+            present.mkdir()
+            (present / "note.txt").write_text("hello\n", encoding="utf-8")
+            missing = root / "ZZZMISSINGTARGET"
+            raw = root / "raw"
+            with mock.patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+                hidden, _hits = pii.collect([present, missing], ["EMAIL_ADDRESS"], raw)
+            shown, _hits = pii.collect([present, missing], ["EMAIL_ADDRESS"], raw)
+        hidden_blob = json.dumps(hidden)
+        self.assertNotIn("ZZZTARGETSENTINEL", hidden_blob)
+        self.assertNotIn("ZZZMISSINGTARGET", hidden_blob)
+        self.assertEqual(hidden["summary"]["target_count"], 2)
+        self.assertTrue(all(label.startswith("<path#") for label in hidden["summary"]["targets"]))
+        self.assertIn("Target path not found:", hidden["findings"][0]["title"])
+        self.assertIn("ZZZTARGETSENTINEL", json.dumps(shown["summary"]["targets"]))
+
+    def test_dry_run_does_not_write_raw_files(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            evidence = root / "out"
+            evidence.mkdir()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "notes.md").write_text("4111111111111111\n", encoding="utf-8")
+            argv = [
+                "pii-scan.py",
+                "--evidence-root", str(evidence),
+                "--target", str(corpus),
+                "--entities", "CREDIT_CARD",
+                "--dry-run",
+            ]
+            with mock.patch.object(sys, "argv", argv), mock.patch("sys.stdout", io.StringIO()):
+                pii.main()
+        self.assertFalse((evidence / "raw" / "pii-scan" / "findings.csv").exists())
+        self.assertFalse((evidence / "evidence" / "pii-scan.json").exists())
 
 
 if __name__ == "__main__":

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 BRIEFING_PATH = ROOT / "report" / "build-briefing.py"
@@ -52,6 +54,25 @@ def _secret(rule: str, sample: str, severity: str = "high", **extra) -> dict:
     }
     row.update(extra)
     return row
+
+
+class TestPiiTitles(unittest.TestCase):
+    def setUp(self):
+        self.briefing = _load_briefing()
+
+    def test_test_card_finding_uses_a_plain_label(self):
+        title = self.briefing._display_finding_title({
+            "id": "pii_scan.test_card",
+            "title": "TEST_CARD detected (2 hit(s) across 1 file(s))",
+            "evidence_count": 2,
+            "tags": ["pii", "test_data"],
+        })
+        self.assertEqual(title, "Test card numbers across 1 file")
+
+    def test_lowercase_test_card_title_is_not_rewritten(self):
+        # The envelope title has to stay in the ENTITY detected (...) form.
+        raw = "test card numbers detected (2 hit(s) across 1 file(s))"
+        self.assertIsNone(self.briefing._plain_pii_title(raw))
 
 
 class TestSecretPresentation(unittest.TestCase):
@@ -141,6 +162,158 @@ class TestSecretPresentation(unittest.TestCase):
         self.assertEqual(
             by_id["pii_scan.secret_generic_secret"]["title"],
             "Generic secrets across 1 file",
+        )
+
+    def test_grouped_rule_title_keeps_the_rule_name(self):
+        presented, _stats = self.briefing.present_findings([
+            _secret(
+                "generic-api-key",
+                "ab12...cd34 (generic-api-key)",
+                title="Secret detected by gitleaks: generic-api-key (2 hit(s) across 2 file(s))",
+                evidence_count=2,
+            ),
+            _secret(
+                "generic-api-key",
+                "YOUR...HERE (generic-api-key)",
+                title="Secret detected by gitleaks: generic-api-key (4 hit(s) across 3 file(s))",
+                evidence_count=4,
+            ),
+        ])
+        by_count = {row["evidence_count"]: row for row in presented}
+        plain = by_count[2]
+        self.assertEqual(plain["_rule"], "generic-api-key")
+        self.assertTrue(plain["_rule_grouped"])
+        self.assertEqual(plain["severity"], "high")
+        self.assertIn("Generic API key", plain["title"])
+        self.assertNotIn("hit(s)", plain["title"])
+        # One placeholder-looking sample must not downgrade every hit of the rule.
+        grouped = by_count[4]
+        self.assertEqual(grouped["severity"], "high")
+        self.assertNotIn("likely test value", grouped["title"])
+        single, _stats = self.briefing.present_findings([
+            _secret("generic-api-key", "YOUR...HERE (generic-api-key)"),
+        ])
+        self.assertEqual(single[0]["severity"], "low")
+
+    def test_grouped_severity_matches_the_collector_map(self):
+        scan_path = ROOT / "components" / "secrets-scan" / "secrets-scan.py"
+        spec = importlib.util.spec_from_file_location("secrets_scan_severity_e2e", scan_path)
+        scan = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(scan)
+        secret = "abcd1234" * 4
+        hits = [
+            {"rule": rule, "file": f"{rule}.txt", "line": 1, "secret": secret, "tags": []}
+            for rule in (
+                "openai-api-key",
+                "gcp-api-key",
+                "aws-docs-example",
+                "slack-webhook-url",
+            )
+        ]
+        findings = scan.group_secret_hits(hits, "gitleaks")
+        collector = {}
+        for item in findings:
+            rule = item["title"].split(": ", 1)[1].split(" (", 1)[0]
+            collector[rule] = item["severity"]
+        presented, _stats = self.briefing.present_findings(findings)
+        briefed = {row["_rule"]: row["severity"] for row in presented}
+        self.assertEqual(collector["openai-api-key"], "critical")
+        self.assertEqual(collector["gcp-api-key"], "critical")
+        self.assertEqual(collector["aws-docs-example"], "high")
+        self.assertEqual(collector["slack-webhook-url"], "high")
+        self.assertEqual(briefed, collector)
+
+        legacy, _stats = self.briefing.present_findings([
+            _secret("aws-docs-example", "ab12...cd34 (aws-docs-example)", severity="high"),
+        ])
+        self.assertEqual(legacy[0]["severity"], "critical")
+
+    def test_all_placeholder_group_is_downgraded(self):
+        grouped = _secret(
+            "generic-api-key",
+            "YOUR...HERE (generic-api-key)",
+            severity="critical",
+            title="Secret detected by gitleaks: generic-api-key (4 hit(s) across 1 file(s))",
+            evidence_count=4,
+            placeholder_count=4,
+        )
+        mixed = _secret(
+            "openai-api-key",
+            "YOUR...HERE (openai-api-key)",
+            severity="critical",
+            title="Secret detected by gitleaks: openai-api-key (4 hit(s) across 2 file(s))",
+            evidence_count=4,
+            placeholder_count=1,
+        )
+        presented, _stats = self.briefing.present_findings([grouped, mixed])
+        by_rule = {row["_rule"]: row for row in presented}
+        self.assertEqual(by_rule["generic-api-key"]["severity"], "low")
+        self.assertIn("likely test value", by_rule["generic-api-key"]["title"])
+        self.assertEqual(by_rule["openai-api-key"]["severity"], "critical")
+        self.assertNotIn("likely test value", by_rule["openai-api-key"]["title"])
+        breakdown = dict(self.briefing.secret_rule_breakdown([grouped, mixed]))
+        self.assertIn("generic-api-key · likely test value", breakdown)
+        self.assertNotIn("openai-api-key · likely test value", breakdown)
+        self.assertEqual(breakdown["openai-api-key"], 4)
+
+    def test_grouped_rule_lists_every_csv_file(self):
+        import csv
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            folder = root / "raw" / "secrets-scan"
+            folder.mkdir(parents=True)
+            with (folder / "findings.csv").open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["file", "line", "rule", "sample_redacted"])
+                writer.writerow(["demo/a.txt", "1", "generic-api-key", "ab12...cd34 (generic-api-key)"])
+                writer.writerow(["demo/b.txt", "2", "generic-api-key", "zzzz...9999 (generic-api-key)"])
+            presented, _stats = self.briefing.present_findings([
+                _secret(
+                    "generic-api-key",
+                    "ab12...cd34 (generic-api-key)",
+                    title="Secret detected by gitleaks: generic-api-key (2 hit(s) across 2 file(s))",
+                    evidence_count=2,
+                )
+            ])
+            ctx = self.briefing.EvidenceContext(root, False)
+            paths = {loc["path"] for loc in ctx.locations(presented[0])}
+        self.assertEqual(paths, {"demo/a.txt", "demo/b.txt"})
+
+    def test_mixed_rule_spelling_lists_every_csv_file(self):
+        import csv
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            folder = root / "raw" / "secrets-scan"
+            folder.mkdir(parents=True)
+            with (folder / "findings.csv").open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["file", "line", "rule", "sample_redacted"])
+                writer.writerow(["demo/a.txt", "1", "aws-access-token", "AKIA...MPLE (aws-access-token)"])
+                writer.writerow(["demo/b.txt", "4", "AWS Access Token", "ASIA...MPLE (AWS Access Token)"])
+            presented, _stats = self.briefing.present_findings([
+                _secret(
+                    "aws-access-token",
+                    "AKIA...MPLE (aws-access-token)",
+                    severity="critical",
+                    title="Secret detected by gitleaks: aws-access-token (2 hit(s) across 2 file(s))",
+                    evidence_count=2,
+                )
+            ])
+            ctx = self.briefing.EvidenceContext(root, False)
+            paths = {loc["path"] for loc in ctx.locations(presented[0])}
+        self.assertEqual(paths, {"demo/a.txt", "demo/b.txt"})
+
+    def test_title_without_a_file_count_still_parses(self):
+        title = "Secret detected by gitleaks: generic-api-key (2 hit(s))"
+        self.assertTrue(self.briefing._secret_title_grouped(title))
+        self.assertEqual(
+            self.briefing._secret_title_parts(title),
+            ("gitleaks", "generic-api-key"),
         )
 
     def test_redundant_count_leaves_the_title(self):
@@ -263,6 +436,121 @@ class TestBriefingHtmlQuality(unittest.TestCase):
         self.assertIn(f"Cursor composer over by {over} days", html)
         self.assertNotIn("Claude Code over by", html)
         self.assertNotIn("1 files", html)
+
+
+class TestRedactionHardening(unittest.TestCase):
+    def test_sample_format_accepts_new_redact_sample_shapes(self):
+        briefing = _load_briefing()
+        short = "k" * 10
+        short_out = briefing.redact_sample(short, "demo")
+        self.assertEqual(short_out, "****REDACTED:demo****")
+        self.assertTrue(briefing._looks_redacted(short_out))
+        self.assertFalse(briefing._looks_redacted(short))
+        long_out = briefing.redact_sample("START" + ("m" * 30) + "END!!", "demo")
+        self.assertTrue(briefing._looks_redacted(long_out))
+        self.assertTrue(briefing._looks_redacted("ab12...cd34 (generic-api-key)"))
+        self.assertTrue(briefing._looks_redacted("****REDACTED:x****"))
+
+    def test_severity_class_rejects_attribute_injection(self):
+        briefing = _load_briefing()
+        quote_break = "low' onclick='alert(1)"
+        rows, _note = briefing.render_appendix_grouped([{
+            "severity": quote_break,
+            "title": "Synthetic row",
+            "evidence_count": 1,
+            "_collector": "demo",
+        }])
+        self.assertNotIn("onclick", rows)
+        self.assertNotIn(quote_break, rows)
+        self.assertIn("class='pill low'", rows)
+        high_rows, _note = briefing.render_appendix_grouped([{
+            "severity": "High",
+            "title": "Synthetic high",
+            "evidence_count": 1,
+        }])
+        self.assertIn("class='pill high'", high_rows)
+
+        env = {
+            "copilot": _envelope(
+                "copilot",
+                platform_detected=True,
+                rules=[],
+                findings=[{
+                    "id": "demo.posture",
+                    "severity": quote_break,
+                    "category": "Shell Execution",
+                    "title": "Synthetic posture",
+                    "sample_redacted": "",
+                }],
+            )
+        }
+        html = briefing.render_permissions_section(env)
+        self.assertNotIn("onclick", html)
+        self.assertIn("class='pill low'", html)
+
+        _tabs, panels = briefing.render_findings_section([{
+            "id": "demo.row",
+            "severity": 'high" onmouseover="alert(1)',
+            "category": "Shell Execution",
+            "title": "Synthetic finding",
+            "evidence_count": 1,
+            "sample_redacted": "",
+        }])
+        self.assertNotIn("onmouseover", panels)
+        self.assertIn('class="pill low"', panels)
+
+    def test_telemetry_card_masks_endpoint_path_when_redacting(self):
+        briefing = _load_briefing()
+        dest = "https://otel.example/home/" + "zzotel" + "/v1"
+        summary = {
+            "otel_enabled": True,
+            "otel_destination": dest,
+            "otel_protocol": "http/protobuf",
+        }
+        with patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+            html = briefing._render_telemetry_summary("claude", summary)
+        self.assertNotIn("zzotel", html)
+        self.assertIn("otel.example", html)
+        with patch.dict(os.environ, {"AISCAN_REDACT": ""}):
+            plain = briefing._render_telemetry_summary("claude", summary)
+        self.assertIn("zzotel", plain)
+
+
+class CodexActivityTests(unittest.TestCase):
+    """Cover: Codex last used from the codex summary; Desktop last opened as its own row."""
+
+    def test_cover_summary_and_desktop(self):
+        from collections import Counter
+
+        mod = _load_briefing()
+        envelopes = {"codex": _envelope("codex", summary={
+            "last_used": "2026-10-04",
+            "desktop_installed": True,
+            "desktop_last_opened": "2026-10-15",
+        })}
+        html = mod.render_cover_status(envelopes, {}, Counter())
+        self.assertIn("2026-10-04", html)
+        self.assertIn("Codex Desktop app", html)
+        self.assertIn("opened 2026-10-15", html)
+        self.assertLess(html.index("2026-10-04"), html.index("Codex Desktop app"))
+        self.assertIn("<strong>1</strong>", html)
+        self.assertEqual(mod._tool_last_used("codex", envelopes), "2026-10-04")
+
+    def test_no_desktop_row_when_not_installed(self):
+        from collections import Counter
+
+        mod = _load_briefing()
+        envelopes = {"codex": _envelope("codex", summary={"last_used": "2026-10-04"})}
+        html = mod.render_cover_status(envelopes, {}, Counter())
+        self.assertNotIn("Codex Desktop app", html)
+        self.assertNotIn("opened", html)
+
+    def test_tools_table_last_used_not_dead(self):
+        mod = _load_briefing()
+        envelopes = {"codex": _envelope("codex", summary={"last_used": "2026-10-04"})}
+        rows = mod.build_tools_table(envelopes, None, {})
+        codex_row = next(row for row in rows if row["key"] == "codex")
+        self.assertEqual(codex_row["last_used"], "2026-10-04")
 
 
 if __name__ == "__main__":

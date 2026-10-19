@@ -141,6 +141,20 @@ prefix_rule(pattern=__import__("os").system("x"))
         self.assertEqual(self.finding(env, "codex.approval.never")["severity"], "critical")
         self.assertTrue(any(r.get("settings_source") == "project .codex/rules" for r in env["rules"]))
 
+    def test_hook_command_masks_secret_before_truncate(self):
+        secret = "AKIA" + "B" * 16
+        command = ("echo " + ("Q" * 70)) + secret
+        hook = json.dumps({
+            "hooks": {
+                "PreToolUse": [{"hooks": [{"type": "command", "command": command}]}],
+            }
+        })
+        self.write("hooks.json", hook)
+        with patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+            sample = self.finding(self.collect(), "codex.hooks.lifecycle_command")["sample_redacted"]
+        self.assertNotIn(secret, sample)
+        self.assertNotIn("AKIA", sample)
+
     def test_managed_settings(self):
         managed = self.base / "managed"
         self.write("requirements.toml", '''allowed_approval_policies=["on-request"]

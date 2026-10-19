@@ -5,6 +5,8 @@ Usage:
     python codex.py --evidence-root ./audit-run [--dry-run]
 
 Reads ~/.codex/sessions JSONL rollouts for approval requests and approved prefixes.
+Compressed rollouts (*.jsonl.zst) are scanned with stdlib compression.zstd on
+Python 3.14+. On older Python they are counted in a low finding and not opened.
 Checks config.toml and auth.json for presence (not token values).
 """
 
@@ -12,31 +14,37 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import tomllib
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+import compressed
 import paths
 from codex_permissions import collect_permissions
 from common import (
     add_base_args,
     classify_rule,
+    clip_sanitized,
     compute_scope_hash,
     finish_collector,
+    is_loopback_url,
     iter_jsonl,
     make_envelope,
     make_finding,
     make_rule,
     nested_text,
     parse_iso,
+    sanitize_text,
     secret_types_in,
     sha256_short,
     validate_evidence_root,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.4.0"
 
 COLLECTOR = "codex"
 
@@ -51,14 +59,16 @@ def safe_url(value: str) -> str:
         return ""
     try:
         parts = urlsplit(text)
+        if not parts.scheme or not parts.netloc:
+            return text[:160]
+        # hostname and port can raise ValueError (bad IPv6, port above 65535).
+        host = parts.hostname or parts.netloc
+        port = parts.port
+        if port:
+            host = f"{host}:{port}"
+        return urlunsplit((parts.scheme, host, parts.path.rstrip("/"), "", ""))
     except ValueError:
-        return text[:160]
-    if not parts.scheme or not parts.netloc:
-        return text[:160]
-    host = parts.hostname or parts.netloc
-    if parts.port:
-        host = f"{host}:{parts.port}"
-    return urlunsplit((parts.scheme, host, parts.path.rstrip("/"), "", ""))
+        return "invalid-endpoint"
 
 
 def _find_endpoint(value) -> str:
@@ -94,9 +104,9 @@ def otel_exporter_summary(otel: dict) -> dict[str, str | bool]:
         else:
             exporter_type = ",".join(sorted(str(k) for k in exporter.keys() if str(k).lower() != "headers"))
     return {
-        "destination": destination,
-        "protocol": protocol,
-        "exporter_type": exporter_type,
+        "destination": sanitize_text(destination),
+        "protocol": sanitize_text(protocol),
+        "exporter_type": sanitize_text(exporter_type),
         "headers_configured": "headers" in exporter if isinstance(exporter, dict) else False,
     }
 
@@ -249,15 +259,9 @@ def extract_balanced_array(text: str, start_pos: int) -> str:
     return ""
 
 
-def _is_localhost(url: str) -> bool:
-    """Check if URL is localhost or loopback."""
-    if not url:
-        return False
-    lower = url.lower()
-    return any(
-        host in lower
-        for host in ["localhost", "127.0.0.1", "::1"]
-    )
+def _is_localhost(url: object) -> bool:
+    """True only when url is a string whose host is exactly loopback."""
+    return is_loopback_url(url)
 
 
 def parse_config_toml(data: dict) -> tuple[list[dict], list[dict]]:
@@ -402,7 +406,7 @@ def parse_config_toml(data: dict) -> tuple[list[dict], list[dict]]:
 
                 # External server finding
                 url = server_config.get("url", "")
-                if url and not _is_localhost(url):
+                if isinstance(url, str) and url.strip() and not _is_localhost(url):
                     findings.append(
                         make_finding(
                             "codex.mcp.external_server",
@@ -517,13 +521,58 @@ def parse_config_toml(data: dict) -> tuple[list[dict], list[dict]]:
     return (rules, findings)
 
 
+def desktop_activity(localappdata: Path | None = None) -> dict:
+    """Codex Desktop (Microsoft Store app) presence and last-opened date.
+
+    Installed means a ``%LOCALAPPDATA%\\Packages\\OpenAI.Codex_*`` folder
+    exists. Last opened is the newest mtime of its ``codex-desktop-*.log``
+    files. Stat only: log contents are never read, and no path is stored.
+    Opened is not used; session activity is ``last_used``.
+    """
+    empty = {"desktop_installed": False, "desktop_last_opened": ""}
+    if localappdata is None:
+        env_value = os.environ.get("LOCALAPPDATA")
+        if sys.platform != "win32" or not env_value:
+            return empty
+        localappdata = Path(env_value)
+    try:
+        packages = [p for p in (localappdata / "Packages").glob("OpenAI.Codex_*") if p.is_dir()]
+    except OSError:
+        packages = []
+    logs: list[Path] = []
+    for pkg in packages:
+        log_root = pkg / "LocalCache" / "Local" / "Codex" / "Logs"
+        try:
+            logs.extend(p for p in log_root.rglob("codex-desktop-*.log") if p.is_file())
+        except OSError:
+            continue
+    date, _source = newest_activity([(path, "desktop_logs") for path in logs])
+    return {"desktop_installed": bool(packages), "desktop_last_opened": date}
+
+
+def newest_activity(candidates: list[tuple[Path, str]]) -> tuple[str, str]:
+    """``(YYYY-MM-DD, label)`` of the newest existing candidate by mtime. Stat only."""
+    newest = None
+    source = ""
+    for path, label in candidates:
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            continue
+        if newest is None or stamp > newest:
+            newest, source = stamp, label
+    if newest is None:
+        return "", ""
+    return datetime.fromtimestamp(newest).strftime("%Y-%m-%d"), source
+
+
 def detect_auth_method(auth_json: Path) -> str:
     if not auth_json.exists():
         return "unknown"
     data = None
     try:
-        data = json.loads(auth_json.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(auth_json.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
         return "present"
     if isinstance(data, dict):
         if "tokens" in data or "access_token" in data:
@@ -533,7 +582,7 @@ def detect_auth_method(auth_json: Path) -> str:
     return "present"
 
 
-def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
+def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None, localappdata: Path | None = None) -> dict:
     codex_sessions = tp.codex_sessions
     config_toml = tp.codex_config
     auth_json = tp.codex_auth
@@ -548,8 +597,10 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
         platform_detected=platform_detected,
     )
 
+    desktop = desktop_activity(localappdata)
+
     if not platform_detected:
-        envelope["summary"] = {"session_files": 0, "rules": 0}
+        envelope["summary"] = {"session_files": 0, "rules": 0, **desktop}
         return envelope
 
     rules: list[dict] = []
@@ -584,101 +635,127 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
             if not agg["last"] or ts > agg["last"]:
                 agg["last"] = ts
 
-    if codex_sessions.exists():
-        for jsonl in codex_sessions.rglob("*.jsonl"):
+    # Codex archives old rollouts as .jsonl.zst. Python 3.14+ reads them
+    # with stdlib compression.zstd. Older Pythons count them and do not
+    # open them. A plain file wins when both X.jsonl and X.jsonl.zst exist.
+    rollout_files = compressed.jsonl_files(codex_sessions) if codex_sessions.exists() else []
+    backend = compressed.zstd_backend()
+    compressed_session_files = sum(1 for path in rollout_files if compressed.is_compressed(path))
+    compressed_unreadable = 0
+    try:
+        state_dbs = list(tp.codex_home.glob("state_*.sqlite")) if tp.codex_home.exists() else []
+    except OSError:
+        state_dbs = []
+    last_used, last_used_source = newest_activity(
+        [(path, "sessions") for path in rollout_files]
+        + [(tp.codex_home / "session_index.jsonl", "session_index")]
+        + [(path, "state_db") for path in state_dbs]
+    )
+
+    if rollout_files:
+        for jsonl in rollout_files:
+            if compressed.is_compressed(jsonl) and backend is None:
+                continue
             session_files += 1
-            for line_no, obj in iter_jsonl(jsonl):
-                ts = parse_iso(obj.get("timestamp"))
-                payload = obj.get("payload", {})
+            try:
+                reader = compressed.iter_jsonl if compressed.is_compressed(jsonl) else iter_jsonl
+                for line_no, obj in reader(jsonl):
+                    if not isinstance(obj, dict):
+                        continue
+                    ts = parse_iso(obj.get("timestamp"))
+                    payload = obj.get("payload", {})
 
-                if isinstance(payload, dict) and payload.get("type") == "function_call":
-                    args_raw = payload.get("arguments", "")
-                    args: dict = {}
-                    if isinstance(args_raw, str):
-                        try:
-                            args = json.loads(args_raw)
-                        except json.JSONDecodeError:
-                            args = {}
-                    elif isinstance(args_raw, dict):
-                        args = args_raw
+                    if isinstance(payload, dict) and payload.get("type") == "function_call":
+                        args_raw = payload.get("arguments", "")
+                        args: dict = {}
+                        if isinstance(args_raw, str):
+                            try:
+                                args = json.loads(args_raw)
+                            except json.JSONDecodeError:
+                                args = {}
+                        elif isinstance(args_raw, dict):
+                            args = args_raw
 
-                    sandbox = str(args.get("sandbox_permissions", ""))
-                    prefix_rule = args.get("prefix_rule", "")
-                    command = str(args.get("command", payload.get("name", "")))
+                        sandbox = str(args.get("sandbox_permissions", ""))
+                        prefix_rule = args.get("prefix_rule", "")
+                        command = str(args.get("command", payload.get("name", "")))
 
-                    if sandbox == "require_escalated" or prefix_rule:
-                        approval_count += 1
-                        if SANDBOX_BYPASS_RE.search(sandbox + command):
-                            add_event(
-                                "codex.sandbox.require_escalated",
-                                "high",
-                                "Shell Execution",
-                                "Codex approval request escalated sandbox permissions",
-                                command[:80] if command else "require_escalated",
-                                ts,
-                                ["unbounded_glob"],
-                            )
-                        if prefix_rule and str(prefix_rule) not in seen_rules:
-                            seen_rules.add(str(prefix_rule))
-                            rule_type, cmd, _ = classify_rule(str(prefix_rule))
+                        if sandbox == "require_escalated" or prefix_rule:
+                            approval_count += 1
+                            if SANDBOX_BYPASS_RE.search(sandbox + command):
+                                add_event(
+                                    "codex.sandbox.require_escalated",
+                                    "high",
+                                    "Shell Execution",
+                                    "Codex approval request escalated sandbox permissions",
+                                    clip_sanitized(command, 80) if command else "require_escalated",
+                                    ts,
+                                    ["unbounded_glob"],
+                                )
+                            if prefix_rule and str(prefix_rule) not in seen_rules:
+                                seen_rules.add(str(prefix_rule))
+                                rule_type, cmd, _ = classify_rule(str(prefix_rule))
+                                rules.append(
+                                    make_rule(
+                                        "codex",
+                                        "user",
+                                        "session",
+                                        rule_type,
+                                        str(prefix_rule),
+                                        "allow",
+                                        command_or_tool=cmd,
+                                        source_kind="session_event",
+                                        confidence="observed_event",
+                                    )
+                                )
+                            if NETWORK_RE.search(command):
+                                add_event(
+                                    "codex.network.escalated",
+                                    "high",
+                                    "Network Egress",
+                                    "Codex escalated approval for network command",
+                                    clip_sanitized(command, 80),
+                                    ts,
+                                    ["network_egress"],
+                                )
+                            if WRITE_OUTSIDE_RE.search(command):
+                                add_event(
+                                    "codex.write.outside_root",
+                                    "high",
+                                    "Data Access",
+                                    "Codex command may write outside project root",
+                                    clip_sanitized(command, 80),
+                                    ts,
+                                    ["env_read"],
+                                )
+
+                    text = nested_text(obj)
+                    if "Approved command prefixes" in text:
+                        block_key = sha256_short(text[:500]) if len(text) > 500 else text[:200]
+                        if block_key in seen_prefix_blocks:
+                            continue
+                        seen_prefix_blocks.add(block_key)
+                        for prefix in parse_approved_prefixes(text):
+                            if prefix in seen_rules:
+                                continue
+                            seen_rules.add(prefix)
+                            rule_type, cmd, _ = classify_rule(prefix)
                             rules.append(
                                 make_rule(
                                     "codex",
                                     "user",
-                                    "session",
+                                    "session_snapshot",
                                     rule_type,
-                                    str(prefix_rule),
+                                    prefix,
                                     "allow",
                                     command_or_tool=cmd,
-                                    source_kind="session_event",
-                                    confidence="observed_event",
+                                    source_kind="session_prefix",
+                                    confidence="medium",
                                 )
                             )
-                        if NETWORK_RE.search(command):
-                            add_event(
-                                "codex.network.escalated",
-                                "high",
-                                "Network Egress",
-                                "Codex escalated approval for network command",
-                                command[:80],
-                                ts,
-                                ["network_egress"],
-                            )
-                        if WRITE_OUTSIDE_RE.search(command):
-                            add_event(
-                                "codex.write.outside_root",
-                                "high",
-                                "Data Access",
-                                "Codex command may write outside project root",
-                                command[:80],
-                                ts,
-                                ["env_read"],
-                            )
-
-                text = nested_text(obj)
-                if "Approved command prefixes" in text:
-                    block_key = sha256_short(text[:500]) if len(text) > 500 else text[:200]
-                    if block_key in seen_prefix_blocks:
-                        continue
-                    seen_prefix_blocks.add(block_key)
-                    for prefix in parse_approved_prefixes(text):
-                        if prefix in seen_rules:
-                            continue
-                        seen_rules.add(prefix)
-                        rule_type, cmd, _ = classify_rule(prefix)
-                        rules.append(
-                            make_rule(
-                                "codex",
-                                "user",
-                                "session_snapshot",
-                                rule_type,
-                                prefix,
-                                "allow",
-                                command_or_tool=cmd,
-                                source_kind="session_prefix",
-                                confidence="medium",
-                            )
-                        )
+            except (OSError, compressed.TooLarge, compressed.DecompressTimeout, compressed.ZstdUnavailable):
+                if compressed.is_compressed(jsonl):
+                    compressed_unreadable += 1
 
     # Flush aggregated session events: one finding per id with evidence_count.
     for finding_id, agg in event_findings.items():
@@ -693,6 +770,31 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
                 last_seen=agg["last"],
                 sample_redacted=agg["sample"],
                 tags=agg["tags"],
+            )
+        )
+
+    if backend is None and compressed_session_files:
+        noun = "log" if compressed_session_files == 1 else "logs"
+        findings.append(
+            make_finding(
+                "codex.sessions.compressed_not_scanned",
+                "low",
+                "General Tooling",
+                f"{compressed_session_files} compressed Codex session {noun} not scanned",
+                evidence_count=compressed_session_files,
+                tags=["coverage_gap"],
+            )
+        )
+    elif compressed_unreadable:
+        noun = "log" if compressed_unreadable == 1 else "logs"
+        findings.append(
+            make_finding(
+                "codex.sessions.compressed_unreadable",
+                "low",
+                "General Tooling",
+                f"{compressed_unreadable} compressed Codex session {noun} could not be fully read",
+                evidence_count=compressed_unreadable,
+                tags=["coverage_gap"],
             )
         )
 
@@ -758,6 +860,12 @@ def collect(tp: paths.ToolPaths, *, repo_roots=None, managed_dirs=None) -> dict:
     envelope["findings"] = findings
     envelope["summary"] = {
         "session_files": session_files,
+        "compressed_session_files": compressed_session_files,
+        "compressed_session_unreadable": compressed_unreadable,
+        "zstd_backend": backend or "none",
+        "last_used": last_used,
+        "last_used_source": last_used_source,
+        **desktop,
         "rules": len(rules),
         "approval_requests": approval_count,
         "findings": len(findings),

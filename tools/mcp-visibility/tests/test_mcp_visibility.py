@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS_DIR))
@@ -303,6 +304,39 @@ class TestPureHelpers(unittest.TestCase):
         self.assertTrue(src.exists)
         self.assertFalse(src.parse_ok)
         self.assertEqual(records, [])
+
+    def test_non_list_args_and_bad_ipv6_do_not_raise(self):
+        self.assertIsNone(mcp.extract_url({"args": 5}))
+        cfg = {"args": 5, "url": "http://[::1"}
+        self.assertEqual(mcp.extract_url(cfg), "http://[::1")
+        self.assertEqual(mcp.endpoint_locality("http://[::1"), "unknown")
+        status, _evidence, keys, _secret = mcp.classify_auth(cfg)
+        self.assertIsInstance(status, str)
+        self.assertEqual(keys, [])
+        record = mcp.ServerRecord(
+            server_name="odd",
+            platform="cursor",
+            scope="user",
+            source_file=Path("mcp.json"),
+            source_kind="mcp_json",
+            config=cfg,
+        )
+        row = record.as_dict()
+        self.assertEqual(row["endpoint_locality"], "unknown")
+        self.assertEqual(row["args"], [])
+
+
+class TestRedactPathBoundary(unittest.TestCase):
+    def test_short_home_does_not_eat_a_longer_directory(self):
+        home = Path("/tmp") / ("zzhome" + "dev")
+        longer_name = "zzhome" + "developer"
+        with patch.object(mcp.Path, "home", return_value=home):
+            short = mcp.redact_path(str(home / "proj"))
+            longer = mcp.redact_path(str(home.parent / longer_name / "proj"))
+        self.assertTrue(short.startswith("<userprofile>"))
+        self.assertNotIn("zzhomedev", short)
+        self.assertNotIn("<userprofile>eloper", longer)
+        self.assertIn(longer_name, longer)
 
 
 if __name__ == "__main__":

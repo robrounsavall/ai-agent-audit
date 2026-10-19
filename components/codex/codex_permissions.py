@@ -8,7 +8,7 @@ import re
 import tokenize
 from pathlib import Path
 
-from common import default_repo_roots, make_finding, make_rule, sanitize_text
+from common import clip_sanitized, default_repo_roots, make_finding, make_rule, sanitize_text
 from configfmt import MAX_CONFIG_BYTES, load_jsonc, load_toml
 
 INTERPRETERS = {"powershell", "pwsh", "cmd", "bash", "sh", "zsh", "python", "python3",
@@ -281,7 +281,7 @@ def collect_permissions(tp, rules, findings, *, repo_roots=None, managed_dirs=No
                 findings.append(make_finding(
                     "codex.hooks.lifecycle_command", severity, "Shell Execution",
                     f"Codex hook {sanitize_text(str(event))} configured with command ({source})",
-                    evidence_count=len(handlers), sample_redacted=handlers[0]["command"][:80]))
+                    evidence_count=len(handlers), sample_redacted=clip_sanitized(handlers[0]["command"], 80)))
 
     rule_files(tp.codex_home)
     hooks(tp.codex_home)

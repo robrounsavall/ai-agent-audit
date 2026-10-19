@@ -50,7 +50,13 @@ def redact_path(path: str) -> str:
     userprofile = str(Path.home())
     out = path
     if userprofile:
-        out = re.sub(re.escape(userprofile), "<userprofile>", out, flags=re.I)
+        # Boundary so a short home like /home/dev does not rewrite /home/development.
+        out = re.sub(
+            r"(?<![A-Za-z0-9])" + re.escape(userprofile) + r"(?![A-Za-z0-9])",
+            "<userprofile>",
+            out,
+            flags=re.I,
+        )
     return out
 
 
@@ -119,7 +125,10 @@ def extract_url(config: dict[str, Any] | None) -> str | None:
     direct = config.get("url") or config.get("serverUrl") or config.get("endpoint")
     if isinstance(direct, str) and direct:
         return mask_secret_text(direct)
-    for item in config.get("args") or []:
+    args = config.get("args")
+    if not isinstance(args, list):
+        return None
+    for item in args:
         if not isinstance(item, str):
             continue
         match = URL_RE.search(item)
@@ -131,8 +140,11 @@ def extract_url(config: dict[str, Any] | None) -> str | None:
 def endpoint_locality(url: str | None) -> str:
     if not url:
         return "command_only"
-    parsed = urlparse(url)
-    host = parsed.hostname
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+    except ValueError:
+        return "unknown"
     if not host:
         return "unknown"
     low = host.lower()
@@ -224,7 +236,13 @@ def classify_auth(config: dict[str, Any] | None) -> tuple[str, list[str], list[s
         return "env_configured", evidence, sorted(env_keys), secret_redacted
     if env_has_reference:
         return "env_var_reference", evidence, sorted(env_keys), secret_redacted
-    if url and urlparse(url).scheme in {"http", "https"}:
+    scheme = ""
+    if url:
+        try:
+            scheme = urlparse(url).scheme
+        except ValueError:
+            scheme = ""
+    if url and scheme in {"http", "https"}:
         return "oauth_likely", evidence, sorted(env_keys), secret_redacted
     return "none", evidence, sorted(env_keys), secret_redacted
 
@@ -302,8 +320,20 @@ class ServerRecord:
         self.finalize()
         command = self.config.get("command") if isinstance(self.config, dict) else None
         args = sanitize_args(self.config.get("args")) if isinstance(self.config, dict) else []
-        url = extract_url(self.config)
-        auth_status, auth_evidence, env_keys, secret_redacted = classify_auth(self.config)
+        try:
+            url = extract_url(self.config)
+            auth_status, auth_evidence, env_keys, secret_redacted = classify_auth(self.config)
+            transport = infer_transport(self.config)
+            endpoint = endpoint_class(self.config)
+            locality = endpoint_locality(url)
+            fingerprint = config_fingerprint(self.config)
+        except (TypeError, ValueError, AttributeError, RecursionError):
+            url = None
+            auth_status, auth_evidence, env_keys, secret_redacted = "none", [], [], False
+            transport = "unknown"
+            endpoint = "reference_only"
+            locality = "unknown"
+            fingerprint = ""
         return {
             "server_name": self.server_name,
             "platform": self.platform,
@@ -314,9 +344,9 @@ class ServerRecord:
             "source_path_id": sha256_short(normalized_path(self.source_file)),
             "registered": self.registered,
             "reference_type": self.reference_type,
-            "transport": infer_transport(self.config),
-            "endpoint_class": endpoint_class(self.config),
-            "endpoint_locality": endpoint_locality(url),
+            "transport": transport,
+            "endpoint_class": endpoint,
+            "endpoint_locality": locality,
             "command": mask_secret_text(command) if command else None,
             "args": args,
             "url": url,
@@ -329,7 +359,7 @@ class ServerRecord:
             "auth_evidence": auth_evidence,
             "env_keys": env_keys,
             "secret_redacted": secret_redacted,
-            "config_fingerprint": config_fingerprint(self.config),
+            "config_fingerprint": fingerprint,
             "duplicate_group": self.duplicate_group,
             "duplicate_of": self.duplicate_of,
             "definition_conflict": self.definition_conflict,

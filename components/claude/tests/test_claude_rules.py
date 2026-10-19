@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ["USERPROFILE"] = r"C:\Users\Test User"
 os.environ["APPDATA"] = r"C:\Users\Test User\AppData\Roaming"
@@ -96,6 +97,29 @@ class TestExtractRules(unittest.TestCase):
             "user", "global", settings, Path("settings.json")
         )
         self.assertIn("claude.permission.bash_wildcard", ids(findings))
+
+
+class TestOtelSummaryRedaction(unittest.TestCase):
+    def test_summary_masks_path_and_service_name_when_redacting(self):
+        service = r"C:\Users\Test User\collector"
+        endpoint = "https://ada:s3cret@otel.example/home/" + "zzotel" + "/v1/traces?x=1"
+        env = [("user", {
+            "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
+            "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+            "OTEL_SERVICE_NAME": service,
+        })]
+        with patch.dict(os.environ, {"AISCAN_REDACT": "1"}):
+            summary = claude.claude_otel_summary(env)
+        self.assertNotIn("zzotel", summary["destination"])
+        self.assertNotIn("s3cret", summary["destination"])
+        self.assertNotIn("Test User", summary["service_name"])
+        self.assertIn("otel.example", summary["destination"])
+        self.assertEqual(summary["protocol"], "http/protobuf")
+        with patch.dict(os.environ, {"AISCAN_REDACT": ""}):
+            plain = claude.claude_otel_summary(env)
+        self.assertIn("zzotel", plain["destination"])
+        self.assertIn("Test User", plain["service_name"])
 
 
 if __name__ == "__main__":
