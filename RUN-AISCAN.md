@@ -144,9 +144,12 @@ machine with a lot of chat history, so give the command at least a
   below for what that flag does and does not cover. The default output is
   unredacted. Treat everything in `$out` as private either way.
 - `-AgentMode` is optional and off unless you add it. It prints paths
-  relative to the output folder and leaves out "Evidence kept at". Text a
-  collector writes to its own error stream can still contain a path. Do
-  not copy any path from the console into chat.
+  relative to the output folder and leaves out "Evidence kept at". On a
+  single collector it also skips the detailed console view and prints only
+  the summary line (collector, detected, finding count), with no hostname,
+  finding titles, or samples. Text a collector writes to its own error
+  stream can still contain a path. Do not copy any path from the console
+  into chat.
 - The closing line depends on the flag. With `-Redact`, it says this run's
   evidence and briefing are redacted, `raw\` is not, and older files
   already in the folder are not re-redacted. Without `-Redact`, it warns
@@ -178,7 +181,12 @@ machine with a lot of chat history, so give the command at least a
     means the file was not readable JSON. Those are real failures. You may
     rerun just that collector once into a new folder, for example
     `... .\aiscan.ps1 codex -OutDir <new folder>`. If the user asked for
-    `-Redact`, add it on that retry too. Then report.
+    `-Redact`, add it on that retry too. If you add `-AgentMode` on that
+    retry, the console prints only the summary line (collector, detected,
+    finding count). It does not print the hostname, finding titles, or
+    samples. Without `-AgentMode`, the detailed view still prints those.
+    With `-Redact` and without `-AgentMode`, the hostname in that view is
+    masked as `<host>`. Then report.
   - `pii-scan` can show `error (exit 2)` when it has no chat export and no
     native chat folder to scan. Report that as nothing to scan. Do not
     treat it as a bug to patch.

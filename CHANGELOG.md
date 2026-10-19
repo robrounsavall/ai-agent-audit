@@ -87,6 +87,12 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Fixed
 
+- A single collector without `-Json` printed the detailed console view,
+  including the machine hostname, finding titles, and samples, even with
+  `-AgentMode` or `-Redact`. With `-AgentMode` it now prints only the
+  summary line (collector, detected, finding count). With `-Redact` and
+  without `-AgentMode`, that view masks the hostname as `<host>`.
+  `-Redact` stays off unless you pass it.
 - The process exits 2 when a collector errors, writes no evidence file, or
   writes a file that is not a readable envelope. It exits 3 when the only
   failure is the briefing. A normal run, including "platform not detected",

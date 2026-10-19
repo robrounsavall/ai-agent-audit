@@ -224,7 +224,8 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 # Mask usernames, paths, secrets, and account emails for output you intend to share
 .\aiscan.ps1 all -Redact
 
-# Paths relative to the scan folder; no "Evidence kept at" line
+# Paths relative to the scan folder; no "Evidence kept at" line.
+# One collector prints the summary line only (no hostname, titles, or samples).
 .\aiscan.ps1 all -OutDir C:\scans\today -AgentMode
 
 # What would be scanned, reading nothing
@@ -272,7 +273,11 @@ More on scan history and telemetry: [docs/scan-history.md](docs/scan-history.md)
 
 The script prints a summary table, then a closing line. `-AgentMode` prints
 paths relative to the scan folder and omits `Evidence kept at`. The table
-and error lines stay. Text a collector writes to its own error stream is
+and error lines stay. A single collector without `-Json` normally prints a
+detailed view that includes the hostname and finding titles. With
+`-AgentMode` that view is skipped and only the summary line is printed.
+With `-Redact` and without `-AgentMode`, the hostname in that view is
+shown as `<host>`. Text a collector writes to its own error stream is
 unchanged, and can still contain a path.
 
 When `-Briefing` writes the HTML and the default browser opens, the script

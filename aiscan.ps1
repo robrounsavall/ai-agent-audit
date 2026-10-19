@@ -104,9 +104,11 @@
 .PARAMETER AgentMode
     Print paths relative to the scan folder and omit the closing
     "Evidence kept at" line. The summary table and error lines stay.
-    For agent runs that must not repeat absolute paths. Messages this
-    script prints are scrubbed. Stderr from a collector process is not,
-    and can still contain a path.
+    A single collector without -Json prints only that summary line
+    (collector, detected, finding count): no hostname, finding titles,
+    or samples. For agent runs that must not repeat absolute paths.
+    Messages this script prints are scrubbed. Stderr from a collector
+    process is not, and can still contain a path.
 
 .NOTES
     Exit codes: 0 the scan finished, including "platform not detected".
@@ -161,7 +163,8 @@
 .EXAMPLE
     .\aiscan.ps1 all -OutDir C:\scans\today -AgentMode
     Summary table and errors stay. Paths are relative to that folder, and the
-    closing "Evidence kept at" line is omitted.
+    closing "Evidence kept at" line is omitted. One collector prints that
+    summary line instead of the detailed view.
 #>
 [CmdletBinding()]
 param(
@@ -732,6 +735,9 @@ function Show-Peek {
     $detected = if ((& $hasProp $Result "platform_detected")) { $Result.platform_detected } else { "?" }
     $ranAt = if ((& $hasProp $Result "ran_at")) { $Result.ran_at } else { "" }
     $host_ = if ((& $hasProp $Result "host")) { $Result.host } else { "" }
+    # The evidence file keeps the short hostname. -Redact masks it here only,
+    # the same way other share-bound fields are replaced with a token.
+    if ($Redact -and $host_) { $host_ = "<host>" }
     $scope = if ((& $hasProp $Result "scope_hash")) { "$($Result.scope_hash)".Substring(0, [Math]::Min(12, "$($Result.scope_hash)".Length)) } else { "" }
 
     Write-Host ("{0}  " -f $Result.collector) -ForegroundColor Cyan -NoNewline
@@ -816,6 +822,25 @@ function Show-Peek {
         }
     }
     Write-Host ""
+}
+
+# One row of the same table `all` prints. Used for a single collector under
+# -AgentMode so the console does not repeat the hostname, titles, or samples.
+function Show-CollectorSummary {
+    param([Parameter(Mandatory = $true)] $Result)
+
+    $names = @($Result.PSObject.Properties.Name)
+    $collector = if ($names -contains "collector") { $Result.collector } else { "" }
+    $detected = if ($names -contains "platform_detected") { $Result.platform_detected } else { "?" }
+    $count = 0
+    if (($names -contains "findings") -and $null -ne $Result.findings) {
+        $count = @($Result.findings).Count
+    }
+    [PSCustomObject]@{
+        Collector = $collector
+        Detected  = $detected
+        Findings  = $count
+    } | Format-Table -AutoSize
 }
 
 # Writes evidence\agent-summary.json. Failures warn and fall through; the
@@ -1019,6 +1044,9 @@ if ($parsed -and $code -eq 0) {
     Write-Host ""
     if ($Json) {
         Read-EvidenceText -Path $jsonPath
+    }
+    elseif ($AgentMode) {
+        Show-CollectorSummary -Result $j
     }
     else {
         Show-Peek -Result $j
