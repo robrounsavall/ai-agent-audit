@@ -112,6 +112,7 @@ teams have no inventory of any of it. aiscan answers the first question:
 | `cloud-agents` (not in `all`) | Cursor Cloud Agents API (`GET https://api.cursor.com` only) | agent status, repos, branches, PR URLs, latest run, token totals. No dollar cost, no conversation text by default |
 | `telemetry` (not in `all`) | Local OTLP and Splunk export files | Approval counts and usage. Cursor `cost_cents` is labeled as from the Cursor dashboard usage export. Dollars are never estimated from tokens |
 | `tools/mcp-visibility` (separate tool, not in `aiscan.ps1`) | MCP configs for Claude, Cursor, Codex, Grok Build, shared `.mcp.json` and repo-scoped files | server inventory, definition drift, auth posture (tokens always masked) |
+| `tools/github-access` (separate tool, not in `aiscan.ps1`) | GitHub API, with a token you already have | GitHub Apps installed on organizations you own, and SAML-authorized credentials. A token cannot list personal-account installs, OAuth grants, or tokens you created |
 
 **Coming next:** a `vscode` collector that treats VS Code as a place where
 agents run (agent mode and auto-approve settings, MCP servers, workspace
@@ -302,6 +303,15 @@ configs). This is a separate tool and prints real local paths by default:
 python tools\mcp-visibility\mcp_visibility.py --format summary
 ```
 
+GitHub Apps installed on organizations you own, plus SAML-authorized
+credentials, using a token you already have. This is not part of `aiscan`
+(that scan stays offline). A token cannot list personal-account app installs
+or the OAuth apps you authorized; the tool prints those settings links instead.
+
+```powershell
+python tools\github-access\github_access.py
+```
+
 ## Evidence model
 
 Every collector writes one JSON envelope to `evidence/<name>.json`:
@@ -340,6 +350,7 @@ core/scan_diff.py     # what changed since the previous scan (changes.json)
 report/               # HTML briefing builder (summary, then tabs) + access map
 samples/              # synthetic demo evidence and the report v2 draft
 tools/mcp-visibility/ # cross-tool MCP inventory utility
+tools/github-access/  # opt-in GitHub App and SAML credential inventory
 scripts/
   test-component.ps1  # run one component's tests, or all
   build-draft-report.ps1  # rebuild the HTML from existing evidence
@@ -358,7 +369,7 @@ SCHEMA.md             # evidence contract (all collectors)
 .\scripts\test-component.ps1 -Name cloud-agents
 .\scripts\test-component.ps1 -Name telemetry-import
 
-# Everything (all components + integration + mcp-visibility)
+# Everything (all components + integration + mcp-visibility + github-access)
 .\scripts\test-component.ps1 -Name all
 
 # Live scan one tool on this machine
