@@ -255,6 +255,22 @@ text when `-Redact` is on, and still keeps full file paths. The evidence
 `host` field is still the machine's short hostname. The same read limits
 in the ground rules and in step 6 still apply.
 
+## Rebuild a briefing without a new scan
+From the repo root, in Windows PowerShell 5.1, point this at a finished
+scan folder. It does not run the collectors again.
+
+    .\scripts\build-draft-report.ps1 -EvidenceRoot C:\scans\2026-10-07
+
+The folder must contain `evidence\` with the collector JSON files (`version`
+major 1). `changes.json`, `raw\`, `manifest.json`, and `run-origin.txt` are
+optional. The HTML is written to
+`C:\scans\2026-10-07\briefing\report-v2.html`. If the folder is missing, the
+script prints `Scan folder not found: C:\scans\2026-10-07` and exits 1. If
+the path exists but is not a scan folder, it prints
+`Not a scan folder: C:\scans\2026-10-07 (expected an evidence directory)`
+and exits 1. Do not open the HTML from this file's agent steps. The person
+running the scan can open it locally.
+
 ## 6. Read the results (only these fields)
 Do not open `evidence\*.json`. Run the summary instead. If `$out` is still
 set in this window:

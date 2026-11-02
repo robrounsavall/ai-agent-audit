@@ -69,6 +69,17 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Changed
 
+- The briefing is easier to use on one offline HTML file. Access-map cells
+  are buttons that open the evidence beside the cell (with a full label and
+  a visible column help control) instead of links that only scroll. Finding
+  rows open one evidence panel under the row, without a 580px table cap.
+  Section tabs sit at the top, use tab roles and arrow keys, and scroll the
+  new section into view. Empty tabs are marked not collected. Search stays
+  on the current category and says when other tabs have matches. The Changes
+  tab sorts high and critical first, folds low new allow rules into one
+  line, and shows the first 20 rows with Show all. Light-mode severity chips
+  use darker text on a solid fill at 12px. Placeholder customer, operator,
+  and manifest lines are omitted when the scan did not set them. Refs #32.
 - Docs no longer say the default output has no identifying paths or is
   redacted. `-Redact` stays off unless you pass it. It masks paths and
   secrets in evidence and the briefing, and it does not clean `raw/`.

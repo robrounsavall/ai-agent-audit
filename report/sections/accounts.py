@@ -41,8 +41,10 @@ def render_accounts_block(env: dict[str, Any] | None) -> str:
     """Account table, or a one-line note when the collector did not run."""
     if not isinstance(env, dict):
         return (
+            '<div id="agents-accounts" class="agents-block">'
+            '<h3>Which account each tool is signed in as.</h3>'
             '<p class="sub">Account identities were not collected in this scan. '
-            "They are part of <span class=\"mono\">aiscan all</span>.</p>"
+            "They are part of <span class=\"mono\">aiscan all</span>.</p></div>"
         )
     rows = env.get("accounts")
     if not isinstance(rows, list):
@@ -54,12 +56,15 @@ def render_accounts_block(env: dict[str, Any] | None) -> str:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        cells = "".join(f"<td>{_cell(row.get(key))}</td>" for key, _label in _COLUMNS)
+        cells = "".join(
+            f"<td data-label=\"{html.escape(label)}\">{_cell(row.get(key))}</td>"
+            for key, label in _COLUMNS
+        )
         body_rows.append(f"<tr>{cells}</tr>")
     if body_rows:
         table = (
-            '<div class="table-wrap table-scroll" style="max-height:none">'
-            '<table class="mcp-table"><thead><tr>'
+            '<div class="table-wrap table-scroll accounts-scroll" style="max-height:none">'
+            '<table class="mcp-table accounts-table"><thead><tr>'
             + "".join(f"<th>{html.escape(label)}</th>" for _key, label in _COLUMNS)
             + "</tr></thead><tbody>"
             + "".join(body_rows)
@@ -75,11 +80,8 @@ def render_accounts_block(env: dict[str, Any] | None) -> str:
         "Emails are masked when this briefing is built with -Redact."
     )
     return (
-        '<header class="sh" style="margin-top: 28px;">'
-        '<div class="kicker"><span class="num">/04a</span>'
-        '<span class="kicker-label">ACCOUNTS</span></div>'
-        "<h2 class=\"h2\">Which account each tool is signed in as.</h2>"
+        '<div id="agents-accounts" class="agents-block">'
+        "<h3>Which account each tool is signed in as.</h3>"
         f"<p class=\"sub\">{signed} signed in, {distinct} distinct identities. {html.escape(note)}</p>"
-        "</header>"
-        f"{table}"
+        f"{table}</div>"
     )
