@@ -471,8 +471,8 @@ class TestRedactionHardening(unittest.TestCase):
         self.assertIn("class='pill high'", high_rows)
 
         env = {
-            "copilot": _envelope(
-                "copilot",
+            "vscode": _envelope(
+                "vscode",
                 platform_detected=True,
                 rules=[],
                 findings=[{

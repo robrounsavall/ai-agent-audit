@@ -11,6 +11,14 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Added
 
+- `vscode` collector 1.1.0 replaces `copilot` and is included in `aiscan all`.
+  It reads VS Code user and workspace settings, Copilot chat-session
+  metadata, AI extensions, and JetBrains Copilot config. Finding ids moved
+  from `copilot.*` to `vscode.*`. An older `copilot.json` still loads as
+  `vscode` in the briefing, access map, and scan diff. Finding ids are not
+  rewritten, so the first comparison after the rename reports the old ids
+  as resolved and the new ids as added. `chat-history` 1.3.0 also exports
+  Copilot chat sessions to `raw/chat-history/copilot/`.
 - Every scan writes one run-origin line: who or what launched it, the start
   time (ISO 8601 with a timezone offset), and why. Pass `-LaunchedBy` and
   `-Reason`, or set `AISCAN_LAUNCHED_BY` and `AISCAN_REASON`. The parameters

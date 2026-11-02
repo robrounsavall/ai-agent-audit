@@ -74,6 +74,7 @@ _LABEL_MAP = {
     "cursor_db":       "Cursor (DB)",
     "codex_sessions":  "Codex",
     "grok_sessions":   "Grok Build",
+    "vscode_chat_sessions": "VS Code",
 }
 
 _ATTR_MAP = {
@@ -82,9 +83,17 @@ _ATTR_MAP = {
     "cursor_db":       "cursor_db",
     "codex_sessions":  "codex_sessions",
     "grok_sessions":   "grok_sessions",
+    "vscode_chat_sessions": "vscode_workspace_storage",
 }
 
-_ORDER = ["claude_projects", "cursor_projects", "cursor_db", "codex_sessions", "grok_sessions"]
+_ORDER = [
+    "claude_projects",
+    "cursor_projects",
+    "cursor_db",
+    "codex_sessions",
+    "grok_sessions",
+    "vscode_chat_sessions",
+]
 
 
 def _console_report(p: paths.ToolPaths) -> str:
@@ -142,6 +151,7 @@ def _json_output(p: paths.ToolPaths) -> dict:
             "codex_sessions":  str(p.codex_sessions),
             "cursor_projects": str(p.cursor_projects),
             "grok_sessions":   str(p.grok_sessions),
+            "vscode_workspace_storage": str(p.vscode_workspace_storage),
         },
         "evidence_meta": paths.safe_path_meta(p),
     }
@@ -161,6 +171,7 @@ def _write_discovery(p: paths.ToolPaths, evidence_root: str) -> Path:
         p.cursor_projects,
         p.cursor_db,
         p.grok_sessions,
+        p.vscode_workspace_storage,
     ])
 
     meta = paths.safe_path_meta(p)
