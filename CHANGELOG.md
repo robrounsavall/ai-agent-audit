@@ -11,6 +11,16 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Added
 
+- Every scan writes one run-origin line: who or what launched it, the start
+  time (ISO 8601 with a timezone offset), and why. Pass `-LaunchedBy` and
+  `-Reason`, or set `AISCAN_LAUNCHED_BY` and `AISCAN_REASON`. The parameters
+  win. If neither is set, the field is `unknown`. The computer name and the
+  Windows account are not used. The line is `run-origin.txt` in the scan
+  folder, a `run_origin` object in `evidence/agent-summary.json` (and in
+  `aiscan summary`), and a line near the top of the briefing. Secrets and
+  paths in those fields are masked even when `-Redact` is off. `-Redact`
+  stays off unless you pass it. An older folder without the file still
+  summarizes, still builds a briefing, and does not show up as a diff.
 - `accounts` collector, included in `aiscan all`. It reports which identity
   each local AI tool is signed in as: tool, signed-in yes/no/unknown, email
   or username, organization, plan, auth method, home-relative source path,
