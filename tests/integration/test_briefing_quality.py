@@ -375,13 +375,18 @@ class TestBriefingHtmlQuality(unittest.TestCase):
             )
             html = briefing.build_html(root, customer="Example", operator="Test")
 
-        self.assertIn("Manifest: not generated", html)
+        self.assertNotIn("Manifest: not generated", html)
+        self.assertEqual(
+            briefing.manifest_briefing_text("missing")[0],
+            "Manifest: not generated",
+        )
         self.assertNotIn("manifest not pre", html)
         self.assertNotIn('<a href="#changes">Changes</a>', html)
         self.assertIn('class="filter-empty"', html)
-        self.assertIn("No matches", html)
+        self.assertIn("No findings match this search.", html)
         self.assertIn("demo/notes.txt", html)
-        self.assertIn("<details class='hit-files'>", html)
+        self.assertNotIn("hit-files", html)
+        self.assertIn('class="finding-toggle"', html)
         self.assertIn("likely test value", html)
         self.assertIn("PII Scan", html)
         self.assertNotIn("Completion times are in Methodology", html)
@@ -390,7 +395,8 @@ class TestBriefingHtmlQuality(unittest.TestCase):
         self.assertNotIn('class="case-num">/01<', html)
         self.assertIn("Hits are matches, findings are rows.", html)
         self.assertIn("Not collected in this scan.", html)
-        self.assertIn("Open a cell for the evidence", html)
+        self.assertNotIn("Open a cell for the evidence", html)
+        self.assertIn("Select a cell to read the evidence", html)
         self.assertNotIn("Each cell links to the evidence row below", html)
 
         kickers = re.findall(

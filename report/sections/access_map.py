@@ -31,27 +31,98 @@ _PILL = {
 }
 
 _ACCESS_CSS = """
-.access-map { min-width: 920px; }
+.access-scroll { overflow: visible; max-height: none; }
+.access-map { min-width: 0; border-collapse: separate; border-spacing: 0; }
 .access-map th, .access-map td { min-width: 108px; }
-.access-map td.access-agent { min-width: 160px; }
+.access-agent { min-width: 160px; text-align: left; }
+.access-cell { position: relative; vertical-align: top; }
 .access-cell--yes { background: var(--red-bg); }
 .access-cell--partial { background: var(--amber-bg); }
 .access-cell--no { background: rgba(16,185,129,.10); }
 .access-cell--unknown { background: transparent; }
-.access-map a.pill { text-decoration: none; }
+.access-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 4px 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.access-chip:focus-visible, .help-tip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.access-info, .help-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-family: var(--f-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  flex: 0 0 auto;
+}
+.help-tip {
+  margin-left: 6px;
+  padding: 0;
+  color: var(--fg-2);
+  background: var(--bg-card);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.help-pop {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--f-sans);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg);
+  white-space: normal;
+}
+.help-pop[hidden] { display: none !important; }
+.access-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(320px, 70vw);
+  padding: 10px 12px;
+  background: var(--bg-card);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+}
+.access-popover.access-popover--end { left: auto; right: 0; }
+.access-popover[hidden] { display: none !important; }
 .access-reason {
-  margin-top: 8px;
-  font-size: 12px;
-  line-height: 1.35;
-  color: var(--fg-3);
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--fg);
 }
 .access-meta {
-  margin-top: 6px;
+  margin: 8px 0 0;
   font-family: var(--f-mono);
-  font-size: 10.5px;
+  font-size: 12px;
   letter-spacing: .04em;
   text-transform: uppercase;
-  color: var(--fg-4);
+  color: var(--fg-2);
 }
 .access-legend {
   display: flex;
@@ -60,17 +131,100 @@ _ACCESS_CSS = """
   list-style: none;
   margin: 0 0 18px;
   padding: 0;
-  color: var(--fg-3);
-  font-size: 13px;
+  color: var(--fg-2);
+  font-size: 14px;
 }
 .access-legend li { display: inline-flex; align-items: center; gap: 8px; }
-.access-map-evidence { margin-top: 28px; }
-.access-map-evidence h3 {
-  font-family: var(--f-display);
-  font-weight: 500;
-  font-size: 22px;
-  margin: 0 0 8px;
+@media (min-width: 721px) {
+  .access-map { min-width: 920px; }
+  .access-map thead th {
+    position: sticky;
+    top: var(--tabbar-h, 56px);
+    z-index: 3;
+    background: var(--bg-card);
+  }
+  .access-map .access-agent {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--bg);
+  }
+  .access-map thead .access-agent { z-index: 4; background: var(--bg-card); }
 }
+@media (max-width: 720px) {
+  .access-map, .access-map tbody, .access-map tr, .access-map th, .access-map td {
+    display: block;
+    min-width: 0;
+    width: auto;
+  }
+  .access-map thead { display: none; }
+  .access-map tr {
+    border: 1px solid var(--line);
+    margin: 0 0 12px;
+    padding: 8px;
+    background: var(--bg-card);
+  }
+  .access-map .access-agent { font-size: 16px; padding-bottom: 6px; }
+  .access-cell { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .access-cell::before {
+    content: attr(data-label);
+    flex: 0 0 7.5rem;
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--fg-2);
+  }
+}
+"""
+
+_ACCESS_JS = """
+<script>
+(function () {
+  if (window.__aiscanAccessBound) return;
+  window.__aiscanAccessBound = true;
+  function closePops(except) {
+    document.querySelectorAll(".access-popover, .help-pop").forEach(function (pop) {
+      if (pop === except) return;
+      pop.hidden = true;
+      var id = pop.id;
+      if (!id) return;
+      var opener = document.querySelector('[aria-controls="' + id + '"]');
+      if (opener) opener.setAttribute("aria-expanded", "false");
+    });
+  }
+  document.addEventListener("click", function (ev) {
+    var help = ev.target.closest && ev.target.closest(".help-tip");
+    var chip = ev.target.closest && ev.target.closest(".access-chip");
+    if (!help && !chip) {
+      if (!ev.target.closest || !ev.target.closest(".access-popover, .help-pop")) closePops(null);
+      return;
+    }
+    ev.preventDefault();
+    var btn = help || chip;
+    var pop = document.getElementById(btn.getAttribute("aria-controls") || "");
+    if (!pop) return;
+    var open = btn.getAttribute("aria-expanded") === "true";
+    closePops(open ? null : pop);
+    if (!open) {
+      pop.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+      var cell = btn.closest(".access-cell");
+      if (cell && pop.classList.contains("access-popover")) {
+        var rect = cell.getBoundingClientRect();
+        pop.classList.toggle("access-popover--end", rect.left > window.innerWidth * 0.55);
+      }
+    }
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Escape") return;
+    var openBtn = document.querySelector('.access-chip[aria-expanded="true"], .help-tip[aria-expanded="true"]');
+    if (!openBtn) return;
+    closePops(null);
+    openBtn.focus();
+  });
+})();
+</script>
 """
 
 
@@ -104,17 +258,33 @@ def render_access_map_section(envelopes: dict[str, dict]) -> str:
         agent_cells = grid["cells"][row["id"]]
         present = "collected" if row["present"] else "not collected"
         present_cls = "ok" if row["present"] else "skipped"
-        body = "".join(_render_cell(agent_cells[column["id"]], column["id"]) for column in grid["columns"])
+        body = "".join(
+            _render_cell(
+                agent_cells[column["id"]],
+                column,
+                str(row.get("label") or row["id"]),
+                str(row["id"]),
+            )
+            for column in grid["columns"]
+        )
         rows_html.append(
             "<tr>"
-            f"<td class='access-agent'><strong>{_esc(row['label'])}</strong>"
-            f"<div class='access-meta'><span class='pill {present_cls}'>{_esc(present)}</span></div></td>"
+            f"<th scope='row' class='access-agent' id='agent-{_esc(row['id'])}'>"
+            f"<strong>{_esc(row['label'])}</strong>"
+            f"<div class='access-meta'><span class='pill {present_cls}'>{_esc(present)}</span></div></th>"
             f"{body}</tr>"
         )
-    headers = "".join(
-        f"<th title='{_esc(column['label'])}'>{_esc(column['short'])}</th>"
-        for column in grid["columns"]
-    )
+    headers = []
+    for column in grid["columns"]:
+        tip_id = f"access-tip-{column['id']}"
+        headers.append(
+            f"<th scope='col' id='col-{_esc(column['id'])}'>"
+            f"<span class='access-col'>{_esc(column['short'])}</span>"
+            f"<button type='button' class='help-tip' aria-expanded='false' aria-controls='{tip_id}' "
+            f"aria-label='{_esc(column['label'])}'><span aria-hidden='true'>?</span></button>"
+            f"<span id='{tip_id}' class='help-pop' role='tooltip' hidden>{_esc(column['label'])}</span>"
+            f"</th>"
+        )
     return f"""<style>{_ACCESS_CSS}</style>
 <section id="access-map" class="section">
   <div class="wrap">
@@ -132,21 +302,25 @@ def render_access_map_section(envelopes: dict[str, dict]) -> str:
       <li><span class="pill ok">no</span> recorded restriction, or nothing in an inventory that ran</li>
       <li><span class="pill skipped">unknown</span> evidence cannot tell</li>
     </ul>
-    <p class="posture-grid-caption">Color tracks access risk. The headline counts yes only, not partial or unknown. Open a cell for the evidence behind it. Network cells show the MCP server count when that collector records one.</p>
-    <div class="table-wrap table-scroll" style="max-height: none;">
+    <p class="posture-grid-caption">Color tracks access risk. The headline counts yes only, not partial or unknown. Network cells show the MCP server count when that collector records one. Select a cell to read the evidence.</p>
+    <div class="table-wrap access-scroll" style="max-height: none;">
       <table class="posture-grid access-map">
-        <thead><tr><th>Agent</th>{headers}</tr></thead>
+        <thead><tr><th scope="col" class="access-agent">Agent</th>{''.join(headers)}</tr></thead>
         <tbody>{''.join(rows_html)}</tbody>
       </table>
     </div>
   </div>
-</section>"""
+</section>
+{_ACCESS_JS}"""
 
 
-def _render_cell(cell: dict[str, Any], column_id: str) -> str:
+def _render_cell(cell: dict[str, Any], column: dict[str, Any], agent_label: str, agent_id: str) -> str:
+    column_id = str(column.get("id") or "")
     value = str(cell.get("value") or "unknown")
     pill = _PILL.get(value, "skipped")
     anchor = str(cell.get("anchor") or "")
+    capability = str(column.get("label") or column.get("short") or column_id)
+    short = str(column.get("short") or capability)
     meta_bits = [f"evidence {_esc(cell.get('evidence') or 'none')}"]
     if column_id == "network":
         mcp_count = cell.get("mcp_count")
@@ -158,15 +332,18 @@ def _render_cell(cell: dict[str, Any], column_id: str) -> str:
             except (TypeError, ValueError, OverflowError):
                 shown = 0
             meta_bits.append(f"{shown} MCP")
+    label = f"{agent_label}, {capability}, {value}, show evidence"
     return (
-        f"<td class='access-cell access-cell--{_esc(value)}'>"
-        f"<a class='pill {pill}' href='#{_esc(anchor)}'>{_esc(value)}</a>"
-        f"<details id='{_esc(anchor)}' class='access-detail'>"
-        f"<summary>Evidence</summary>"
-        f"<div class='access-reason'>{_esc(cell.get('reason') or '')}</div>"
-        f"<div class='access-meta'>{' · '.join(meta_bits)}</div>"
-        "</details>"
-        "</td>"
+        f"<td class='access-cell access-cell--{_esc(value)}' data-label='{_esc(short)}' "
+        f"headers='agent-{_esc(agent_id)} col-{_esc(column_id)}'>"
+        f"<button type='button' class='access-chip pill {pill}' aria-expanded='false' "
+        f"aria-controls='{_esc(anchor)}' aria-label='{_esc(label)}'>"
+        f"<span class='access-chip-value'>{_esc(value)}</span>"
+        f"<span class='access-info' aria-hidden='true'>i</span></button>"
+        f"<div id='{_esc(anchor)}' class='access-popover' role='dialog' hidden>"
+        f"<p class='access-reason'>{_esc(cell.get('reason') or '')}</p>"
+        f"<p class='access-meta'>{' · '.join(meta_bits)}</p>"
+        "</div></td>"
     )
 
 

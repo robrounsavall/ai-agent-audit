@@ -81,7 +81,7 @@ Bookkeeping such as "keys scanned" can stay non-zero and the drift flag still ap
 
 ## Briefing
 
-The report v2 briefing loads `evidence/changes.json` on its own. The loader skips collector `changes` while it walks the other `evidence/*.json` files, then passes `load_changes_envelope(...)` to `render_changes_section` and `render_changes_nav`. Both return an empty string if there is no changes evidence; the page then says changes were not collected. A first scan gets a short note instead of a diff. The summary at the top of the page uses one sentence from the same envelope. See [report-v2.md](report-v2.md).
+The report v2 briefing loads `evidence/changes.json` on its own. The loader skips collector `changes` while it walks the other `evidence/*.json` files, then passes `load_changes_envelope(...)` to `render_changes_section` and `render_changes_nav`. Both return an empty string if there is no changes evidence; the page then says changes were not collected. A first scan gets a short note instead of a diff. The Findings summary shows the change counts from the same envelope and a control that opens the Changes tab. See [report-v2.md](report-v2.md).
 
 ## Splunk, later
 
