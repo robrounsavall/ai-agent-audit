@@ -413,7 +413,7 @@ def harness_panel(h: dict) -> str:
             "</tr>")
     cannot = "".join(f"<li>{md(t)}{cites_html(c)}</li>" for t, c in h["cannot"])
     return f"""
-<article class="h-panel" id="h-{h['id']}" data-harness="{h['id']}" aria-labelledby="h-{h['id']}-title">
+<article class="h-panel" id="h-{h['id']}" data-harness="{h['id']}" data-total="{len(h['rows'])}" aria-labelledby="h-{h['id']}-title">
   <header class="h-head">
     <div>
       <p class="eyebrow">{esc(h['vendor'])}</p>
@@ -422,6 +422,7 @@ def harness_panel(h: dict) -> str:
     <div class="h-badges">{status}{badges}</div>
   </header>
   <p class="h-summary">{md(h['summary'])}</p>
+  <p class="h-match"><span class="match-count" data-role="match-count">{len(h['rows'])} / {len(h['rows'])} rows match</span></p>
   <div class="table-wrap">
   <table class="atlas-table">
     <caption class="sr-only">{esc(h['name'])}: storage locations, what the harness keeps there, and what aiscan does</caption>
@@ -438,15 +439,23 @@ def harness_panel(h: dict) -> str:
 
 
 def harness_section() -> str:
-    buttons = ['<button type="button" class="seg" data-harness="all" aria-pressed="true">All harnesses</button>']
+    total_rows = sum(len(h["rows"]) for h in A.HARNESSES)
+    buttons = ['<button type="button" class="seg" data-harness="all" aria-pressed="true">All harnesses '
+               f'<span class="seg-count" data-role="seg-count" aria-hidden="true">{total_rows}</span>'
+               f'<span class="sr-only" data-role="seg-sr">, {total_rows} matching rows</span></button>']
     for h in A.HARNESSES:
-        buttons.append(f'<button type="button" class="seg" data-harness="{h["id"]}" aria-pressed="false" tabindex="-1" title="{esc(h["name"])}">{esc(h["short"])}</button>')
+        rows = len(h["rows"])
+        buttons.append(
+            f'<button type="button" class="seg" data-harness="{h["id"]}" aria-pressed="false" tabindex="-1" '
+            f'title="{esc(h["name"])}">{esc(h["short"])}'
+            f'<span class="seg-count" data-role="seg-count" aria-hidden="true">{rows}</span>'
+            f'<span class="sr-only" data-role="seg-sr">, {rows} matching rows</span></button>'
+        )
     cats = "".join(
         f'<label class="check"><input type="checkbox" name="cat" value="{k}" checked><span class="cat cat-{k}">{esc(v)}</span></label>'
         for k, v in A.CATEGORIES)
     modes = "".join(
         f'<li>{mode_badge(k)}<span>{esc(v[1])}</span></li>' for k, v in A.MODES.items())
-    total_rows = sum(len(h["rows"]) for h in A.HARNESSES)
     return f"""
 <section id="atlas" class="section" aria-labelledby="atlas-title">
   <p class="kicker">03 · Harness atlas</p>
@@ -468,7 +477,8 @@ def harness_section() -> str:
         <input id="atlas-q" type="search" placeholder="e.g. state.vscdb, sessions, MCP" autocomplete="off" spellcheck="false">
       </div>
     </div>
-    <p class="count" id="atlas-count" aria-live="polite">Showing {total_rows} of {total_rows} rows across {len(A.HARNESSES)} harnesses.</p>
+    <p class="count" id="atlas-count" aria-live="polite">Showing {total_rows} of {total_rows} rows across {len(A.HARNESSES)} harnesses with matches.</p>
+    <p class="count count-empty" id="atlas-empty" aria-live="polite" hidden>No rows match the current filters. Clear the search or re-enable categories.</p>
   </div>
   <details class="legend-box">
     <summary>Read-mode legend</summary>
@@ -623,7 +633,8 @@ def coverage_section() -> str:
   envelope can move the answer off <em>unknown</em>, so the map says unknown even when nearby fields look alarming.
   "From evidence" means the cell <em>can</em> be filled by a real scan; it is not a claim about any machine.
   {cites_html([C_('report/access_map.py', 42, 44, 'UNCAPTURED'), C_('report/access_map.py', 21, 40, 'COLUMNS')])}</p>
-  <div class="table-wrap">
+  <p class="scroll-hint needs-js" id="cov-scroll-hint" hidden>Swipe sideways to view more capability columns →</p>
+  <div class="table-wrap cov-wrap" tabindex="0" role="region" aria-label="Coverage matrix, scroll sideways for more columns">
   <table class="cov-table">
     <caption class="sr-only">Access-map coverage by agent and capability</caption>
     <thead><tr><th scope="col">Agent</th>{head}</tr></thead>
@@ -784,15 +795,18 @@ def hero() -> str:
          [C_("aiscan.ps1", 8, 10, "network")]),
         ("Local scans cannot see remote histories",
          "Vendor-side transcripts, cloud sessions and synced history sit outside the machine. Inside aiscan.ps1, only the opt-in cloud-agents command calls a vendor API.",
-         [C_("report/access_map.py", 44, 47, '("claude", "remote")')]),
+         [C_("aiscan.ps1", 8, 11, "cloud-agents"),
+          C_("aiscan.ps1", 328, 330, "Opt-in collectors stay out of $StdlibOrder"),
+          C_("components/cloud-agents/cloud-agents.py", 131, 132, "GET only, and only https://api.cursor.com paths this inventory needs.")]),
         ("Unredacted by default", "Evidence and the briefing keep real paths, names and secret-shaped samples unless you pass <code>-Redact</code>.",
          [C_("core/common.py", 251, 259, "def redaction_disabled(")]),
         ("Two layers", "<code>evidence\\</code> holds structured envelopes. <code>raw\\</code> holds transcript text and scanner CSVs and is never redacted.",
-         [C_("SCHEMA.md", 166, 169, "Chat transcript text NEVER appears in evidence/")]),
+         [C_("SCHEMA.md", 166, 169, "Chat transcript text NEVER appears in evidence/"),
+          C_("aiscan.ps1", 685, 688, "raw\\ is NOT redacted")]),
         ("Coverage is uneven", "Claude, Codex and Cursor configs are parsed in depth. Grok Bot is presence-only, and local execution there is reported as unknown.",
          [C_("components/grok-bot/grok-bot.py", 97, 98, "not_determinable_offline")]),
     ]
-    items = "".join(f"<li><h3>{t}</h3><p>{d}</p>{cites_html(c)}</li>" for t, d, c in facts)
+    items = "".join(f"<li><p class=\"fact-title\">{t}</p><p>{d}</p>{cites_html(c)}</li>" for t, d, c in facts)
     return f"""
 <header class="hero" id="top">
   <p class="kicker">Reference · aiscan {A.AISCAN_VERSION} · source commit <code class="sha" title="{A.BASE_SHA}">{A.BASE_SHA[:12]}</code></p>
@@ -910,7 +924,7 @@ h1{font:780 clamp(2.4rem,5.4vw,4.1rem)/1.02 var(--display); letter-spacing:-.035
 .facts li{grid-column:span 2} .facts li:nth-child(n+4){grid-column:span 3}
 @media (max-width:900px){ .facts{grid-template-columns:minmax(0,1fr)} .facts li,.facts li:nth-child(n+4){grid-column:auto} }
 .facts li{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px}
-.facts h3{font:700 1.02rem/1.3 var(--display); margin:0 0 6px; letter-spacing:-.01em}
+.fact-title{font:700 1.02rem/1.3 var(--display); margin:0 0 6px; letter-spacing:-.01em}
 .facts p{margin:0 0 8px; color:var(--ink-2); font-size:.94rem; line-height:1.5}
 .hero-meta{font-size:.88rem; color:var(--muted); max-width:80ch; margin:0}
 .section{padding:56px 0 18px; border-bottom:1px solid var(--line); scroll-margin-top:12px}
@@ -990,8 +1004,10 @@ h3{font-family:var(--display); letter-spacing:-.01em}
 .control-block{border:0; margin:0; padding:0; min-width:0}
 .control-row{display:flex; flex-wrap:wrap; gap:12px 28px; margin-top:12px; align-items:flex-end}
 .segmented{display:flex; flex-wrap:wrap; gap:6px}
-.seg{font:600 .88rem var(--sans); border:1px solid var(--line); background:var(--surface); color:var(--ink-2); border-radius:999px; padding:6px 13px; cursor:pointer}
+.seg{font:600 .88rem var(--sans); border:1px solid var(--line); background:var(--surface); color:var(--ink-2); border-radius:999px; padding:6px 13px; cursor:pointer; display:inline-flex; align-items:center; gap:7px}
 .seg[aria-pressed="true"]{background:var(--ink); color:var(--paper); border-color:var(--ink)}
+.seg-count{font:700 .7rem var(--mono); background:var(--line-2); color:var(--ink-2); border-radius:999px; padding:1px 7px; line-height:1.2}
+.seg[aria-pressed="true"] .seg-count{background:color-mix(in srgb,var(--paper) 20%,transparent); color:var(--paper)}
 .checks{display:flex; flex-wrap:wrap; gap:6px 12px}
 .check{display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:.88rem}
 .check input{width:17px; height:17px; accent-color:var(--aiscan); margin:0}
@@ -1010,6 +1026,8 @@ input[type=search]{width:100%; font:.95rem var(--sans); padding:8px 12px; border
 .eyebrow{margin:0; font-size:.78rem; color:var(--muted); text-transform:uppercase; letter-spacing:.1em; font-weight:650}
 .h-badges{display:flex; flex-wrap:wrap; gap:6px; align-items:center}
 .h-summary{max-width:84ch; color:var(--ink-2); margin:0 0 14px}
+.h-match{margin:0 0 10px}
+.match-count{font:650 .8rem var(--mono); color:var(--muted)}
 .chip{font:600 .76rem var(--mono); padding:2px 8px; border-radius:6px; background:var(--aiscan-bg); color:var(--aiscan)}
 .status{font:650 .74rem var(--sans); padding:3px 9px; border-radius:999px; white-space:nowrap; letter-spacing:.02em}
 .status-all{background:var(--local-bg); color:var(--local)}
@@ -1053,6 +1071,7 @@ code.path{background:none; padding:0; font-size:.82rem; color:var(--ink); word-b
 .cannot ul{margin:0; padding-left:18px}
 .cannot li{margin:4px 0; font-size:.93rem}
 .no-rows{font-style:italic; color:var(--muted)}
+.count-empty{color:var(--warn); font-weight:650}
 .inv-table th[scope=row],.inv-table td:nth-child(2),.inv-table td:nth-child(3){white-space:nowrap}
 .grid-cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px}
 .card-collector header{display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:8px}
@@ -1077,8 +1096,14 @@ code.path{background:none; padding:0; font-size:.82rem; color:var(--ink); word-b
 .guarantees{list-style:none; padding:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px}
 .guarantees li{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 16px}
 .guarantees h3{margin:0 0 4px; font-size:1rem} .guarantees p{margin:0 0 6px; color:var(--ink-2); font-size:.93rem}
+.cov-wrap{position:relative}
+.cov-wrap::after{content:""; position:sticky; right:0; top:0; float:right; width:56px; height:100%; pointer-events:none; opacity:0; background:linear-gradient(to right, rgba(0,0,0,0), color-mix(in srgb,var(--paper) 55%, var(--remote-bg)) 70%); box-shadow:inset -1px 0 0 color-mix(in srgb,var(--remote) 28%, transparent)}
+.cov-wrap.is-scrollable::after{opacity:1}
+.cov-wrap.at-end::after{opacity:0}
+.scroll-hint{margin:-2px 0 10px; font-size:.84rem; color:var(--remote); font-weight:700; letter-spacing:.02em}
 .cov-table{min-width:760px; table-layout:fixed}
-.cov-table th[scope=row]{width:170px; font-weight:650}
+.cov-table th[scope=row]{width:170px; font-weight:650; position:sticky; left:0; z-index:2; background:var(--surface)}
+.cov-table thead th:first-child{position:sticky; left:0; z-index:3; background:var(--surface)}
 .cov-table thead th{white-space:normal}
 .cov-cell{text-align:center; padding:6px}
 .cov-ev{color:var(--local); font-size:.8rem; font-weight:600}
@@ -1137,7 +1162,9 @@ code.path{background:none; padding:0; font-size:.82rem; color:var(--ink); word-b
   .diagram-narrow{display:none!important} .diagram-wide{display:block!important}
   main{padding:0}
   .section{padding:18pt 0 6pt; break-before:auto}
-  #atlas,#sources{break-before:page}
+  #boundary,#atlas,#sources{break-before:page}
+  #boundary > .kicker,#boundary > h2,#boundary > .lede{break-after:avoid-page}
+  #boundary .figure-boundary{margin-top:8pt}
   .h-panel,.figure,.card,.guarantees li,.facts li{break-inside:avoid; box-shadow:none}
   tr{break-inside:avoid}
   .table-wrap{overflow:visible}
@@ -1180,26 +1207,48 @@ JS = r"""
   var segs = $$('.seg');
   var panels = $$('.h-panel');
   var countEl = $('#atlas-count');
+  var emptyEl = $('#atlas-empty');
+  function rowWord(n){ return n === 1 ? 'row' : 'rows'; }
+  function harnessWord(n){ return n === 1 ? 'harness' : 'harnesses'; }
   function apply(){
     var shown = 0, total = 0, harnessShown = 0;
     var q = state.q.trim().toLowerCase();
     panels.forEach(function(p){
       var inHarness = state.harness === 'all' || p.getAttribute('data-harness') === state.harness;
-      var visibleRows = 0;
+      var visibleRows = 0, panelMatches = 0, panelTotal = 0;
       $$('.atlas-row', p).forEach(function(r){
+        panelTotal++;
         total++;
-        var ok = inHarness && state.cats[r.getAttribute('data-cat')] && (!q || r.textContent.toLowerCase().indexOf(q) !== -1);
+        var base = state.cats[r.getAttribute('data-cat')] && (!q || r.textContent.toLowerCase().indexOf(q) !== -1);
+        if (base) panelMatches++;
+        var ok = inHarness && base;
         r.classList.toggle('is-hidden', !ok);
         if (ok) { visibleRows++; shown++; }
       });
-      p.classList.toggle('is-hidden', !inHarness);
-      if (inHarness) harnessShown++;
+      var panelVisible = state.harness === 'all' ? panelMatches > 0 : inHarness;
+      p.classList.toggle('is-hidden', !panelVisible);
+      if (panelVisible) harnessShown++;
       var empty = $('.no-rows', p);
-      if (empty) empty.hidden = !(inHarness && visibleRows === 0);
+      if (empty) empty.hidden = !(panelVisible && panelMatches === 0);
       var table = $('.table-wrap', p);
-      if (table) table.style.display = (inHarness && visibleRows === 0) ? 'none' : '';
+      if (table) table.style.display = (panelVisible && panelMatches === 0) ? 'none' : '';
+      var match = $('[data-role="match-count"]', p);
+      if (match) match.textContent = panelMatches + ' / ' + panelTotal + ' rows match';
+      var hid = p.getAttribute('data-harness');
+      var segCount = $('.seg[data-harness="' + hid + '"] [data-role="seg-count"]');
+      var segSr = $('.seg[data-harness="' + hid + '"] [data-role="seg-sr"]');
+      if (segCount) segCount.textContent = String(panelMatches);
+      if (segSr) segSr.textContent = ', ' + panelMatches + ' matching ' + rowWord(panelMatches);
     });
-    if (countEl) countEl.textContent = 'Showing ' + shown + ' of ' + total + ' rows across ' + harnessShown + (harnessShown === 1 ? ' harness.' : ' harnesses.');
+    var allCount = $('.seg[data-harness="all"] [data-role="seg-count"]');
+    var allSr = $('.seg[data-harness="all"] [data-role="seg-sr"]');
+    if (allCount) allCount.textContent = String(shown);
+    if (allSr) allSr.textContent = ', ' + shown + ' matching ' + rowWord(shown);
+    if (countEl) {
+      var suffix = state.harness === 'all' ? (' ' + harnessWord(harnessShown) + ' with matches.') : (' ' + harnessWord(harnessShown) + '.');
+      countEl.textContent = 'Showing ' + shown + ' of ' + total + ' rows across ' + harnessShown + suffix;
+    }
+    if (emptyEl) emptyEl.hidden = shown !== 0;
     segs.forEach(function(b){
       var on = b.getAttribute('data-harness') === state.harness;
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -1289,6 +1338,24 @@ JS = r"""
       reason.appendChild(h); reason.appendChild(p);
     });
   });
+  // Coverage table horizontal-scroll affordance.
+  (function(){
+    var wrap = $('.cov-wrap');
+    var hint = $('#cov-scroll-hint');
+    if (!wrap || !hint) return;
+    function update(){
+      var max = wrap.scrollWidth - wrap.clientWidth;
+      var scrollable = max > 4;
+      var atEnd = !scrollable || wrap.scrollLeft >= max - 2;
+      wrap.classList.toggle('is-scrollable', scrollable);
+      wrap.classList.toggle('at-end', atEnd);
+      hint.hidden = !scrollable;
+      if (scrollable) hint.textContent = atEnd ? 'Swipe left to review earlier columns ←' : 'Swipe sideways to view more capability columns →';
+    }
+    wrap.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    update();
+  })();
 
   // Section highlight in the table of contents.
   var navLinks = $$('.toc li a');
