@@ -78,6 +78,56 @@ class IngestCommandTests(CliCase):
         self.assertNotIn(str(self.tmp), out + err)
         self.assertIn("not-a-scan", err)
 
+    def test_ingest_with_no_paths_uses_the_default_scans_root(self):
+        scans = self.tmp / "scans"
+        first = self.scan_folder("scans/2026-11-12_1500")
+        second = self.scan_folder("scans/2026-11-12_1515", findings=[finding("a.two")])
+        env = json.loads((second / "evidence" / "claude.json").read_text(encoding="utf-8"))
+        env["ran_at"] = "2026-11-12T15:15:00+00:00"
+        (second / "evidence" / "claude.json").write_text(json.dumps(env), encoding="utf-8")
+        pointer = scans / "latest"
+        (pointer / "evidence").mkdir(parents=True)
+        (pointer / "evidence" / "claude.json").write_text(
+            (first / "evidence" / "claude.json").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        with mock.patch.dict(os.environ, {"AISCAN_SCANS_ROOT": str(scans)}, clear=False):
+            code, out, err = run("--db", self.db, "ingest")
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("2 scan(s) added", out)
+        conn = hub_db.connect(self.db)
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(count, 2)
+
+    def test_ingest_default_hints_at_legacy_aiscan_results(self):
+        scans = self.tmp / "scans"
+        scans.mkdir()
+        legacy = self.tmp / "local" / "aiscan-results"
+        self.scan_folder("local/aiscan-results/20261018-090000")
+        env = {
+            "AISCAN_SCANS_ROOT": str(scans),
+            "LOCALAPPDATA": str(self.tmp / "local"),
+        }
+        with mock.patch.dict(os.environ, env, clear=False):
+            code, out, err = run("--db", self.db, "ingest")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("aiscan-results", err)
+        self.assertIn("were not moved", err)
+        self.assertNotIn(str(self.tmp), out + err)
+
+    def test_ingest_default_root_helper_imports_scans(self):
+        scans = self.tmp / "scans"
+        self.scan_folder("scans/2026-11-12_1500")
+        with mock.patch.dict(os.environ, {"AISCAN_SCANS_ROOT": str(scans)}, clear=False):
+            added, duplicate, failed = aiscan_hub.ingest_default_root(Path(self.db))
+        self.assertEqual((added, duplicate, failed), (1, 0, 0))
+        with mock.patch.dict(os.environ, {"AISCAN_SCANS_ROOT": str(scans)}, clear=False):
+            added, duplicate, failed = aiscan_hub.ingest_default_root(Path(self.db))
+        self.assertEqual((added, duplicate, failed), (0, 1, 0))
+
 
 class PushTests(CliCase):
     def test_push_url_rules(self):

@@ -608,6 +608,15 @@ class TestNewestFolder(unittest.TestCase):
             os.utime(custom, (100, 100))
             self.assertEqual(agent_summary.newest_scan_dir(root).name, "20900101-000000")
 
+    def test_new_stamp_names_sort_and_latest_is_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._scan(root, "2026-11-12_1500")
+            self._scan(root, "2026-11-12_1515")
+            pointer = self._scan(root, "latest")
+            os.utime(pointer, (3_000_000_000, 3_000_000_000))
+            self.assertEqual(agent_summary.newest_scan_dir(root).name, "2026-11-12_1515")
+
     def test_newer_partial_does_not_hide_the_full_scan(self):
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp)

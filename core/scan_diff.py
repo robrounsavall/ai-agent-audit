@@ -78,6 +78,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import scan_paths
+
 from common import (
     DERIVED_EVIDENCE_STEMS,
     display_path,
@@ -253,6 +255,8 @@ def resolve_previous(
         return None
     for child in children:
         if not child.is_dir():
+            continue
+        if scan_paths.is_pointer_name(child.name):
             continue
         try:
             resolved = child.resolve()

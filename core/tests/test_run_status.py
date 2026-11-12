@@ -140,7 +140,8 @@ class TestRunStatusCli(unittest.TestCase):
         self.assertIn("New-CollectorStatusRow", text)
         self.assertIn("Read-EvidenceEnvelope", text)
         self.assertIn("Clear-CollectorEvidence", text)
-        self.assertIn('[guid]::NewGuid().ToString("N")', text)
+        self.assertIn("scan_paths.py", text)
+        self.assertIn("New-DefaultScanFolder", text)
 
 
 if __name__ == "__main__":

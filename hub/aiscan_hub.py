@@ -39,6 +39,7 @@ import hub_paths
 import hub_db
 import hub_queries
 from hub_bundle import BundleError, build_bundle, is_scan_folder
+import scan_paths
 
 PUSH_PATH = "/api/v1/scans"
 PUSH_TIMEOUT = 60
@@ -51,13 +52,22 @@ def _version() -> str:
 
 
 def _scan_folders(path: Path) -> list[Path]:
-    """``path`` if it is a scan folder, else its child scan folders."""
-    if is_scan_folder(path):
+    """``path`` if it is a scan folder, else its child scan folders.
+
+    A ``latest`` pointer directory is not treated as a scan of its own.
+    """
+    if is_scan_folder(path) and not scan_paths.is_pointer_name(path.name):
         return [path]
     if not path.is_dir():
         return []
     try:
-        children = sorted(child for child in path.iterdir() if child.is_dir() and is_scan_folder(child))
+        children = sorted(
+            child
+            for child in path.iterdir()
+            if child.is_dir()
+            and not scan_paths.is_pointer_name(child.name)
+            and is_scan_folder(child)
+        )
     except OSError:
         return []
     return children
@@ -65,17 +75,32 @@ def _scan_folders(path: Path) -> list[Path]:
 
 # ---- ingest ---------------------------------------------------------------
 
-def cmd_ingest(args: argparse.Namespace) -> int:
+def _legacy_hint() -> None:
+    """Mention leftover aiscan-results scans without moving them."""
+    if not scan_paths.legacy_scan_roots():
+        return
+    print(
+        "Older scans are still in %LOCALAPPDATA%\\aiscan-results and were not moved.",
+        file=sys.stderr,
+    )
+    print(
+        "Add them with: .\\aiscan.ps1 hub-import -OutDir $env:LOCALAPPDATA\\aiscan-results",
+        file=sys.stderr,
+    )
+
+
+def ingest_paths(db_path: Path, paths: list[Path]) -> tuple[int, int, int]:
+    """Add scan folders to the database. Returns (added, duplicate, failed)."""
     folders: list[Path] = []
-    for raw in args.paths:
+    for raw in paths:
         found = _scan_folders(Path(raw))
         if not found:
             # Leaf name only: agents run this and must not repeat full paths.
             print(f"Not a scan folder, and no scan folders inside it: {Path(raw).name}", file=sys.stderr)
         folders.extend(found)
     if not folders:
-        return 1
-    conn = hub_db.connect(hub_paths.resolve_db_path(args.db))
+        return (0, 0, 0)
+    conn = hub_db.connect(db_path)
     added = duplicate = failed = 0
     try:
         for folder in folders:
@@ -94,8 +119,43 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 added += 1
     finally:
         conn.close()
-    print(f"Hub: {added} scan(s) added, {duplicate} already stored, {failed} skipped.")
-    return 0 if (added or duplicate) else 1
+    return (added, duplicate, failed)
+
+
+def ingest_default_root(db_path: Path) -> tuple[int, int, int] | None:
+    """Ingest the default scans folder when it exists. None if it is absent."""
+    root = scan_paths.default_scans_root()
+    if not root.is_dir():
+        return None
+    return ingest_paths(db_path, [root])
+
+
+def cmd_ingest(args: argparse.Namespace) -> int:
+    db_path = hub_paths.resolve_db_path(args.db)
+    raw_paths = list(args.paths)
+    if not raw_paths:
+        root = scan_paths.default_scans_root()
+        if not root.is_dir() or not scan_paths.has_scan_children(root):
+            print(
+                "No scans in the default folder yet. New scans go under "
+                "%USERPROFILE%\\aiscan\\scans (or AISCAN_SCANS_ROOT). "
+                "Pass a path to import older folders.",
+                file=sys.stderr,
+            )
+            _legacy_hint()
+            return 1
+        raw_paths = [str(root)]
+    added, duplicate, failed = ingest_paths(db_path, [Path(p) for p in raw_paths])
+    if added or duplicate or failed:
+        print(f"Hub: {added} scan(s) added, {duplicate} already stored, {failed} skipped.")
+    if added == 0 and duplicate == 0:
+        if not args.paths:
+            print("No scan folders found in the default scans folder.", file=sys.stderr)
+            _legacy_hint()
+        return 1
+    if not args.paths:
+        _legacy_hint()
+    return 0
 
 
 # ---- serve ----------------------------------------------------------------
@@ -138,6 +198,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
         )
         return 1
     hub_db.connect(db_path).close()
+    if not getattr(args, "no_ingest", False):
+        result = ingest_default_root(db_path)
+        if result is None:
+            print(
+                "No default scans folder yet. New scans go under "
+                "%USERPROFILE%\\aiscan\\scans (or AISCAN_SCANS_ROOT).",
+            )
+        else:
+            added, duplicate, failed = result
+            print(f"Hub: {added} scan(s) added, {duplicate} already stored, {failed} skipped.")
+        _legacy_hint()
     token = load_ui_token(db_path.parent, rotate=args.rotate_token)
     allowed = set(hub_web.LOOPBACK_NAMES) | {args.bind.lower()} | {h.lower() for h in args.allowed_host}
     allowed.discard("0.0.0.0")
@@ -206,6 +277,8 @@ def cmd_demo(args: argparse.Namespace) -> int:
     if args.no_serve:
         return 0
     args.db = str(db_path)
+    # Demo data is invented. Do not pull real scans into that database.
+    args.no_ingest = True
     return cmd_serve(args)
 
 
@@ -379,13 +452,22 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     ingest = sub.add_parser("ingest", help="Add scan folders to the hub database")
-    ingest.add_argument("paths", nargs="+", help="A scan folder, or a folder that holds scan folders")
+    ingest.add_argument(
+        "paths",
+        nargs="*",
+        help="A scan folder, or a folder that holds scan folders. Omit to import the default scans folder.",
+    )
     ingest.set_defaults(func=cmd_ingest)
 
     def serve_options(target: argparse.ArgumentParser) -> None:
         target.add_argument("--bind", default="127.0.0.1", help="Address to listen on. Default 127.0.0.1")
         target.add_argument("--port", type=int, default=8765)
         target.add_argument("--no-browser", action="store_true", help="Do not open the dashboard in a browser")
+        target.add_argument(
+            "--no-ingest",
+            action="store_true",
+            help="Do not import the default scans folder when the dashboard starts",
+        )
         target.add_argument("--allowed-host", action="append", default=[], metavar="NAME",
                             help="Extra host name this hub answers to (repeatable), such as hub.example")
         target.add_argument("--tls-cert", default=None, help="PEM certificate chain. Enables HTTPS with --tls-key")

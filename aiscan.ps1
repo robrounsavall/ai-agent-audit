@@ -4,8 +4,11 @@
     Local AI coding agent posture scan (one collector or all stdlib collectors).
 
 .DESCRIPTION
-    Runs the collectors against a throwaway temp directory and prints results to
-    the console. Read-only against tool data. The collectors in 'all' are offline
+    Runs the collectors and prints results to the console. By default each scan
+    is kept under %USERPROFILE%\aiscan\scans\<yyyy-MM-dd_HHmm[ss]>, with
+    latest.txt pointing at the newest run. Set AISCAN_SCANS_ROOT to choose a
+    different root, or pass -OutDir or -Here. Read-only against tool data. The
+    collectors in 'all' are offline
     and make no network calls. 'cloud-agents' and 'telemetry' are opt-in and are
     not part of 'all'. cloud-agents sends HTTPS GET requests only to the Cursor
     Cloud Agents API. telemetry reads local export files. A briefing run also
@@ -24,13 +27,18 @@
     'summary' reads a finished scan and prints a safe summary (collector,
     detection, and finding severity, title, category, and evidence count).
     It does not run collectors. Omit -OutDir to use the newest scan under
-    %LOCALAPPDATA%\aiscan-results that has at least half as many collectors
-    as the largest run there. A newer one-collector folder is skipped.
+    %USERPROFILE%\aiscan\scans (or AISCAN_SCANS_ROOT) that has at least
+    half as many collectors as the largest run there. A newer one-collector
+    folder is skipped. If that folder is empty, summary looks in the older
+    %LOCALAPPDATA%\aiscan-results location and says so.
     'all' runs the 12 offline collectors and prints a combined summary.
     'hub' runs the local dashboard over the hub database (hub\aiscan_hub.py
-    serve). It listens on 127.0.0.1 and needs the access token it prints.
+    serve). It ingests the default scans folder first, so past default
+    scans show up without a separate import. It listens on 127.0.0.1 and
+    needs the access token it prints.
     'hub-import' adds scan folders you already have to the hub database.
-    Pass -OutDir with one scan folder or a folder that holds several.
+    Omit -OutDir to import the default scans folder. Pass -OutDir with one
+    scan folder or a folder that holds several (including older locations).
     Neither runs collectors, and neither makes an outbound network call.
     'accounts' reports which identity each tool is signed in as. It stores
     emails and plan names, never token or API key values. -Redact stays off
@@ -47,7 +55,9 @@
     .cursor/mcp.json, and Grok project .grok/config.toml discovery.
 
 .PARAMETER Keep
-    Keep the temp evidence directory and print its path instead of deleting it.
+    Accepted and implied. Default scans are kept under
+    %USERPROFILE%\aiscan\scans (or AISCAN_SCANS_ROOT). The folder is not
+    deleted. -OutDir and -Here also keep their target.
 
 .PARAMETER Redact
     Mask secrets and hash paths in the output. Off by default: aiscan runs on your
@@ -70,10 +80,11 @@
     are done. Ignored (with a warning) when -Redact or -AgentMode is set.
 
 .PARAMETER OutDir
-    Persistent output root instead of the throwaway temp directory. Creates
-    <OutDir>\evidence and <OutDir>\raw and writes collector output there. Implies
-    -Keep: the directory is never deleted. Omit for the default throwaway-temp
-    behavior.
+    Write this scan to a specific folder instead of the default scans root.
+    Creates <OutDir>\evidence and <OutDir>\raw and writes collector output
+    there. Implies -Keep: the directory is never deleted. Omit to use
+    %USERPROFILE%\aiscan\scans\<yyyy-MM-dd_HHmm[ss]>, or set
+    AISCAN_SCANS_ROOT to choose a different default root.
 
 .PARAMETER Here
     Write persistent output to the current working directory. Creates
@@ -121,7 +132,9 @@
 
 .PARAMETER HistoryRoot
     Folder of dated scan directories. Passed to scan_diff as --history-root
-    when -Previous is omitted. Default is the parent of the scan folder.
+    when -Previous is omitted. Default is the parent of the scan folder,
+    which for a default run is %USERPROFILE%\aiscan\scans (or
+    AISCAN_SCANS_ROOT). That is how the briefing finds the previous scan.
 
 .PARAMETER AgentMode
     Print paths relative to the scan folder and omit the closing
@@ -135,10 +148,11 @@
 
 .PARAMETER Hub
     After the scan, add its evidence to the local hub database so it shows
-    in the dashboard ('aiscan hub'). Works with a throwaway scan too: the
-    database keeps the evidence layer after the temp folder is deleted.
-    raw\ is never read. A failure here warns and does not change the exit
-    code. Nothing is sent to another machine.
+    in the dashboard ('aiscan hub'). Default scans are already kept on disk
+    and 'aiscan hub' also ingests the default scans folder, so this flag is
+    useful when -OutDir or -Here wrote the scan somewhere else. raw\ is
+    never read. A failure here warns and does not change the exit code.
+    Nothing is sent to another machine.
 
 .PARAMETER LaunchedBy
     Who or what started this scan, such as a harness name ("Claude Code")
@@ -203,8 +217,9 @@
 .EXAMPLE
     .\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
     Safe summary of a scan that already finished. No -OutDir selects the newest
-    full scan under %LOCALAPPDATA%\aiscan-results. A newer one-collector
-    folder is skipped.
+    full scan under %USERPROFILE%\aiscan\scans (or AISCAN_SCANS_ROOT). A
+    newer one-collector folder is skipped. An older aiscan-results folder
+    is used only if the default root has no scans.
 
 .EXAMPLE
     .\aiscan.ps1 all -OutDir C:\scans\today -AgentMode
@@ -218,8 +233,10 @@
     database. Then '.\aiscan.ps1 hub' opens the dashboard.
 
 .EXAMPLE
-    .\aiscan.ps1 hub-import -OutDir C:\scans
-    Adds every scan folder under C:\scans to the hub database.
+    .\aiscan.ps1 hub-import
+    Adds every scan folder under %USERPROFILE%\aiscan\scans (or
+    AISCAN_SCANS_ROOT) to the hub database. Pass -OutDir to import a
+    different folder, including an older aiscan-results directory.
 
 .EXAMPLE
     .\aiscan.ps1 all -OutDir C:\scans\today -Briefing -LaunchedBy "Claude Code" -Reason "comparison baseline"
@@ -552,7 +569,8 @@ function Invoke-OneCollector {
 function Write-OutDirId {
     param([string]$Root)
     # Leaf name only, and only after the folder exists. A later shell rebuilds
-    # $env:LOCALAPPDATA\aiscan-results\<id>. The full path is not printed.
+    # $env:USERPROFILE\aiscan\scans\<id> (or AISCAN_SCANS_ROOT\<id>).
+    # The full path is not printed.
     # Split-Path -Leaf of a drive root is the drive itself, which is not an id.
     if (-not $Root) { return }
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return }
@@ -694,6 +712,46 @@ function Write-RunOrigin {
     }
 }
 
+function Get-AiscanScansRoot {
+    # Same rule as core/scan_paths.py: AISCAN_SCANS_ROOT, else
+    # %USERPROFILE%\aiscan\scans. Prefers the Python helper so both agree.
+    $helper = Join-Path $CoreDir "scan_paths.py"
+    if ((Test-Path -LiteralPath $helper) -and (Get-Command $Python -ErrorAction SilentlyContinue)) {
+        $out = & $Python $helper "--print-root" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $out) {
+            $text = "$($out | Select-Object -Last 1)".Trim()
+            if ($text) { return $text }
+        }
+    }
+    if ($env:AISCAN_SCANS_ROOT -and $env:AISCAN_SCANS_ROOT.Trim()) {
+        return $env:AISCAN_SCANS_ROOT.Trim()
+    }
+    if ($env:USERPROFILE) {
+        return Join-Path $env:USERPROFILE "aiscan\scans"
+    }
+    return $null
+}
+
+function New-DefaultScanFolder {
+    # Exclusive dated folder plus latest.txt. Failures must not fall back to TEMP.
+    $helper = Join-Path $CoreDir "scan_paths.py"
+    if (-not (Test-Path -LiteralPath $helper)) {
+        Write-Host "scan_paths.py not found. Pass -OutDir to choose the scan folder." -ForegroundColor Red
+        exit 1
+    }
+    $out = & $Python $helper "--alloc"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Could not create the default scan folder." -ForegroundColor Red
+        exit 1
+    }
+    $text = "$($out | Select-Object -Last 1)".Trim()
+    if (-not $text) {
+        Write-Host "Could not create the default scan folder." -ForegroundColor Red
+        exit 1
+    }
+    return $text
+}
+
 function New-PeekRoot {
     # Scan start, before collectors. ISO 8601 with a numeric offset.
     # DateTimeOffset and this format work on Windows PowerShell 5.1.
@@ -701,8 +759,8 @@ function New-PeekRoot {
         "yyyy-MM-ddTHH:mm:sszzz",
         [System.Globalization.CultureInfo]::InvariantCulture
     )
-    # -Here/-OutDir make the root persistent (same evidence/raw layout);
-    # otherwise fall back to a throwaway temp directory, same as always.
+    # -Here/-OutDir write to a chosen folder; otherwise use the stable
+    # default under %USERPROFILE%\aiscan\scans (or AISCAN_SCANS_ROOT).
     $root = if ($OutDir) {
         $OutDir
     }
@@ -710,44 +768,32 @@ function New-PeekRoot {
         (Get-Location).ProviderPath
     }
     else {
-        # Seconds alone collide when two runs start together. -Force would
-        # then let them share the folder, and one cleanup would delete the other.
-        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-        $nonce = [guid]::NewGuid().ToString("N").Substring(0, 8)
-        Join-Path $env:TEMP "aiscan-$stamp-$nonce"
+        New-DefaultScanFolder
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $root "evidence") | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $root "raw") | Out-Null
-    # Temp scans are deleted at the end. Print the id only when this folder
-    # will still be there for a later `aiscan summary`.
-    if ($Keep -or $OutDir -or $Here -or $Briefing) {
-        Write-OutDirId -Root $root
-    }
+    # Default scans are kept. Print the id so a later shell can rebuild the path.
+    Write-OutDirId -Root $root
     Write-RunOrigin -Root $root
     return $root
 }
 
 function Remove-PeekRoot {
     param([string]$Root)
-    # -Briefing implies keep: the briefing.html lives inside the root and the
-    # browser opens it asynchronously; deleting the root would race the open.
-    if ($Keep -or $OutDir -or $Here -or $Briefing) {
-        Write-Host ""
-        # -AgentMode drops this absolute path. The warning line stays.
-        if (-not $AgentMode) {
-            Write-Host "Evidence kept at: $Root" -ForegroundColor Cyan
-        }
-        if ($Redact) {
-            # Only files written by this run are redacted. A reused -OutDir can
-            # still hold an older unredacted evidence file or briefing.
-            Write-Host "Redaction was on for this run: evidence and the briefing written now are redacted. raw\ is NOT redacted, keep it local. Files left from earlier runs in this folder are not re-redacted." -ForegroundColor DarkGray
-        }
-        else {
-            Write-Host "(unredacted by default: real secrets / paths / transcript metadata - delete when done)" -ForegroundColor DarkGray
-        }
+    # Default scans, -OutDir, and -Here are all kept. The briefing lives
+    # inside the root; deleting it would also race the browser open.
+    Write-Host ""
+    # -AgentMode drops this absolute path. The warning line stays.
+    if (-not $AgentMode) {
+        Write-Host "Evidence kept at: $Root" -ForegroundColor Cyan
+    }
+    if ($Redact) {
+        # Only files written by this run are redacted. A reused -OutDir can
+        # still hold an older unredacted evidence file or briefing.
+        Write-Host "Redaction was on for this run: evidence and the briefing written now are redacted. raw\ is NOT redacted, keep it local. Files left from earlier runs in this folder are not re-redacted." -ForegroundColor DarkGray
     }
     else {
-        Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "(unredacted by default: real secrets / paths / transcript metadata - delete when done)" -ForegroundColor DarkGray
     }
 }
 
@@ -777,10 +823,9 @@ function Invoke-ScanDiff {
     elseif ($HistoryRoot) {
         $diffArgs += @("--history-root", $HistoryRoot)
     }
-    elseif (-not $OutDir -and -not $Here) {
-        # A throwaway folder's parent is TEMP. Do not treat other temp dirs as scan history.
-        $diffArgs += @("--history-root", $Root)
-    }
+    # Default scans live as siblings under the scans root, so the parent
+    # (scan_diff's default) is the history. -OutDir / -Here keep that same
+    # parent-of-the-scan-folder rule.
     & $Python @diffArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Scan diff failed (exit $LASTEXITCODE). The briefing will say changes were not collected." -ForegroundColor Yellow
@@ -1046,14 +1091,30 @@ if ($Collector -eq "summary") {
         Write-OutDirId -Root $herePath
     }
     else {
-        if (-not $env:LOCALAPPDATA) {
-            Write-Host "LOCALAPPDATA is not set. Pass -OutDir to choose the scan folder." -ForegroundColor Red
+        $resultsRoot = Get-AiscanScansRoot
+        if (-not $resultsRoot) {
+            Write-Host "USERPROFILE is not set. Pass -OutDir to choose the scan folder, or set AISCAN_SCANS_ROOT." -ForegroundColor Red
             exit 1
         }
-        $resultsRoot = Join-Path $env:LOCALAPPDATA "aiscan-results"
-        $picked = & $Python @($summaryScript, "--results-root", $resultsRoot, "--print-id")
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $picked = $null
+        if (Test-Path -LiteralPath $resultsRoot -PathType Container) {
+            $picked = & $Python @($summaryScript, "--results-root", $resultsRoot, "--print-id")
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
         $outLeaf = "$picked".Trim()
+        $usedLegacy = $false
+        if (-not $outLeaf -and $env:LOCALAPPDATA) {
+            $legacyRoot = Join-Path $env:LOCALAPPDATA "aiscan-results"
+            if (Test-Path -LiteralPath $legacyRoot -PathType Container) {
+                $picked = & $Python @($summaryScript, "--results-root", $legacyRoot, "--print-id")
+                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                $outLeaf = "$picked".Trim()
+                if ($outLeaf) {
+                    $resultsRoot = $legacyRoot
+                    $usedLegacy = $true
+                }
+            }
+        }
         if (-not $outLeaf) {
             Write-Host "No scan folders found." -ForegroundColor Red
             exit 1
@@ -1062,6 +1123,9 @@ if ($Collector -eq "summary") {
         if (-not (Test-Path -LiteralPath $chosen -PathType Container)) {
             Write-Host "Output folder not found." -ForegroundColor Red
             exit 1
+        }
+        if ($usedLegacy) {
+            Write-Host "Using a scan from the older aiscan-results folder. New scans go under %USERPROFILE%\aiscan\scans (or AISCAN_SCANS_ROOT). Older folders were not moved." -ForegroundColor DarkGray
         }
         $sumArgs += @("--evidence-root", $chosen)
         Write-OutDirId -Root $chosen
@@ -1085,21 +1149,22 @@ if ($Collector -eq "hub" -or $Collector -eq "hub-import") {
         exit $LASTEXITCODE
     }
     $importRoot = if ($OutDir) { $OutDir } elseif ($Here) { (Get-Location).ProviderPath } else { $null }
-    if (-not $importRoot) {
-        Write-Host "hub-import needs -OutDir (a scan folder, or a folder of scan folders) or -Here." -ForegroundColor Red
-        exit 1
+    if ($importRoot) {
+        if (-not (Test-Path -LiteralPath $importRoot -PathType Container)) {
+            Write-Host "Output folder not found." -ForegroundColor Red
+            exit 1
+        }
+        & $Python $HubScript "ingest" $importRoot
+        exit $LASTEXITCODE
     }
-    if (-not (Test-Path -LiteralPath $importRoot -PathType Container)) {
-        Write-Host "Output folder not found." -ForegroundColor Red
-        exit 1
-    }
-    & $Python $HubScript "ingest" $importRoot
+    # No -OutDir / -Here: import the default scans folder.
+    & $Python $HubScript "ingest"
     exit $LASTEXITCODE
 }
 
 # Adds this scan's evidence layer to the hub database. Bookkeeping: a
-# failure warns and the scan result stands. Runs before a throwaway root is
-# deleted, so the database is what keeps a default scan.
+# failure warns and the scan result stands. Default scans are also kept
+# on disk under the scans root; this writes them into the hub database.
 function Add-ScanToHub {
     param([string]$Root)
     if (-not $Hub) { return }
