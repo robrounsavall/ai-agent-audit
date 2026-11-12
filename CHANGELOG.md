@@ -9,6 +9,8 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-12
+
 ### Added
 
 - Default scans are kept under `%USERPROFILE%\aiscan\scans\<yyyy-MM-dd_HHmm[ss]>`
@@ -428,7 +430,8 @@ each collector's `__version__` and appear in the evidence envelopes.
 - `tools/mcp-visibility`, a standalone MCP server inventory.
 - Per-component tests and a CI matrix on `windows-latest`.
 
-[Unreleased]: https://github.com/robrounsavall/ai-agent-audit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/robrounsavall/ai-agent-audit/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/robrounsavall/ai-agent-audit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/robrounsavall/ai-agent-audit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/robrounsavall/ai-agent-audit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/robrounsavall/ai-agent-audit/releases/tag/v0.1.0

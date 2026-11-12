@@ -10,7 +10,7 @@ the briefing are unredacted: they can include real paths, usernames,
 hostnames, and secret samples. Pass `-Redact` to mask those in the evidence
 and the briefing. `-Redact` does not clean `raw/`.
 
-Current release: **[v0.3.0](https://github.com/robrounsavall/ai-agent-audit/releases/tag/v0.3.0)**
+Current release: **[v0.3.1](https://github.com/robrounsavall/ai-agent-audit/releases/tag/v0.3.1)**
 (2026-11-12). What changed in each release is in [CHANGELOG.md](CHANGELOG.md).
 
 [![Sample briefing, synthetic data](docs/briefing-screenshot.png)](https://robrounsavall.github.io/ai-agent-audit/sample-report.html)
