@@ -36,7 +36,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 COLLECTOR = "chat-history"
 
@@ -412,50 +412,439 @@ def collect_copilot(buckets, include_tool_details, workspace_storage, problems=N
                 add_entry(buckets, ts, "Copilot", role, text, str(jsonl), workspace=workspace)
 
 
-def collect_codex(buckets, include_tool_details, root, problems=None):
-    if not root.exists():
-        return
-    for jsonl in compressed.jsonl_files(root):
-        try:
-            if compressed.is_compressed(jsonl):
-                # Without stdlib zstd this raises before the file is opened.
-                # The codex collector reports that coverage gap.
-                text = compressed.read_text(
-                    jsonl, errors="replace", max_bytes=compressed.MAX_DECOMPRESSED_BYTES
-                )
-                lines = text.splitlines()
-            else:
-                # A bad byte is reported and this file is skipped. Other files continue.
-                lines = read_text_lines(jsonl, problems)
-                if lines is None:
-                    continue
-        except OSError:
+# Codex writes the same turn as a response_item and, on older builds, again as
+# an event_msg. A later shape is kept only when that role and text were not
+# already counted. See collect_codex.
+_CODEX_TEXT_PARTS = {"text", "input_text", "output_text"}
+_CODEX_REQUEST_MARKER = "## My request for Codex:"
+# Whole-part wrappers Codex injects as user-role prompt scaffolding.
+# Matching is case-insensitive and requires both ends, except the AGENTS.md
+# heading, which is injected context even when the closing tag is absent.
+_CODEX_CONTEXT_WRAPPERS = (
+    ("<environment_context>", "</environment_context>"),
+    ("<user_instructions>", "</user_instructions>"),
+    ("<environments_instructions>", "</environments_instructions>"),
+    ("<apps_instructions>", "</apps_instructions>"),
+    ("<skills_instructions>", "</skills_instructions>"),
+    ("<plugins_instructions>", "</plugins_instructions>"),
+    ("<skill>", "</skill>"),
+    ("<collaboration_mode>", "</collaboration_mode>"),
+    ("<multi_agent_mode>", "</multi_agent_mode>"),
+    ("<realtime_conversation>", "</realtime_conversation>"),
+    ("<context_window_guidance>", "</context_window_guidance>"),
+    ("<context_window>", "</context_window>"),
+    ("<tools>", "</tools>"),
+    ("<turn_aborted>", "</turn_aborted>"),
+    ("<subagent_notification>", "</subagent_notification>"),
+    ("<instructions>", "</instructions>"),
+)
+_CODEX_AGENTS_HEADING = "# agents.md instructions for "
+# thread_history SQLite is a projection and is often touched just after the
+# rollout file. A gap this large means the database moved on without a new
+# rollout file, which this collector does not read.
+_CODEX_SQLITE_NEWER_SECONDS = 24 * 60 * 60
+
+
+def _fresh_codex_stats() -> dict:
+    return {
+        "files_seen": 0,
+        "files_read": 0,
+        "messages": 0,
+        "compressed_unreadable": 0,
+        "compressed_not_scanned": 0,
+        "thread_history_dbs": 0,
+        "rollout_migrations": False,
+        "sqlite_history_gap": "",
+    }
+
+
+def _is_injected_context(text: str) -> bool:
+    """True when a user part is prompt scaffolding rather than a person typing."""
+    folded = text.strip().casefold()
+    if not folded:
+        return True
+    if folded.startswith(_CODEX_AGENTS_HEADING):
+        return True
+    for start, end in _CODEX_CONTEXT_WRAPPERS:
+        if folded.startswith(start) and folded.endswith(end):
+            return True
+    return False
+
+
+def _user_chat_text(text: str) -> str:
+    """Drop injected context. Keep the request that follows Codex's own marker."""
+    if not isinstance(text, str):
+        return ""
+    marker_at = text.find(_CODEX_REQUEST_MARKER)
+    if marker_at >= 0:
+        text = text[marker_at + len(_CODEX_REQUEST_MARKER):]
+    text = text.strip()
+    if not text or _is_injected_context(text):
+        return ""
+    return text
+
+
+def _content_parts(content) -> list[str]:
+    if isinstance(content, str):
+        return [content.strip()] if content.strip() else []
+    if not isinstance(content, list):
+        return []
+    parts = []
+    for item in content:
+        if isinstance(item, str) and item.strip():
+            parts.append(item.strip())
             continue
-        except (compressed.ZstdUnavailable, compressed.TooLarge, compressed.DecompressTimeout, UnicodeError):
-            if compressed.is_compressed(jsonl):
-                continue
-            raise
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("type") or "").casefold()
+        if kind in _CODEX_TEXT_PARTS and item.get("text"):
+            piece = str(item["text"]).strip()
+            if piece:
+                parts.append(piece)
+    return parts
+
+
+def _join_user_parts(parts: list[str]) -> str:
+    kept = [_user_chat_text(part) for part in parts]
+    return "\n\n".join(part for part in kept if part).strip()
+
+
+def _join_assistant_parts(parts: list[str]) -> str:
+    return "\n\n".join(part for part in parts if part and part.strip()).strip()
+
+
+def _legacy_message_text(payload: dict, role: str, include_tool_details: bool) -> str:
+    message = payload.get("message")
+    if isinstance(message, str) and message.strip():
+        text = message.strip()
+    else:
+        text = get_content_text(payload, include_tool_details)
+    if role == "user":
+        return _user_chat_text(text)
+    return text.strip() if isinstance(text, str) else ""
+
+
+def _classify_codex_line(obj: dict, include_tool_details: bool):
+    """Return ``(shape, role, text)`` for one rollout line, or None.
+
+    ``shape`` is ``response`` (current ``response_item`` message), ``completed``
+    (paginated ``item_completed`` user/assistant item), or ``legacy``
+    (``event_msg`` user_message / agent_message). Developer and system roles
+    are skipped. Inter-agent ``response_item`` / ``agent_message`` is skipped
+    unless ``include_tool_details`` is set. The legacy ``event_msg``
+    ``agent_message`` is the assistant's reply, not inter-agent traffic.
+    """
+    payload = obj.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    record_type = obj.get("type")
+    ptype = payload.get("type")
+    if record_type == "response_item" and ptype == "message":
+        role = str(payload.get("role") or "").casefold()
+        if role not in ("user", "assistant"):
+            return None
+        parts = _content_parts(payload.get("content"))
+        text = _join_user_parts(parts) if role == "user" else _join_assistant_parts(parts)
+        if not text:
+            return None
+        return ("response", role, text)
+    if record_type == "response_item" and ptype == "agent_message":
+        if not include_tool_details:
+            return None
+        text = _join_assistant_parts(_content_parts(payload.get("content")))
+        if not text:
+            return None
+        return ("response", "assistant", text)
+    if record_type != "event_msg":
+        return None
+    if ptype == "item_completed":
+        item = payload.get("item")
+        if not isinstance(item, dict):
+            return None
+        item_type = str(item.get("type") or "")
+        if item_type == "UserMessage":
+            role = "user"
+            text = _join_user_parts(_content_parts(item.get("content")))
+        elif item_type == "AgentMessage":
+            role = "assistant"
+            text = _join_assistant_parts(_content_parts(item.get("content")))
+        else:
+            return None
+        if not text:
+            return None
+        return ("completed", role, text)
+    if ptype == "user_message":
+        text = _legacy_message_text(payload, "user", include_tool_details)
+        if not text:
+            return None
+        return ("legacy", "user", text)
+    if ptype == "agent_message":
+        text = _legacy_message_text(payload, "assistant", include_tool_details)
+        if not text:
+            return None
+        return ("legacy", "assistant", text)
+    return None
+
+
+def _merge_codex_shapes(groups: list[list[tuple]]) -> list[tuple]:
+    """Keep every line from the first non-empty shape, then new texts only.
+
+    Repeated messages inside one shape stay. The same role and text written
+    again as another shape does not count a second time.
+    """
+    represented: set[tuple[str, str]] = set()
+    chosen = []
+    filtering = False
+    for group in groups:
+        if not filtering:
+            emit = list(group)
+            filtering = True
+        else:
+            emit = [entry for entry in group if (entry[1], entry[2]) not in represented]
+        for entry in emit:
+            represented.add((entry[1], entry[2]))
+            chosen.append(entry)
+    return chosen
+
+
+def _rollout_timestamp(obj: dict, path: Path, cached):
+    ts = parse_iso(obj.get("timestamp"))
+    if ts is not None:
+        return ts, cached
+    payload = obj.get("payload")
+    ms = payload.get("completed_at_ms") if isinstance(payload, dict) else None
+    if isinstance(ms, (int, float)) and not isinstance(ms, bool):
+        if ms > 1_000_000_000_000:
+            return datetime.fromtimestamp(ms / 1000.0), cached
+        if ms > 1_000_000_000:
+            return datetime.fromtimestamp(float(ms)), cached
+    if cached is None:
+        try:
+            cached = datetime.fromtimestamp(path.stat().st_mtime)
+        except OSError:
+            cached = datetime.now()
+    return cached, cached
+
+
+def _codex_scan_roots(root: Path) -> tuple[Path, list[Path]]:
+    """Codex home and the rollout directories under it.
+
+    A real scan passes ``<CODEX_HOME>/sessions``. Archived threads are moved
+    to the sibling ``archived_sessions`` directory and stay readable. Any
+    other root is scanned as itself so tests can point at a fixture folder.
+    """
+    root = Path(root)
+    if root.name == "sessions":
+        home = root.parent
+        roots = []
+        if root.exists():
+            roots.append(root)
+        archived = home / "archived_sessions"
+        try:
+            archived_exists = archived.exists()
+        except OSError:
+            archived_exists = False
+        if archived_exists:
+            roots.append(archived)
+        return home, roots
+    try:
+        exists = root.exists()
+    except OSError:
+        exists = False
+    return root, [root] if exists else []
+
+
+def _read_rollout_lines(path: Path, problems: list | None, stats: dict) -> list[str] | None:
+    """Lines from a rollout, or None when this file cannot be read.
+
+    A missing zstd backend is recorded and the file is not opened. A
+    compressed file that fails (``ZstdUnavailable``, ``TooLarge``,
+    ``DecompressTimeout``, ``UnicodeError``, ``OSError``) is recorded and
+    skipped. A plain file that cannot be decoded is recorded by
+    ``read_text_lines``.
+    """
+    if compressed.is_compressed(path):
+        if compressed.zstd_backend() is None:
+            stats["compressed_not_scanned"] += 1
+            if problems is not None:
+                problems.append("compressed_not_scanned")
+            return None
+        try:
+            text = compressed.read_text(
+                path, errors="replace", max_bytes=compressed.MAX_DECOMPRESSED_BYTES
+            )
+        except (
+            compressed.ZstdUnavailable,
+            compressed.TooLarge,
+            compressed.DecompressTimeout,
+            UnicodeError,
+            OSError,
+        ):
+            stats["compressed_unreadable"] += 1
+            if problems is not None:
+                problems.append("unreadable")
+            return None
+        stats["files_read"] += 1
+        return text.splitlines()
+    lines = read_text_lines(path, problems)
+    if lines is not None:
+        stats["files_read"] += 1
+    return lines
+
+
+def _observe_sqlite_history(home: Path, rollout_files: list[Path], stats: dict) -> None:
+    """Note when ``thread_history_*.sqlite`` may hold messages we did not read.
+
+    Rollout JSONL is still the durable record. The SQLite file is a
+    rebuildable projection. This does not open the database. It only checks
+    that the file exists and whether it is newer than every rollout we saw.
+    """
+    try:
+        dbs = [path for path in home.glob("thread_history_*.sqlite") if path.is_file()]
+    except OSError:
+        dbs = []
+    stats["thread_history_dbs"] = len(dbs)
+    try:
+        stats["rollout_migrations"] = (home / "rollout-migrations").is_dir()
+    except OSError:
+        stats["rollout_migrations"] = False
+    if not dbs:
+        return
+    if not rollout_files:
+        stats["sqlite_history_gap"] = "no_rollouts"
+        return
+    try:
+        newest_db = max(path.stat().st_mtime for path in dbs)
+        newest_rollout = max(path.stat().st_mtime for path in rollout_files)
+    except OSError:
+        return
+    if newest_db > newest_rollout + _CODEX_SQLITE_NEWER_SECONDS:
+        stats["sqlite_history_gap"] = "newer_than_rollouts"
+
+
+def codex_coverage_findings(stats: dict | None) -> list[dict]:
+    """Coverage notes for Codex history this collector did not fully read."""
+    if not stats:
+        return []
+    findings = []
+    not_scanned = int(stats.get("compressed_not_scanned") or 0)
+    if not_scanned:
+        noun = "log" if not_scanned == 1 else "logs"
+        findings.append(
+            make_finding(
+                "chat_history.codex.compressed_not_scanned",
+                "low",
+                "General Tooling",
+                f"{not_scanned} compressed Codex session {noun} not scanned",
+                evidence_count=not_scanned,
+                sample_redacted=f"files={not_scanned}",
+                tags=["coverage_gap"],
+            )
+        )
+    unreadable = int(stats.get("compressed_unreadable") or 0)
+    if unreadable:
+        noun = "log" if unreadable == 1 else "logs"
+        findings.append(
+            make_finding(
+                "chat_history.codex.compressed_unreadable",
+                "low",
+                "General Tooling",
+                f"{unreadable} compressed Codex session {noun} could not be read",
+                evidence_count=unreadable,
+                sample_redacted=f"files={unreadable}",
+                tags=["coverage_gap"],
+            )
+        )
+    files_seen = int(stats.get("files_seen") or 0)
+    files_read = int(stats.get("files_read") or 0)
+    messages = int(stats.get("messages") or 0)
+    if files_read > 0 and messages == 0:
+        findings.append(
+            make_finding(
+                "chat_history.codex.format_drift",
+                "low",
+                "General Tooling",
+                "Codex session files were found but no chat messages were recognized",
+                evidence_count=files_seen,
+                sample_redacted=(
+                    f"files={files_seen} read={files_read} messages=0; format may have changed"
+                ),
+                tags=["coverage_gap"],
+            )
+        )
+    gap = str(stats.get("sqlite_history_gap") or "")
+    if gap:
+        dbs = int(stats.get("thread_history_dbs") or 0)
+        if gap == "no_rollouts":
+            sample = f"rollout_files=0 thread_history_sqlite={dbs}"
+        else:
+            sample = f"rollout_files={files_seen} thread_history_sqlite={dbs} newer_than_rollouts=yes"
+        if stats.get("rollout_migrations"):
+            sample += " rollout_migrations=present"
+        findings.append(
+            make_finding(
+                "chat_history.codex.sqlite_history_not_counted",
+                "low",
+                "General Tooling",
+                "Codex thread history may be in SQLite and was not counted",
+                evidence_count=dbs or 1,
+                sample_redacted=sample,
+                tags=["coverage_gap"],
+            )
+        )
+    return findings
+
+
+def collect_codex(buckets, include_tool_details, root, problems=None, stats=None):
+    """Collect Codex chat from rollout JSONL under ``root``.
+
+    Accepts the legacy shape (``event_msg`` / ``user_message`` or
+    ``agent_message``) and the current shape (``response_item`` /
+    ``message`` with ``input_text`` or ``output_text`` parts). Paginated
+    history also stores the visible turn on ``event_msg`` / ``item_completed``
+    (``UserMessage`` and ``AgentMessage``). When more than one shape is
+    present, a later copy of the same role and text is not counted again.
+
+    ``stats``, when a dict, receives file and message counts plus the flags
+    ``codex_coverage_findings`` turns into coverage notes. Compressed reads
+    that fail are also appended to ``problems``.
+    """
+    if not isinstance(stats, dict):
+        stats = {}
+    stats.update(_fresh_codex_stats())
+    home, roots = _codex_scan_roots(Path(root))
+    files: list[Path] = []
+    for scan_root in roots:
+        files.extend(compressed.jsonl_files(scan_root))
+    files = sorted(set(files))
+    stats["files_seen"] = len(files)
+    _observe_sqlite_history(home, files, stats)
+    messages = 0
+    for jsonl in files:
+        lines = _read_rollout_lines(jsonl, problems, stats)
+        if not lines:
+            continue
+        grouped: dict[str, list[tuple]] = {"response": [], "completed": [], "legacy": []}
+        file_ts = None
         for raw in lines:
             obj = _json_object(raw)
             if obj is None:
                 continue
             try:
-                payload = obj.get("payload")
-                if obj.get("type") != "event_msg" or not isinstance(payload, dict):
+                classified = _classify_codex_line(obj, include_tool_details)
+                if classified is None:
                     continue
-                ptype = payload.get("type")
-                if ptype not in ("user_message", "agent_message"):
-                    continue
-                role = "user" if ptype == "user_message" else "assistant"
-                ts = parse_iso(obj.get("timestamp")) or datetime.fromtimestamp(jsonl.stat().st_mtime)
-                message = payload.get("message")
-                text = (
-                    str(message) if isinstance(message, str) and message
-                    else get_content_text(payload, include_tool_details)
-                )
-                add_entry(buckets, ts, "Codex", role, text, str(jsonl))
-            except (TypeError, ValueError, AttributeError, RecursionError):
+                shape, role, text = classified
+                ts, file_ts = _rollout_timestamp(obj, jsonl, file_ts)
+                grouped[shape].append((ts, role, text))
+            except (TypeError, ValueError, AttributeError, RecursionError, OSError):
                 continue
+        for ts, role, text in _merge_codex_shapes(
+            [grouped["response"], grouped["completed"], grouped["legacy"]]
+        ):
+            add_entry(buckets, ts, "Codex", role, text, str(jsonl))
+            messages += 1
+    stats["messages"] = messages
 
 
 def grok_workspace_label(slug):
@@ -700,6 +1089,7 @@ def build_evidence(
     claude_roots: list[Path] | None = None,
     metrics: dict | None = None,
     parse_problems: list | None = None,
+    codex_stats: dict | None = None,
 ) -> dict:
     claude_roots = claude_roots or [tp.claude_projects]
     scanned = [
@@ -840,6 +1230,9 @@ def build_evidence(
                 tags=["config_parse_error"],
             )
         )
+    if codex_stats is not None:
+        envelope["summary"]["codex_session_files_seen"] = int(codex_stats.get("files_seen") or 0)
+        findings.extend(codex_coverage_findings(codex_stats))
     envelope["findings"] = findings
     envelope["raw_pointers"] = raw_pointers
     return envelope
@@ -861,6 +1254,7 @@ def main():
     results = []
     metrics: dict = {}
     parse_problems: list[str] = []
+    codex_stats: dict = {}
     sources = [
         (
             "Claude",
@@ -874,7 +1268,11 @@ def main():
             "Codex",
             defaultdict(list),
             lambda b: collect_codex(
-                b, args.include_tool_details, tp.codex_sessions, problems=parse_problems
+                b,
+                args.include_tool_details,
+                tp.codex_sessions,
+                problems=parse_problems,
+                stats=codex_stats,
             ),
             "codex",
         ),
@@ -942,7 +1340,13 @@ def main():
         print(f"{r['files']} files, {r['entries']} entries")
 
     envelope = build_evidence(
-        results, raw_root, tp, claude_roots=claude_roots, metrics=metrics, parse_problems=parse_problems
+        results,
+        raw_root,
+        tp,
+        claude_roots=claude_roots,
+        metrics=metrics,
+        parse_problems=parse_problems,
+        codex_stats=codex_stats,
     )
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)
 
