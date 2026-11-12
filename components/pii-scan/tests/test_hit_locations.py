@@ -67,6 +67,44 @@ class TestHitLocations(unittest.TestCase):
         self.assertEqual(len(emails), 40)
         self.assertEqual(sum(1 for h in emails if "before" in h), 5)
 
+    def _entities(self, text: str, entities: list[str]) -> list[str]:
+        path = self.target / "case.jsonl"
+        path.write_text(text, encoding="utf-8", newline="\n")
+        hits, _private = pii.scan_file(path, entities)
+        return [h["entity"] for h in hits if h["entity"] in entities or h["entity"] == "TEST_CARD"]
+
+    def test_digits_inside_ids_are_not_cards(self):
+        # Every one of these passed the prefix and Luhn checks in a real scan.
+        for text in (
+            '"uuid":"38e730b7-44b3-4539-5787-6362d9950e8f"',
+            '"id":"022ed323-0bae-4539-5787-6362148d149e"',
+            'image-d49d7d04-7f45-3957-8763-621486ae6044129.png',
+            '"id":"msg_089cc1bb4b07b90f016a4539578763621486b733260918602e3"',
+            '["31bc6b5eff1d655f5ab37dd16a4539578763621486c1d677de61dad03b"]',
+            "session_4539578763621486",
+            "4539578763621486-turn",
+            "45-3957-8763-621486",
+            "4-5395-7876-3621-486",
+        ):
+            self.assertEqual(self._entities(text, ["CREDIT_CARD"]), [], text)
+
+    def test_cards_written_the_usual_ways_are_still_found(self):
+        for text in (
+            "card 4539578763621486 declined",
+            "card 4539 5787 6362 1486 declined",
+            "card 4539-5787-6362-1486.",
+            '"pan": "4539578763621486",',
+            "amex 3782 822463 10005",
+        ):
+            self.assertEqual(len(self._entities(text, ["CREDIT_CARD"])), 1, text)
+
+    def test_known_invalid_ssns_and_version_strings(self):
+        self.assertEqual(self._entities("ssn 078-05-1120 or 219-09-9999", ["US_SSN"]), [])
+        self.assertEqual(self._entities("ssn 536-90-4399", ["US_SSN"]), ["US_SSN"])
+        for text in ("Chrome/131.0.6778.86 Safari", "version 10.0.19045.5131", "v8.8.4.4", "8.8.8.8-beta"):
+            self.assertEqual(self._entities(text, ["IP_ADDRESS"]), [], text)
+        self.assertEqual(self._entities("connect to 8.8.8.8 on port 53", ["IP_ADDRESS"]), ["IP_ADDRESS"])
+
     def _rows(self) -> list[dict]:
         with (self.root / "raw" / "findings.csv").open(encoding="utf-8", newline="") as handle:
             return list(csv.DictReader(handle))

@@ -154,6 +154,19 @@ also reported by the length-only matchers. Hex runs are `hex_secret`, other
 long runs are `generic_secret`, and an unbroken run of more than 512
 characters (a base64 image, a minified bundle) is not a hit.
 
+A match that is plainly not a credential is not a row and is not counted:
+a vendor object id (`rs_`, `fc_`, `msg_`, and similar prefixes before a hex
+run), a value whose key names it as a hash, digest, commit, signature, or
+encrypted blob, a path-like or low-entropy run, `Authorization: Bearer` with
+no token after it, a placeholder password, and a placeholder or
+localhost-default connection string. `hit_is_noise()` in `core/common.py`
+holds the rules. They apply to listed hits only. `mask_secrets()` still masks
+every one of these under `-Redact`.
+
+A card number must stand alone and, if grouped, be grouped the way cards are
+printed. Digits inside a UUID, a message id, a hash, or a file name are not
+reported.
+
 `pii-scan` 1.4.0 changed what a `SECRET_*` count means. It used to be one row
 per type per file at line 0. It is now one row per value, so the first scan
 after the upgrade shows much larger counts for the same files.

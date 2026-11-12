@@ -32,7 +32,7 @@ class TestSecretSpans(unittest.TestCase):
         self.assertEqual(text[start:end], GH)
 
     def test_hex_is_reported_as_hex_not_generic(self):
-        spans = secret_spans(f"commit {HEX40}")
+        spans = secret_spans(f"SESSION_SECRET={HEX40}")
         self.assertEqual([kind for kind, _s, _e in spans], ["hex_secret"])
 
     def test_vendor_key_inside_a_bearer_header_is_one_hit(self):
@@ -40,7 +40,7 @@ class TestSecretSpans(unittest.TestCase):
         self.assertEqual([kind for kind, _s, _e in spans], ["vendor_token"])
 
     def test_spans_are_in_text_order_and_repeat_per_occurrence(self):
-        text = f"{HEX40}\nfirst {GH}\nsecond {GH}\n"
+        text = f"key={HEX40}\nfirst {GH}\nsecond {GH}\n"
         spans = secret_spans(text)
         self.assertEqual([kind for kind, _s, _e in spans], ["hex_secret", "github_pat", "github_pat"])
         self.assertEqual([s for _k, s, _e in spans], sorted(s for _k, s, _e in spans))

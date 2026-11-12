@@ -73,6 +73,21 @@ each collector's `__version__` and appear in the evidence envelopes.
   secret-shaped value in an exported transcript with its line and column and
   the session file, workspace, role, and time of the message it is in.
   Findings carry `hit_count` and `hit_types`.
+- Far fewer false positives in listed hits. On one developer machine the
+  same files went from about 131,000 hits to about 6,900.
+  - `pii-scan` 1.5.0: a card number must stand alone. Digits inside a UUID,
+    a message id, a hash, or a file name are not a card, and a grouped
+    number must be grouped the way cards are printed (4-4-4-4, 4-6-5, and
+    so on). Two SSNs the SSA lists as never valid are skipped. Four dotted
+    numbers after a product name or a slash are a version, not an IP.
+  - Listed secret hits skip vendor object ids (`rs_`, `fc_`, `msg_`, ...),
+    values whose key says they are a hash, digest, commit, signature, or
+    encrypted blob, path-like and low-entropy runs, `Authorization: Bearer`
+    with no real token after it, placeholder passwords, and placeholder or
+    localhost-default connection strings. Masking under `-Redact` is
+    unchanged and still covers all of these.
+  - `chat-history` 1.6.0 flags a transcript file only when it holds a listed
+    hit, so the files-flagged count drops with it.
 - `git-posture` 1.2.0 writes `raw/git-posture/locations.csv`: the repository
   behind each finding, and for a committed `.env` the path, the commit that
   added it, the date, and whether it is still tracked.

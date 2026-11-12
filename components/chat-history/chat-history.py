@@ -31,14 +31,12 @@ from common import (
     compute_scope_hash,
     finish_collector,
     hit_context,
-    looks_like_secret,
     make_envelope,
     make_finding,
     redact_sample,
     redaction_disabled,
     resolve_raw_root,
     secret_spans,
-    secret_types_in,
     validate_evidence_root,
 )
 
@@ -367,8 +365,11 @@ def export_buckets(buckets, tool_name, folder_name, output_root):
             "date": date_key,
             "entries": len(entries),
             "size": len(content.encode("utf-8")),
-            "has_secret": looks_like_secret(content),
-            "secret_types": secret_types_in(content),
+            # A file is flagged when it holds at least one listed hit. This
+            # used to be any secret-shaped text at all, which flagged files
+            # whose only match was a commit id or a response id.
+            "has_secret": bool(hit_counts),
+            "secret_types": sorted(hit_counts),
             "secret_hits": hit_rows,
             "secret_hit_count": sum(hit_counts.values()),
             "secret_hit_types": sorted(hit_counts),
@@ -1509,9 +1510,9 @@ def main():
                         "date": dk,
                         "entries": len(ev),
                         "size": sum(len(e["text"].encode()) for e in ev),
-                        "has_secret": any(looks_like_secret(e["text"]) for e in ev),
-                        "secret_types": list({
-                            t for e in ev for t in secret_types_in(e["text"])
+                        "has_secret": any(secret_spans(e["text"]) for e in ev),
+                        "secret_types": sorted({
+                            t for e in ev for t, _s, _e in secret_spans(e["text"])
                         }),
                     }
                     for dk, ev in buckets.items()

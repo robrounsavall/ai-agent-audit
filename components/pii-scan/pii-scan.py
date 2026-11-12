@@ -72,7 +72,7 @@ from common import (
 # Major stays 1: the envelope version doubles as the evidence schema major
 # (build-briefing.py gates on it) and the envelope shape is unchanged. The
 # Presidio->stdlib engine swap is internal to the collector.
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 COLLECTOR = "pii-scan"
 
@@ -123,11 +123,32 @@ def _card_digits(raw: str) -> str:
     return re.sub(r"[ -]", "", raw)
 
 
+# How card numbers are written when they are grouped: 4-4-4-4, American
+# Express 4-6-5, Diners 4-6-4, 19-digit 4-4-4-4-3, and 13-digit 4-4-5. A run
+# of digits broken up any other way (2-4-4-3, 1-4-4-4) is the tail of one
+# UUID group and the start of the next, not a card.
+_CARD_GROUPINGS = frozenset({
+    (4, 4, 4, 4), (4, 6, 5), (4, 6, 4), (4, 4, 4, 4, 3), (4, 4, 5), (4, 4, 4, 2), (4, 4, 4, 3),
+})
+
+
+def card_grouping_ok(raw: str) -> bool:
+    """True for an unbroken number or one grouped the way cards are printed."""
+    if " " not in raw and "-" not in raw:
+        return True
+    if " " in raw and "-" in raw:
+        return False
+    groups = tuple(len(part) for part in raw.replace("-", " ").split(" "))
+    return groups in _CARD_GROUPINGS
+
+
 def credit_card_ok(raw: str) -> bool:
     digits = _card_digits(raw)
     if not 13 <= len(digits) <= 19:
         return False
     if len(set(digits)) == 1:
+        return False
+    if not card_grouping_ok(raw):
         return False
     return bool(_CC_PREFIX_RE.match(digits)) and luhn_ok(digits)
 
@@ -167,7 +188,15 @@ def is_test_pan(raw: str) -> bool:
     return _card_digits(raw) in TEST_PANS
 
 
+# Two numbers the Social Security Administration lists as invalid because
+# they were printed in public: the 1938 wallet-insert card and the SSA's own
+# pamphlet. Both still turn up in validator code and test data.
+_SSN_NEVER_ISSUED = frozenset({"078-05-1120", "219-09-9999"})
+
+
 def ssn_ok(raw: str) -> bool:
+    if raw in _SSN_NEVER_ISSUED:
+        return False
     area, group, serial = raw.split("-")
     if area in ("000", "666") or area >= "900":
         return False
@@ -203,7 +232,14 @@ def private_ip(raw: str) -> bool:
 # --------------------------------------------------------------------------- #
 DETECTORS: dict[str, tuple[re.Pattern, Callable[[str], bool] | None, float]] = {
     "CREDIT_CARD": (
-        re.compile(r"(?<![\d.])(?:\d[ -]?){12,18}\d(?![\d.])"),
+        # Not inside a longer token. A letter, a digit, or a dash or
+        # underscore joined to one on either side means the digits are part
+        # of an identifier: a UUID, a message id, a hash, a file name.
+        re.compile(
+            r"(?<![A-Za-z0-9.])(?<![A-Za-z0-9][-_])"
+            r"(?:\d[ -]?){12,18}\d"
+            r"(?![A-Za-z0-9])(?![-_.][A-Za-z0-9])"
+        ),
         credit_card_ok,
         1.0,
     ),
@@ -241,6 +277,27 @@ DETECTORS: dict[str, tuple[re.Pattern, Callable[[str], bool] | None, float]] = {
 }
 
 DEFAULT_ENTITIES = list(DETECTORS)
+
+
+# Four dotted numbers after a product name or a slash are a version
+# (Chrome/131.0.6778.86, version 10.0.19045.5131), not an address.
+_VERSION_BEFORE_RE = re.compile(
+    r"(?:/|\bv|\b(?:version|ver|release|build|chrome|chromium|firefox|safari|edge|edg|"
+    r"opera|opr|electron|node|python|windows|win|nt|android|ios|macos|linux|kernel|"
+    r"sdk|runtime|framework|net|dotnet|java|jdk|jre|office|excel|word|"
+    r"nversion|assemblyversion|fileversion|productversion)[\s/=:\"']*)$",
+    re.IGNORECASE,
+)
+
+
+def context_rejects(entity: str, line: str, start: int, end: int) -> bool:
+    """True when the text around a match shows it is not what the entity says."""
+    if entity == "IP_ADDRESS":
+        if _VERSION_BEFORE_RE.search(line[max(0, start - 24):start]):
+            return True
+        # A fifth dotted part, or a build suffix, makes it a version too.
+        return line[end:end + 1] in ("-", "+", "_")
+    return False
 
 
 def _text_suffix(path: Path) -> str:
@@ -332,6 +389,8 @@ def scan_file(
                 if validator is not None and not validator(value):
                     if entity == "IP_ADDRESS" and private_ip(value):
                         private_ips += 1
+                    continue
+                if context_rejects(entity, line, match.start(), match.end()):
                     continue
                 recorded = entity
                 if entity == "CREDIT_CARD" and is_test_pan(value):
