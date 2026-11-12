@@ -6,7 +6,7 @@
 .PARAMETER Name
     Component name: claude, cowork, cursor, codex, vscode, grok, grok-bot,
     accounts, chat-history, git-posture, secrets-scan, pii-scan, cloud-agents,
-    telemetry-import, core, integration, all.
+    telemetry-import, core, hub, integration, all.
 
 .EXAMPLE
     .\scripts\test-component.ps1 -Name codex
@@ -18,7 +18,7 @@ param(
     [ValidateSet(
         "claude", "cowork", "cursor", "codex", "vscode", "grok", "grok-bot",
         "accounts", "chat-history", "git-posture", "secrets-scan", "pii-scan",
-        "cloud-agents", "telemetry-import", "core", "integration", "all"
+        "cloud-agents", "telemetry-import", "core", "hub", "integration", "all"
     )]
     [string]$Name
 )
@@ -69,7 +69,7 @@ if ($Name -eq "all") {
     $order = @(
         "core", "claude", "cowork", "cursor", "codex", "vscode", "grok", "grok-bot",
         "accounts", "chat-history", "git-posture", "secrets-scan", "pii-scan",
-        "cloud-agents", "telemetry-import", "integration"
+        "cloud-agents", "telemetry-import", "hub", "integration"
     )
     foreach ($n in $order) {
         & $PSCommandPath -Name $n
@@ -85,6 +85,11 @@ if ($Name -eq "all") {
 
 if ($Name -eq "core") {
     $code = Invoke-Discover -StartDir (Join-Path $RepoRoot "core\tests") -Label "core"
+    exit $code
+}
+
+if ($Name -eq "hub") {
+    $code = Invoke-Discover -StartDir (Join-Path $RepoRoot "hub\tests") -Label "hub"
     exit $code
 }
 
