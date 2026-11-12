@@ -172,6 +172,106 @@ def secret_types_in(text: str) -> list[str]:
     ]
 
 
+# Per-hit location of secret-shaped text. Used by the collectors that write
+# hit rows under raw/ so the briefing can show where each value sits.
+#
+# One span of text is reported once. The length-only matchers overlap the
+# vendor ones (the tail of a ghp_ token is also a 32+ character run) and each
+# other (every hex run is also a base64 run), so the specific pattern wins and
+# hex is tried before generic.
+_HIT_PRIORITY = {"hex_secret": 1, "generic_secret": 2}
+HIT_CONTEXT_CHARS = 80
+
+
+# A base64 image or a minified bundle is one unbroken run of thousands of
+# characters. That is a blob, not a credential, so the length-only matchers
+# skip a run longer than this when listing hits.
+HIT_MAX_UNSTRUCTURED_LEN = 512
+
+
+def secret_spans(text: str) -> list[tuple[str, int, int]]:
+    """Every plausible secret match as (type, start, end), in text order.
+
+    Overlapping matches collapse to the most specific pattern.
+    """
+    if not text:
+        return []
+    ordered = sorted(
+        SECRET_PATTERNS, key=lambda item: _HIT_PRIORITY.get(item[0], 0)
+    )
+    claimed: list[tuple[int, int]] = []
+    found: list[tuple[str, int, int]] = []
+    import bisect
+
+    for secret_type, pattern in ordered:
+        fresh: list[tuple[int, int]] = []
+        for match in pattern.finditer(text):
+            start, end = match.span()
+            if end <= start or not _is_plausible_secret(secret_type, match.group(0)):
+                continue
+            if secret_type in _HIT_PRIORITY and end - start > HIT_MAX_UNSTRUCTURED_LEN:
+                continue
+            pos = bisect.bisect_right(claimed, (start, end))
+            if pos and claimed[pos - 1][1] > start:
+                continue
+            if pos < len(claimed) and claimed[pos][0] < end:
+                continue
+            fresh.append((start, end))
+            found.append((secret_type, start, end))
+        if fresh:
+            claimed = sorted(claimed + fresh)
+    found.sort(key=lambda item: item[1])
+    return found
+
+
+class LineIndex:
+    """Map a character offset to a 1-based (line, column)."""
+
+    def __init__(self, text: str):
+        self._text = text
+        self._starts = [0]
+        find = text.find
+        pos = find("\n")
+        while pos != -1:
+            self._starts.append(pos + 1)
+            pos = find("\n", pos + 1)
+
+    def locate(self, offset: int) -> tuple[int, int]:
+        import bisect
+
+        line = bisect.bisect_right(self._starts, offset)
+        return line, offset - self._starts[line - 1] + 1
+
+    def line_bounds(self, offset: int) -> tuple[int, int]:
+        import bisect
+
+        line = bisect.bisect_right(self._starts, offset)
+        start = self._starts[line - 1]
+        end = self._starts[line] - 1 if line < len(self._starts) else len(self._text)
+        return start, end
+
+
+_CONTEXT_WS_RE = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def hit_context(
+    text: str,
+    start: int,
+    end: int,
+    index: LineIndex,
+    width: int = HIT_CONTEXT_CHARS,
+) -> tuple[str, str]:
+    """Text on the same line just before and just after a match.
+
+    A JSONL record can be megabytes on one line, so each side is cut to
+    ``width`` characters. Control characters become one space.
+    """
+    line_start, line_end = index.line_bounds(start)
+    before = text[max(line_start, start - width):start]
+    after = text[end:min(line_end, end + width)]
+    return _CONTEXT_WS_RE.sub(" ", before), _CONTEXT_WS_RE.sub(" ", after)
+
+
 # Generic absolute-path matcher. Unquoted segments exclude whitespace so the
 # match does not run past a path into surrounding prose. The running operator's
 # own profile (which may contain spaces, e.g. "Test User") is handled by

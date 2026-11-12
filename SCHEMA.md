@@ -120,6 +120,48 @@ Both are emitted by `make_rule()` when supplied and are tagged share-safe
 below. The Codex collector groups by these (`user_config` for config.toml
 grants, `session_prefix`/`session_event` for session-derived rules).
 
+Collectors may add scalar fields to a finding. `chat-history` adds
+`hit_count` (int, every secret-shaped value in that tool's transcripts) and
+`hit_types` (list of matcher names). Neither holds a value.
+
+## Per-hit rows under `raw/`
+
+A finding says how many. These files say where. They are written under
+`raw/`, never under `evidence/`, and are never part of a shared bundle. The
+briefing reads them to build the "Where it is" list under a finding.
+
+| File | Written by | Columns |
+|---|---|---|
+| `raw/pii-scan/findings.csv` | `pii-scan` | `file`, `entity`, `score`, `line`, `sample`, `col`, `before`, `after` |
+| `raw/chat-history-hits/secret-hits.csv` | `chat-history` | `tool`, `file`, `line`, `col`, `type`, `sample`, `before`, `after`, `source`, `workspace`, `role`, `time` |
+| `raw/git-posture/locations.csv` | `git-posture` | `finding`, `repo`, `path`, `commit`, `date`, `note` |
+
+`line` and `col` are 1-based. `before` and `after` are the text on the same
+line on each side of the match, at most 80 characters each, with control
+characters turned into a space. `sample` is the matched value. With `-Redact`
+the column is named `sample_redacted`, the value is shortened, and `before`
+and `after` are empty. Rows are capped at 25 per type per file; the counts in
+the evidence are complete.
+
+In `secret-hits.csv`, `file` is the exported transcript under
+`raw/chat-history/` and `source` is the tool's own session file that the
+message came from. That file is the one to delete. The CSV sits beside
+`raw/chat-history/`, not inside it, so `pii-scan` and `secrets-scan` do not
+scan the list of values a second time.
+
+One span of text is one row. A GitHub token is a `github_pat` hit and is not
+also reported by the length-only matchers. Hex runs are `hex_secret`, other
+long runs are `generic_secret`, and an unbroken run of more than 512
+characters (a base64 image, a minified bundle) is not a hit.
+
+`pii-scan` 1.4.0 changed what a `SECRET_*` count means. It used to be one row
+per type per file at line 0. It is now one row per value, so the first scan
+after the upgrade shows much larger counts for the same files.
+
+In `locations.csv`, a `git.env.in_history` row is one committed `.env` path
+with the oldest commit that added it, that commit's date, and whether the
+file is still tracked at HEAD. File contents are not read.
+
 ## RawPointer
 
 ```json

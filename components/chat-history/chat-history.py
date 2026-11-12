@@ -26,18 +26,35 @@ import paths
 import wsl
 from common import (
     APPDATA,
+    LineIndex,
     add_base_args,
     compute_scope_hash,
     finish_collector,
+    hit_context,
     looks_like_secret,
     make_envelope,
     make_finding,
+    redact_sample,
+    redaction_disabled,
     resolve_raw_root,
+    secret_spans,
     secret_types_in,
     validate_evidence_root,
 )
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
+
+# Kept beside raw/chat-history, not inside it: pii-scan and secrets-scan walk
+# that folder, and a list of the values found there would be scanned again.
+SECRET_HITS_DIR = "chat-history-hits"
+SECRET_HITS_FILE = "secret-hits.csv"
+SECRET_HITS_REF = f"raw/{SECRET_HITS_DIR}/{SECRET_HITS_FILE}"
+# Stored rows per secret type per transcript file. Counts are always complete.
+MAX_HIT_ROWS_PER_TYPE = 25
+SECRET_HIT_COLUMNS = [
+    "tool", "file", "line", "col", "type", "sample", "before", "after",
+    "source", "workspace", "role", "time",
+]
 
 COLLECTOR = "chat-history"
 
@@ -211,6 +228,86 @@ def estimate_active_minutes(buckets, cap_minutes=ACTIVE_GAP_CAP_MINUTES) -> int:
     return round(total_seconds / 60)
 
 
+def locate_secret_hits(content, marks, path, tool_key, max_per_type=MAX_HIT_ROWS_PER_TYPE):
+    """Where each secret-shaped value sits in one exported transcript.
+
+    ``marks`` is a list of (first line of a message, entry) in file order.
+    Returns (rows, counts): rows are capped per type, counts are complete.
+    Each row names the export file, the line and column, and the message the
+    line belongs to: the tool's own session file, the workspace, the role,
+    and the time.
+    """
+    import bisect
+    from collections import Counter
+
+    counts: Counter = Counter()
+    rows: list[dict] = []
+    spans = secret_spans(content)
+    if not spans:
+        return rows, counts
+    index = LineIndex(content)
+    starts = [mark[0] for mark in marks]
+    for secret_type, start, end in spans:
+        counts[secret_type] += 1
+        if counts[secret_type] > max_per_type:
+            continue
+        line, col = index.locate(start)
+        pos = bisect.bisect_right(starts, line) - 1
+        entry = marks[pos][1] if pos >= 0 else {}
+        before, after = hit_context(content, start, end, index)
+        ts = entry.get("ts")
+        rows.append({
+            "tool": tool_key,
+            "file": str(path),
+            "line": line,
+            "col": col,
+            "type": secret_type,
+            "sample": content[start:end],
+            "before": before,
+            "after": after,
+            "source": str(entry.get("source") or ""),
+            "workspace": str(entry.get("workspace") or ""),
+            "role": str(entry.get("role") or ""),
+            "time": ts.isoformat(timespec="seconds") if isinstance(ts, datetime) else "",
+        })
+    return rows, counts
+
+
+def write_secret_hits(raw_root: Path, results: list[dict]) -> int:
+    """Write raw/chat-history-hits/secret-hits.csv. Returns the row count.
+
+    The file stays under raw/, beside the transcripts it points into. With
+    -Redact the value is masked and the surrounding text is left out.
+    """
+    rows = [
+        row
+        for result in results
+        for finfo in result.get("files_info", [])
+        for row in finfo.get("secret_hits", [])
+    ]
+    out_dir = Path(raw_root) / SECRET_HITS_DIR
+    target = out_dir / SECRET_HITS_FILE
+    if not rows:
+        target.unlink(missing_ok=True)
+        return 0
+    show_raw = redaction_disabled()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    import csv
+
+    with target.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [c if c != "sample" or show_raw else "sample_redacted" for c in SECRET_HIT_COLUMNS]
+        )
+        for row in rows:
+            out = dict(row)
+            if not show_raw:
+                out["sample"] = redact_sample(row["sample"], row["type"])
+                out["before"] = out["after"] = ""
+            writer.writerow([out[c] for c in SECRET_HIT_COLUMNS])
+    return len(rows)
+
+
 def export_buckets(buckets, tool_name, folder_name, output_root):
     out_dir = output_root / folder_name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -222,13 +319,24 @@ def export_buckets(buckets, tool_name, folder_name, output_root):
         entries = sorted(buckets[date_key], key=lambda e: (e["ts"], e["source"]))
         path = out_dir / f"{date_key}.md"
 
-        lines = [
+        lines = []
+        line_total = 0
+        # (first file line of a message body, entry). Lets a hit on line N be
+        # traced back to the session file and message it came from.
+        marks = []
+
+        def emit(*items):
+            nonlocal line_total
+            lines.extend(items)
+            line_total += sum(item.count("\n") + 1 for item in items)
+
+        emit(
             f"# {tool_name} Chat History - {date_key}",
             "",
             f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"Entries: {len(entries)}",
             "",
-        ]
+        )
 
         by_source = {}
         for e in entries:
@@ -238,20 +346,22 @@ def export_buckets(buckets, tool_name, folder_name, output_root):
             group = by_source[source]
             ws = group[0].get("workspace", "")
             ws_label = f" - {ws}" if ws else ""
-            lines += [f"## Session{ws_label}", "", f"Source: `{source}`", ""]
+            emit(f"## Session{ws_label}", "", f"Source: `{source}`", "")
             for e in group:
                 role = e["role"] or "message"
-                lines += [
-                    f"### {e['ts'].strftime('%H:%M:%S')} - {role}",
-                    "",
-                    e["text"],
-                    "",
-                ]
+                emit(f"### {e['ts'].strftime('%H:%M:%S')} - {role}", "")
+                marks.append((line_total + 1, e))
+                emit(e["text"], "")
 
         content = "\n".join(lines)
-        path.write_text(content, encoding="utf-8")
+        # newline="" writes the text as built. The default would turn every
+        # "\n" into "\r\n" on Windows and a lone "\r" inside a message would
+        # then shift the line numbers recorded for the hits below.
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(content)
         written += 1
         total_entries += len(entries)
+        hit_rows, hit_counts = locate_secret_hits(content, marks, path, folder_name)
         files_info.append({
             "path": path,
             "date": date_key,
@@ -259,6 +369,9 @@ def export_buckets(buckets, tool_name, folder_name, output_root):
             "size": len(content.encode("utf-8")),
             "has_secret": looks_like_secret(content),
             "secret_types": secret_types_in(content),
+            "secret_hits": hit_rows,
+            "secret_hit_count": sum(hit_counts.values()),
+            "secret_hit_types": sorted(hit_counts),
         })
 
     return {
@@ -1195,29 +1308,41 @@ def build_evidence(
                 secret_file_count += 1
                 bucket = secret_by_tool.setdefault(
                     tool_key,
-                    {"count": 0, "severity": "high", "types": set()},
+                    {"count": 0, "severity": "high", "types": set(), "hits": 0, "rows": 0,
+                     "hit_types": set()},
                 )
                 bucket["count"] += 1
                 bucket["types"].update(finfo["secret_types"])
+                bucket["hits"] += int(finfo.get("secret_hit_count") or 0)
+                bucket["rows"] += len(finfo.get("secret_hits") or [])
+                bucket["hit_types"].update(finfo.get("secret_hit_types") or [])
                 if "aws_key" in finfo["secret_types"]:
                     bucket["severity"] = "critical"
 
+    secret_hit_total = 0
     for tool_key, info in secret_by_tool.items():
-        findings.append(
-            make_finding(
-                f"chat_history.secret.{tool_key}",
-                info["severity"],
-                "Secrets Exposure",
-                f"Chat transcripts contain potential secrets ({tool_key})",
-                evidence_count=info["count"],
-                sample_redacted=f"{info['count']} files flagged",
-                secret_redacted=True,
-                tags=[
-                    "chat_plaintext",
-                    "gh_token_present" if "github_pat" in info["types"] else "history_retention",
-                ],
-            )
+        secret_hit_total += info["hits"]
+        finding = make_finding(
+            f"chat_history.secret.{tool_key}",
+            info["severity"],
+            "Secrets Exposure",
+            f"Chat transcripts contain potential secrets ({tool_key})",
+            evidence_count=info["count"],
+            sample_redacted=f"{info['count']} files flagged",
+            secret_redacted=True,
+            tags=[
+                "chat_plaintext",
+                "gh_token_present" if "github_pat" in info["types"] else "history_retention",
+            ],
+            # The per-hit rows: file, line, column, session, and message.
+            raw_evidence_ref=SECRET_HITS_REF if info["rows"] else None,
         )
+        if info["hits"]:
+            finding["hit_count"] = info["hits"]
+            # One type per value: a GitHub token is not also listed as a
+            # generic secret because its tail is a long random run.
+            finding["hit_types"] = sorted(info["hit_types"])
+        findings.append(finding)
 
     if all_dates:
         oldest = min(all_dates)
@@ -1262,6 +1387,7 @@ def build_evidence(
             "active_gap_cap_minutes": ACTIVE_GAP_CAP_MINUTES,
         }
 
+    envelope["summary"]["secret_hits"] = secret_hit_total
     envelope["summary"]["discovery"] = paths.safe_path_meta(tp)
     envelope["summary"]["claude_sources_scanned"] = len(claude_roots)
     if wsl_roots:
@@ -1395,6 +1521,9 @@ def main():
             r = export_buckets(buckets, tool_name, folder, chat_output)
         results.append(r)
         print(f"{r['files']} files, {r['entries']} entries")
+
+    if not args.dry_run:
+        write_secret_hits(raw_root, results)
 
     envelope = build_evidence(
         results,

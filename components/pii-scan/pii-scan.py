@@ -52,16 +52,19 @@ from typing import Callable, Iterable
 import compressed
 import paths
 from common import (
+    HIT_CONTEXT_CHARS,
+    LineIndex,
     add_base_args,
     compute_scope_hash,
     finish_collector,
+    hit_context,
     make_envelope,
     make_finding,
     redact_sample,
     redaction_disabled,
     resolve_raw_root,
     sanitize_text,
-    secret_types_in,
+    secret_spans,
     sha256_short,
     validate_evidence_root,
 )
@@ -69,7 +72,7 @@ from common import (
 # Major stays 1: the envelope version doubles as the evidence schema major
 # (build-briefing.py gates on it) and the envelope shape is unchanged. The
 # Presidio->stdlib engine swap is internal to the collector.
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 
 COLLECTOR = "pii-scan"
 
@@ -295,15 +298,33 @@ def severity_for(entity: str) -> str:
     return SEVERITY_BY_ENTITY.get(entity, "medium")
 
 
-def scan_file(path: Path, entities: list[str]) -> tuple[list[dict], int]:
-    """Return (hits, private_ip_count) for one file."""
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+DEFAULT_CONTEXT_ROWS = 25
+
+
+def scan_file(
+    path: Path, entities: list[str], context_rows: int = DEFAULT_CONTEXT_ROWS
+) -> tuple[list[dict], int]:
+    """Return (hits, private_ip_count) for one file.
+
+    Every hit carries its line and column. The first ``context_rows`` hits of
+    each entity also carry the text on either side of the match. collect()
+    stores no more rows than that, so a file with thousands of hits stays
+    small in memory.
+    """
     text = read_text(path)
     if not text:
         return [], 0
 
     hits: list[dict] = []
     private_ips = 0
-    for line_no, line in enumerate(text.splitlines(), start=1):
+    seen: Counter[str] = Counter()
+    # split("\n") keeps the same line numbers as LineIndex below. splitlines()
+    # also breaks on form feeds and Unicode separators, which an editor does
+    # not count as lines.
+    for line_no, line in enumerate(text.split("\n"), start=1):
         for entity in entities:
             pattern, validator, score = DETECTORS[entity]
             for match in pattern.finditer(line):
@@ -315,26 +336,43 @@ def scan_file(path: Path, entities: list[str]) -> tuple[list[dict], int]:
                 recorded = entity
                 if entity == "CREDIT_CARD" and is_test_pan(value):
                     recorded = "TEST_CARD"
-                hits.append(
-                    {
-                        "file": str(path),
-                        "entity": recorded,
-                        "score": score,
-                        "line": line_no,
-                        "sample": value,
-                    }
-                )
+                hit = {
+                    "file": str(path),
+                    "entity": recorded,
+                    "score": score,
+                    "line": line_no,
+                    "col": match.start() + 1,
+                    "sample": value,
+                }
+                seen[recorded] += 1
+                if seen[recorded] <= context_rows:
+                    lo = max(0, match.start() - HIT_CONTEXT_CHARS)
+                    hi = match.end() + HIT_CONTEXT_CHARS
+                    hit["before"] = _CONTROL_RE.sub(" ", line[lo:match.start()])
+                    hit["after"] = _CONTROL_RE.sub(" ", line[match.end():hi])
+                hits.append(hit)
 
-    for secret_type in secret_types_in(text):
-        hits.append(
-            {
+    # One row per secret-shaped value, at its real line and column. This used
+    # to be one row per type per file at line 0, which said a file had a
+    # GitHub token somewhere and nothing about where.
+    spans = secret_spans(text)
+    if spans:
+        index = LineIndex(text)
+        for secret_type, start, end in spans:
+            entity = f"SECRET_{secret_type.upper()}"
+            line_no, col = index.locate(start)
+            hit = {
                 "file": str(path),
-                "entity": f"SECRET_{secret_type.upper()}",
+                "entity": entity,
                 "score": 1.0,
-                "line": 0,
-                "sample": secret_type,
+                "line": line_no,
+                "col": col,
+                "sample": text[start:end],
             }
-        )
+            seen[entity] += 1
+            if seen[entity] <= context_rows:
+                hit["before"], hit["after"] = hit_context(text, start, end, index)
+            hits.append(hit)
 
     return hits, private_ips
 
@@ -350,13 +388,15 @@ def write_raw_outputs(
     csv_path = raw_dir / "findings.csv"
     # findings.csv lives under raw/, which never leaves the machine (SCHEMA.md).
     # In the default unredacted local mode show the real matched text so hits
-    # can be triaged; -Redact (AISCAN_REDACT=1) restores masking.
+    # can be triaged; -Redact (AISCAN_REDACT=1) restores masking and leaves the
+    # before/after columns empty, because that text is transcript content.
     show_raw = redaction_disabled()
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
             ["file", "entity", "score", "line",
-             "sample" if show_raw else "sample_redacted"]
+             "sample" if show_raw else "sample_redacted",
+             "col", "before", "after"]
         )
         for hit in hits:
             writer.writerow(
@@ -366,6 +406,9 @@ def write_raw_outputs(
                     hit["score"],
                     hit["line"],
                     hit["sample"] if show_raw else redact_sample(hit["sample"], hit["entity"]),
+                    hit.get("col", ""),
+                    hit.get("before", "") if show_raw else "",
+                    hit.get("after", "") if show_raw else "",
                 ]
             )
 
@@ -488,7 +531,12 @@ def collect(
                     file=sys.stderr, flush=True,
                 )
             try:
-                hits, private_ips = scan_file(file_path, entities)
+                if max_samples_per_file > DEFAULT_CONTEXT_ROWS:
+                    hits, private_ips = scan_file(
+                        file_path, entities, context_rows=max_samples_per_file
+                    )
+                else:
+                    hits, private_ips = scan_file(file_path, entities)
             except compressed.TooLarge:
                 files_too_large += 1
                 files_scanned -= 1

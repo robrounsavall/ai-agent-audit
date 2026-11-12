@@ -60,6 +60,14 @@
     contains local paths: do not share it. Ignored (with a warning) when -Redact
     is set.
 
+.PARAMETER ShowSecrets
+    With -Briefing, write briefing\briefing-unmasked.html: under each finding,
+    every matched value in full, the text on either side of it, the file, line
+    and column, and links that open the file at that line in VS Code or Cursor.
+    Includes everything -LocalLinks does. The file holds live credentials. Keep
+    it on this machine and delete it when you are done. Ignored (with a
+    warning) when -Redact or -AgentMode is set.
+
 .PARAMETER OutDir
     Persistent output root instead of the throwaway temp directory. Creates
     <OutDir>\evidence and <OutDir>\raw and writes collector output there. Implies
@@ -165,6 +173,11 @@
     folder links. Local use only.
 
 .EXAMPLE
+    .\aiscan.ps1 all -OutDir C:\scans\today -Briefing -ShowSecrets
+    Builds briefing\briefing-unmasked.html for the person fixing the findings:
+    each secret in full with its file, line, and surrounding text. Local use only.
+
+.EXAMPLE
     .\aiscan.ps1 all -Here -Briefing -Customer "Acme Corp" -Operator "Jane Doe"
 
 .EXAMPLE
@@ -224,6 +237,8 @@ param(
 
     [switch]$LocalLinks,
 
+    [switch]$ShowSecrets,
+
     [string]$OutDir,
 
     [switch]$Here,
@@ -282,6 +297,16 @@ $UseLocalLinks = [bool]$LocalLinks
 if ($LocalLinks -and $Redact) {
     Write-Host "-Redact turns off -LocalLinks; building a shareable briefing without local paths." -ForegroundColor Yellow
     $UseLocalLinks = $false
+}
+$UseShowSecrets = [bool]$ShowSecrets
+if ($ShowSecrets -and $Redact) {
+    Write-Host "-Redact turns off -ShowSecrets; building a briefing without secret values." -ForegroundColor Yellow
+    $UseShowSecrets = $false
+}
+elseif ($ShowSecrets -and $AgentMode) {
+    # Agent mode exists so an agent that launches a scan never reads raw values.
+    Write-Host "-AgentMode turns off -ShowSecrets; building a briefing without secret values." -ForegroundColor Yellow
+    $UseShowSecrets = $false
 }
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
@@ -763,7 +788,9 @@ function Invoke-AiscanBriefing {
     # a failed Start-Process does not fail the briefing.
     $script:AiscanBriefingFailed = $true
     $briefingScript = Join-Path $ScriptDir "report\build-briefing.py"
-    $briefingName = if ($UseLocalLinks) { "briefing-local.html" } else { "briefing.html" }
+    $briefingName = if ($UseShowSecrets) { "briefing-unmasked.html" }
+    elseif ($UseLocalLinks) { "briefing-local.html" }
+    else { "briefing.html" }
     $briefingOut = Join-Path $Root "briefing\$briefingName"
     if (-not (Test-Path -LiteralPath $briefingScript)) {
         Write-Host "build-briefing.py not found; skipping briefing." -ForegroundColor Yellow
@@ -778,6 +805,7 @@ function Invoke-AiscanBriefing {
         "--out", $briefingOut
     )
     if ($UseLocalLinks) { $briefingArgs += "--local-links" }
+    if ($UseShowSecrets) { $briefingArgs += "--show-secrets" }
     if ($Customer) { $briefingArgs += @("--customer", $Customer) }
     if ($Operator) { $briefingArgs += @("--operator", $Operator) }
     try {
@@ -794,6 +822,9 @@ function Invoke-AiscanBriefing {
         return
     }
     Write-Host ("Briefing written: {0}" -f (Format-AiscanPath -Path $briefingOut -Root $Root)) -ForegroundColor Green
+    if ($UseShowSecrets) {
+        Write-Host "This briefing shows secret values in full. Keep it on this machine and delete it when you are done." -ForegroundColor Yellow
+    }
     try {
         # Continue would swallow a non-terminating Start-Process error and
         # still print the success line. Stop makes that error hit the catch.

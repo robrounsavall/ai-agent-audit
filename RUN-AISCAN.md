@@ -15,13 +15,15 @@ other files, in scan output, or in the user's chat transcripts.
    - Never open, list, search or summarize anything under `raw\`. It holds
      the user's chat transcripts and secret-scan hits.
    - Never read `*.csv`, `*.jsonl`, `summary.md`,
-     `briefing-local.html`, or the full `briefing.html`.
+     `briefing-local.html`, `briefing-unmasked.html`, or the full
+     `briefing.html`.
    - In chat, never repeat file paths, usernames, hostnames, command lines,
      rule text, or any part of a secret.
 2. **No network except `git clone`.** Do not upload, paste, attach, post,
    commit, push, or open issues/PRs with any output. Never run
    `cloud-agents` or `telemetry`. Never set `CURSOR_API_KEY`. Never use
-   `-IncludeRunResult`, `-LocalLinks`, `-Here`, or `irm ... | iex`.
+   `-IncludeRunResult`, `-LocalLinks`, `-ShowSecrets`, `-Here`, or
+   `irm ... | iex`.
 3. **No changes.** Do not edit any settings, config files, permissions,
    PATH, or the machine's execution policy. Do not install anything
    (Python, Git, Betterleaks, gitleaks, trufflehog) unless the user says
@@ -291,7 +293,7 @@ as a failed scan.
 
 Do not read samples, rules, raw pointers, the host, or paths from anywhere
 else. Do not open `raw\`, `*.csv`, `*.jsonl`, `summary.md`,
-`briefing-local.html`, or `briefing.html`.
+`briefing-local.html`, `briefing-unmasked.html`, or `briefing.html`.
 
 If a title contains a path, a username, a hostname, or a secret-looking
 string, do not quote that part. Describe the finding in general words.

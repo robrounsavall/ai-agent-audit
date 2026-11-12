@@ -16,7 +16,31 @@ The tabs are:
 | Usage | Token totals, and cost only when the export carried cents |
 | Coverage gaps | Questions the evidence cannot answer |
 
-If a tab has no evidence, it is dimmed with a "not collected" tag and the panel says `Not collected in this scan.` The page still opens. A missing file is not an error in the report. On the access map, a Yes or Unknown cell is a button that opens that cell's evidence. On Findings, a row opens its evidence underneath.
+If a tab has no evidence, it is dimmed with a "not collected" tag and the panel says `Not collected in this scan.` The page still opens. A missing file is not an error in the report. On the access map, a Yes or Unknown cell is a button that opens that cell's evidence. On Findings, a row opens its detail underneath: what to do, then where it is.
+
+## Opening a finding
+
+Select a finding row and the panel under it answers three questions in order.
+
+1. Why it matters and what to do. A short statement of the risk and numbered steps: which credential to rotate and where, which config key to change, which file to delete. The text is fixed per finding type and is in `report/remediation.py`.
+2. What triggered it. The collector's sample and any extra fields it recorded.
+3. Where it is. For secrets and PII this is one entry per distinct value, with every place that value appears. Named credential types (AWS, GitHub, vendor keys) are listed first. The two length-only matchers come last, and a value that is the length of a git commit id or a SHA-256 digest is marked as unlikely to be a credential. Each location names the tool, the file, and the line and column. A chat-transcript hit also names the tool's own session file, the workspace, the message role, and the time, because that session file is the one to delete. A `.env` finding lists the repository, the path, and the commit that added it. A permission finding lists the rules it is about.
+
+The filter box above the list narrows the locations by tool, path, or type.
+
+How much of that is shown depends on how the page was built.
+
+| Build | File | Paths | Matched values and surrounding text |
+|---|---|---|---|
+| `-Briefing` | `briefing.html` | Shortened or hashed | Masked. Not on the page. |
+| `-Briefing -LocalLinks` | `briefing-local.html` | Full, with Copy path, folder, and open-in-editor links | Masked. Not on the page. |
+| `-Briefing -ShowSecrets` | `briefing-unmasked.html` | Full, same links | Shown in full, with up to 80 characters on each side |
+
+`-ShowSecrets` is for the person doing the cleanup on the machine that was scanned. The file holds live credentials and transcript excerpts. Keep it on that machine and delete it when you are done. The banner at the top has a Hide values button that blurs the values for a screen share. `-Redact` and `-AgentMode` both turn `-ShowSecrets` off.
+
+The open-in-editor links use the `vscode://file/<path>:<line>:<column>` and `cursor://file/...` schemes. They work when that editor is installed. A session log is often one very long line per message, so the column matters more than the line.
+
+Positions come from the scan that wrote the folder. A folder scanned before this feature has no line numbers for secrets, and the panel says so. Scan again to get them.
 
 The page does not copy full transcripts or prompts. It does show finding samples. Those samples are unredacted unless the scan used `-Redact`, so they can include paths and secret-shaped text. Cowork still contributes counts, not file contents. The agents tab includes an account table when `evidence/accounts.json` is present: email, username, organization, and plan from local config. Those identifiers are shown on a normal scan. They are masked when the briefing is built with `-Redact`. Token and API key values are not in the table.
 

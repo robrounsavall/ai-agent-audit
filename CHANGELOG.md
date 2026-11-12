@@ -46,6 +46,36 @@ each collector's `__version__` and appear in the evidence envelopes.
   now the newest chat or agent session date instead of always `unknown`.
   The access map fills VS Code shell, file-write, network, git and approval
   cells from the agent-host settings.
+- Opening a finding in the briefing now says what to do about it and where
+  it is. Each finding has a short risk statement and numbered steps (which
+  credential to rotate and where, which config key to change, which file to
+  delete). Secret and PII findings list one entry per distinct value with
+  every location: tool, file, line, column, and for chat transcripts the
+  tool's own session file, workspace, message role, and time. Named
+  credential types come first; hash-length hex values are marked as unlikely
+  to be credentials. A `.env` finding lists the repository, path, and commit.
+  A permission finding lists the rules it is about. A filter box narrows the
+  locations.
+- `-ShowSecrets` (with `-Briefing`) writes `briefing\briefing-unmasked.html`:
+  the matched values in full, up to 80 characters of text on each side, full
+  local paths, a Copy value button, and links that open the file at the line
+  in VS Code or Cursor. It is opt-in and local only. `-Redact` and
+  `-AgentMode` turn it off. The default `briefing.html` still masks values
+  and hides paths, and `-LocalLinks` still shows paths with values masked;
+  both now show line and column.
+- `pii-scan` 1.4.0 records one row per secret-shaped value with its line,
+  column, and surrounding text in `raw/pii-scan/findings.csv`. It used to
+  record one row per type per file at line 0, so `SECRET_*` counts are much
+  larger on the first scan after upgrading. A value is reported once, by the
+  most specific matcher, and an unbroken run of more than 512 characters is
+  not a hit.
+- `chat-history` 1.6.0 writes `raw/chat-history-hits/secret-hits.csv`: each
+  secret-shaped value in an exported transcript with its line and column and
+  the session file, workspace, role, and time of the message it is in.
+  Findings carry `hit_count` and `hit_types`.
+- `git-posture` 1.2.0 writes `raw/git-posture/locations.csv`: the repository
+  behind each finding, and for a committed `.env` the path, the commit that
+  added it, the date, and whether it is still tracked.
 - `vscode` collector 1.1.0 replaces `copilot` and is included in `aiscan all`.
   It reads VS Code user and workspace settings, Copilot chat-session
   metadata, AI extensions, and JetBrains Copilot config. Finding ids moved
