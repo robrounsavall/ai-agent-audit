@@ -25,6 +25,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -34,6 +35,7 @@ except ImportError:  # pragma: no cover - non-Windows fallback
     winreg = None
 
 import paths
+import wsl
 from common import (
     APPDATA,
     add_base_args,
@@ -51,7 +53,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 COLLECTOR = "claude"
 
@@ -612,11 +614,145 @@ def scan_side_artifacts(claude_home: Path) -> list[dict]:
     return findings
 
 
+def _same_path(a: Path, b: Path) -> bool:
+    try:
+        return str(a.resolve()).lower() == str(b.resolve()).lower()
+    except OSError:
+        return str(a).lower() == str(b).lower()
+
+
+def transcript_stats(claude_projects: Path) -> tuple[int, str]:
+    """(transcript file count, newest transcript date) under a projects dir."""
+    count = 0
+    newest = 0.0
+    try:
+        for path in claude_projects.rglob("*.jsonl"):
+            count += 1
+            try:
+                newest = max(newest, path.stat().st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    date = datetime.fromtimestamp(newest, tz=timezone.utc).date().isoformat() if newest else ""
+    return count, date
+
+
+def _merge_finding(all_findings: list[dict], seen: set[str], finding: dict, label: str) -> None:
+    """Add a finding, or fold it into the existing one with the same id so a
+    WSL copy of a Windows finding reads as one finding with both sources."""
+    sample = finding.get("sample_redacted") or ""
+    note = f"{label}: {sample}" if sample else label
+    if finding["id"] not in seen:
+        seen.add(finding["id"])
+        finding["sample_redacted"] = note
+        all_findings.append(finding)
+        return
+    for existing in all_findings:
+        if existing["id"] == finding["id"]:
+            existing["evidence_count"] = int(existing.get("evidence_count") or 1) + int(
+                finding.get("evidence_count") or 1
+            )
+            prior = existing.get("sample_redacted") or ""
+            existing["sample_redacted"] = (f"{prior}; {note}" if prior else note)[:240]
+            return
+
+
+def collect_wsl_home(
+    home: wsl.WslHome,
+    scope_filter: str,
+    all_rules: list[dict],
+    all_findings: list[dict],
+    seen_finding_ids: set[str],
+    settings_envs: list[tuple[str, dict]],
+    parse_reasons: list[str],
+    scanned_paths: list[str],
+) -> dict:
+    """Read one WSL ~/.claude: user settings, side artifacts, transcript stats.
+
+    Returns a per-home summary keyed by distro. The Linux username and home
+    path never leave this function.
+    """
+    label = home.label
+    mode = ""
+    auto_disabled = False
+    files = 0
+    rules_before = len(all_rules)
+    user_scope = scope_matches(scope_filter, "user")
+    if user_scope:
+        for name in ("settings.json", "settings.local.json"):
+            path = home.claude_home / name
+            if not path.is_file():
+                continue
+            files += 1
+            scanned_paths.append(str(path))
+            data, err = _read_settings_object(path)
+            if err:
+                parse_reasons.append(f"{label} {err}")
+                continue
+            if not data:
+                continue
+            if name == "settings.json":
+                mode, _key = permission_mode_from_settings(data)
+            auto_disabled = auto_disabled or _setting_disabled(data, "disableAutoMode")
+            env = data.get("env", {})
+            if isinstance(env, dict):
+                settings_envs.append((f"{label} {name}", env))
+            rules, findings = extract_rules_from_settings("user", label, data, path)
+            all_rules.extend(rules)
+            for finding in findings:
+                _merge_finding(all_findings, seen_finding_ids, finding, label)
+    for finding in scan_side_artifacts(home.claude_home):
+        _merge_finding(all_findings, seen_finding_ids, finding, label)
+
+    projects = home.claude_home / "projects"
+    sessions, last = transcript_stats(projects)
+    version = detect_claude_code_version(projects)
+    if not user_scope:
+        mode_label = "not scanned (scope)"
+    elif mode:
+        mode_label = mode
+    elif auto_disabled:
+        mode_label = "default (auto disabled)"
+    else:
+        mode_label = "auto (implicit default)"
+        _merge_finding(
+            all_findings,
+            seen_finding_ids,
+            make_finding(
+                "claude.permission.auto_mode_default",
+                "medium",
+                "Shell Execution",
+                "No Claude permission mode is set, so interactive sessions start in auto mode "
+                "(no routine prompts; a classifier reviews actions)",
+                sample_redacted=(
+                    "permissions.defaultMode=unset; implicit default=auto; "
+                    f"version={version or 'unknown'}"
+                ),
+                tags=["auto_mode"],
+            ),
+            label,
+        )
+    return {
+        "distro": home.distro,
+        "settings_files": files,
+        "rules": len(all_rules) - rules_before,
+        "permission_mode": mode_label,
+        "claude_code_version": version,
+        "sessions": sessions,
+        "last_activity": last,
+    }
+
+
 def collect(
     scope_filter: str,
     tp: paths.ToolPaths,
     repo_roots: list[Path] | None = None,
+    wsl_homes: list[wsl.WslHome] | None = None,
 ) -> dict:
+    """wsl_homes defaults to none so callers (and tests) opt in; main()
+    passes the running-distro discovery."""
+    homes = [h for h in (wsl_homes or []) if not _same_path(h.claude_home, tp.claude_home)]
     roots = list(repo_roots) if repo_roots is not None else default_repo_roots()
     settings_files = discover_settings(scope_filter, tp.claude_home, roots)
     desktop_config = desktop_config_path()
@@ -625,11 +761,12 @@ def collect(
     scanned_paths = [str(p) for _, _, p in settings_files]
     if desktop_present:
         scanned_paths.append(str(desktop_config))
+    scanned_paths.extend(str(h.claude_home) for h in homes)
     scope_hash = compute_scope_hash(scanned_paths or [str(tp.claude_home)])
 
     # A Desktop-only install has no Claude Code home. Project settings in a
     # repo also count, so a missing home does not skip the scan.
-    platform_detected = code_home or desktop_present or bool(settings_files)
+    platform_detected = code_home or desktop_present or bool(settings_files) or bool(homes)
     envelope = make_envelope(
         COLLECTOR,
         __version__,
@@ -707,6 +844,7 @@ def collect(
         if finding["id"] not in seen_finding_ids:
             seen_finding_ids.add(finding["id"])
             all_findings.append(finding)
+
 
     def drop_as_not_applied(finding_id: str, note: str) -> None:
         nonlocal all_findings
@@ -796,6 +934,34 @@ def collect(
     else:
         mode_label, mode_source = "auto (implicit default)", "built-in default"
 
+    # WSL homes are read after all Windows-home logic so the Windows
+    # permission-mode handling is unchanged; their findings carry a wsl:<distro> label.
+    wsl_scanned: list[str] = []
+    wsl_parse: list[str] = []
+    wsl_summaries = [
+        collect_wsl_home(
+            home, scope_filter, all_rules, all_findings, seen_finding_ids,
+            settings_envs, wsl_parse, wsl_scanned,
+        )
+        for home in homes
+    ]
+
+    if wsl_parse:
+        _merge_finding(
+            all_findings,
+            seen_finding_ids,
+            make_finding(
+                "claude.config.parse_error",
+                "low",
+                "General Tooling",
+                "Claude settings file is present but could not be parsed",
+                evidence_count=len(wsl_parse),
+                sample_redacted="; ".join(wsl_parse)[:180],
+                tags=["config_parse_error"],
+            ),
+            "wsl",
+        )
+
     otel = claude_otel_summary(settings_envs)
     if otel["enabled"]:
         destination = str(otel.get("destination") or "destination not recorded")
@@ -833,6 +999,13 @@ def collect(
         "auto_mode_disabled": auto_disabled,
         "bypass_mode_disabled": bypass_disabled,
     }
+    if homes:
+        envelope["summary"]["settings_files"] += sum(h["settings_files"] for h in wsl_summaries)
+        envelope["summary"]["wsl_homes"] = wsl_summaries
+        envelope["summary"]["wsl_sessions"] = sum(h["sessions"] for h in wsl_summaries)
+        envelope["summary"]["wsl_last_activity"] = max(
+            (h["last_activity"] for h in wsl_summaries), default=""
+        )
     return envelope
 
 
@@ -855,7 +1028,7 @@ def main() -> None:
     else:
         repo_roots = default_repo_roots()
 
-    envelope = collect(args.scope, tp, repo_roots=repo_roots)
+    envelope = collect(args.scope, tp, repo_roots=repo_roots, wsl_homes=wsl.claude_homes())
     if not envelope["platform_detected"]:
         finish_collector(envelope, evidence_root, dry_run=args.dry_run)
         sys.exit(2)

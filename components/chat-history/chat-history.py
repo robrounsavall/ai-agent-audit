@@ -23,6 +23,7 @@ from urllib.parse import unquote
 
 import compressed
 import paths
+import wsl
 from common import (
     APPDATA,
     add_base_args,
@@ -36,7 +37,7 @@ from common import (
     validate_evidence_root,
 )
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 COLLECTOR = "chat-history"
 
@@ -326,6 +327,55 @@ def claude_history_roots(tp: paths.ToolPaths) -> list[Path]:
             seen.add(key)
             unique.append(root)
     return unique
+
+
+def wsl_claude_roots(homes, existing: list[Path]) -> list[tuple[str, Path]]:
+    """(label, projects dir) for WSL Claude homes not already in `existing`."""
+    seen = set()
+    for root in existing:
+        try:
+            seen.add(str(root.resolve()).lower())
+        except OSError:
+            seen.add(str(root).lower())
+    out: list[tuple[str, Path]] = []
+    for home in homes:
+        projects = home.claude_home / "projects"
+        try:
+            key = str(projects.resolve()).lower()
+        except OSError:
+            key = str(projects).lower()
+        if key in seen or not projects.is_dir():
+            continue
+        seen.add(key)
+        out.append((home.label, projects))
+    return out
+
+
+def wsl_discovery_meta(wsl_roots: list[tuple[str, Path]]) -> dict:
+    """Discovery block for WSL Claude transcripts, shaped like safe_path_meta.
+    Counts and dates only; the path is hashed."""
+    files = 0
+    newest = 0.0
+    for _label, root in wsl_roots:
+        try:
+            for path in root.rglob("*.jsonl"):
+                files += 1
+                try:
+                    newest = max(newest, path.stat().st_mtime)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return {
+        "detected": files > 0,
+        "file_count": files,
+        "newest": datetime.fromtimestamp(newest).date().isoformat() if newest else None,
+        "source": "wsl",
+        "path_id": hashlib.sha256(
+            "|".join(sorted(str(r).replace("\\", "/").lower() for _l, r in wsl_roots)).encode("utf-8")
+        ).hexdigest()[:12],
+        "distros": sorted({label.split(":", 1)[-1] for label, _r in wsl_roots}),
+    }
 
 
 def collect_claude_roots(buckets, include_tool_details, roots: list[Path], metrics=None, problems=None):
@@ -1090,6 +1140,7 @@ def build_evidence(
     metrics: dict | None = None,
     parse_problems: list | None = None,
     codex_stats: dict | None = None,
+    wsl_roots: list[tuple[str, Path]] | None = None,
 ) -> dict:
     claude_roots = claude_roots or [tp.claude_projects]
     scanned = [
@@ -1213,6 +1264,10 @@ def build_evidence(
 
     envelope["summary"]["discovery"] = paths.safe_path_meta(tp)
     envelope["summary"]["claude_sources_scanned"] = len(claude_roots)
+    if wsl_roots:
+        meta = wsl_discovery_meta(wsl_roots)
+        envelope["summary"]["discovery"]["claude_wsl"] = meta
+        envelope["summary"]["claude_wsl_files"] = meta["file_count"]
     if metrics:
         for key, value in sorted(metrics.items()):
             if isinstance(value, int):
@@ -1250,6 +1305,8 @@ def main():
     chat_output = raw_root / "chat-history"
     tp = paths.resolve_from_args(args)
     claude_roots = claude_history_roots(tp)
+    wsl_roots = wsl_claude_roots(wsl.claude_homes(), claude_roots)
+    claude_roots = claude_roots + [root for _label, root in wsl_roots]
 
     results = []
     metrics: dict = {}
@@ -1347,6 +1404,7 @@ def main():
         metrics=metrics,
         parse_problems=parse_problems,
         codex_stats=codex_stats,
+        wsl_roots=wsl_roots,
     )
     finish_collector(envelope, evidence_root, dry_run=args.dry_run)
 

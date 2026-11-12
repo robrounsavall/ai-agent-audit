@@ -479,6 +479,52 @@ class AccessMapFixtureTests(unittest.TestCase):
         for column in ("files", "secrets", "git"):
             self.assertEqual(cells[column]["value"], "unknown", column)
 
+    def test_vscode_agent_host_signals(self) -> None:
+        grid = build_access_map(
+            {
+                "vscode": {
+                    "collector": "vscode",
+                    "version": "1.2.0",
+                    "platform_detected": True,
+                    "summary": {
+                        "tools_auto_approve": False,
+                        "workspace_mcp_servers": 0,
+                        "agent_host_config": True,
+                        "agent_host_allow_rules": 1,
+                        "agent_host_global_auto_approve": False,
+                        "agent_host_edit_auto_approve_all": True,
+                        "agent_host_edit_protected_patterns": 24,
+                        "agent_host_sandbox": "off",
+                        "agent_host_sandbox_git_auth": True,
+                        "agent_host_sandbox_gh_auth": True,
+                        "agent_host_github_mcp": True,
+                    },
+                    "findings": [{"id": "vscode.agent_host.sandbox_off", "severity": "medium"}],
+                    "rules": [
+                        {
+                            "platform": "vscode",
+                            "rule_type": "web_fetch",
+                            "rule": "WebFetch(docs.example.com)",
+                            "decision": "allow",
+                            "command_or_tool_redacted": "WebFetch",
+                        }
+                    ],
+                }
+            }
+        )
+        cells = grid["cells"]["vscode"]
+        self.assertEqual(cells["shell"]["value"], "partial")
+        self.assertIn("sandbox is off", cells["shell"]["reason"])
+        self.assertEqual(cells["files"]["value"], "yes")
+        self.assertIn("24 protected", cells["files"]["reason"])
+        self.assertEqual(cells["network"]["value"], "yes")
+        self.assertIn("WebFetch", cells["network"]["reason"])
+        self.assertIn("GitHub MCP", cells["network"]["reason"])
+        self.assertEqual(cells["git"]["value"], "partial")
+        self.assertIn("git and gh", cells["git"]["reason"])
+        self.assertEqual(cells["approval"]["value"], "partial")
+        self.assertEqual(cells["secrets"]["value"], "unknown")
+
     def test_vscode_agent_mode_without_auto_approve(self) -> None:
         grid = build_access_map(
             {

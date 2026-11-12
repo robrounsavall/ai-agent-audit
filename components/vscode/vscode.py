@@ -23,14 +23,17 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sqlite3
 import sys
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 
 from common import (
     APPDATA,
     USERPROFILE,
     add_base_args,
+    classify_rule,
     compute_scope_hash,
     finish_collector,
     make_envelope,
@@ -44,7 +47,7 @@ import paths as toolpaths
 
 # Envelope schema major stays 1 (briefing validates major == 1); this collector
 # supersedes copilot.py 1.0.0.
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "vscode"
 JETBRAINS_ROOT = APPDATA / "JetBrains"
@@ -399,6 +402,278 @@ def parse_vscode_settings(
 
 
 # --------------------------------------------------------------------------- #
+# Agent host (globalStorage/agent-host-config.json + agent-host.db)
+# --------------------------------------------------------------------------- #
+AGENT_HOST_CONFIG = "agent-host-config.json"
+AGENT_HOST_DB = "agent-host.db"
+_SAFE_TOKEN_RE = re.compile(r"^[a-z0-9_.-]{1,32}$")
+_SANDBOX_OFF_VALUES = {"off", "false", "disabled", "none", "0"}
+
+
+def _safe_token(value: object) -> str:
+    text = str(value or "").strip().lower()
+    return text if _SAFE_TOKEN_RE.match(text) else ""
+
+
+def parse_agent_host_config(data: dict) -> tuple[list[dict], list[dict], dict]:
+    """Parse VS Code's agent-host config (the Agents window / Copilot CLI host).
+
+    Returns (rules, findings, summary). Summary keys are prefixed agent_host_.
+    Trusted folder paths, shell paths and free-text instructions are counted,
+    never copied.
+    """
+    rules: list[dict] = []
+    findings: list[dict] = []
+    summary: dict = {"agent_host_config": True}
+    label = "vscode-agent-host"
+
+    perms = data.get("permissions") if isinstance(data.get("permissions"), dict) else {}
+    counts = {}
+    for decision in ("allow", "ask", "deny"):
+        entries = perms.get(decision) if isinstance(perms.get(decision), list) else []
+        counts[decision] = 0
+        for entry in entries:
+            if not isinstance(entry, str) or not entry.strip():
+                continue
+            counts[decision] += 1
+            rule_type, tool, _inner = classify_rule(entry)
+            rules.append(
+                make_rule(
+                    "vscode",
+                    "user",
+                    label,
+                    rule_type,
+                    entry,
+                    decision,
+                    command_or_tool=tool,
+                    source_kind="user_config",
+                    settings_source=AGENT_HOST_CONFIG,
+                    confidence="high",
+                )
+            )
+    summary["agent_host_allow_rules"] = counts["allow"]
+    summary["agent_host_ask_rules"] = counts["ask"]
+    summary["agent_host_deny_rules"] = counts["deny"]
+    if counts["allow"]:
+        findings.append(
+            make_finding(
+                "vscode.agent_host.allow_rules",
+                "low",
+                "General Tooling",
+                "VS Code agent host has standing allow rules",
+                evidence_count=counts["allow"],
+                tags=["agent_autonomy"],
+            )
+        )
+
+    def flag(key: str) -> bool | None:
+        return _as_bool(data.get(key))
+
+    global_auto = flag("globalAutoApproveEnabled")
+    terminal_auto = flag("terminalAutoApproveEnabled")
+    summary["agent_host_global_auto_approve"] = global_auto if global_auto is not None else "unset"
+    summary["agent_host_terminal_auto_approve_rules"] = (
+        terminal_auto if terminal_auto is not None else "unset"
+    )
+    if global_auto:
+        findings.append(
+            make_finding(
+                "vscode.agent_host.global_auto_approve",
+                "high",
+                "Shell Execution",
+                "VS Code agent host auto-approves every tool call",
+                tags=["agent_autonomy", "approval_bypass"],
+            )
+        )
+
+    edit_patterns = data.get("editAutoApprovePatterns")
+    edit_all = False
+    protected = 0
+    if isinstance(edit_patterns, dict):
+        edit_all = _as_bool(edit_patterns.get("**/*")) is True
+        protected = sum(1 for k, v in edit_patterns.items() if k != "**/*" and _as_bool(v) is False)
+    summary["agent_host_edit_auto_approve_all"] = edit_all
+    summary["agent_host_edit_protected_patterns"] = protected
+    if edit_all:
+        findings.append(
+            make_finding(
+                "vscode.agent_host.edit_auto_approve",
+                "low",
+                "Data Access",
+                "VS Code agent file edits are auto-approved outside protected paths",
+                evidence_count=protected or 1,
+                sample_redacted=f"**/* auto-approved; {protected} protected pattern(s)",
+                tags=["agent_autonomy"],
+            )
+        )
+
+    sandbox = data.get("sandbox") if isinstance(data.get("sandbox"), dict) else {}
+    mode = str(sandbox.get("enabled", "")).strip().lower() if sandbox else ""
+    if isinstance(sandbox.get("enabled"), bool):
+        mode = "on" if sandbox["enabled"] else "off"
+    summary["agent_host_sandbox"] = _safe_token(mode) or ("unset" if not mode else "other")
+    sandbox_off = mode in _SANDBOX_OFF_VALUES
+    for key, out in (
+        ("allowNetwork", "agent_host_sandbox_allow_network"),
+        ("allowUnsandboxedCommands", "agent_host_sandbox_allow_unsandboxed"),
+        ("authenticateGit", "agent_host_sandbox_git_auth"),
+        ("authenticateGh", "agent_host_sandbox_gh_auth"),
+    ):
+        val = _as_bool(sandbox.get(key))
+        summary[out] = val if val is not None else "unset"
+    if sandbox_off:
+        findings.append(
+            make_finding(
+                "vscode.agent_host.sandbox_off",
+                "medium",
+                "Shell Execution",
+                "VS Code agent terminal sandbox is off; commands run with your full user rights",
+                sample_redacted="sandbox=disabled",
+                tags=["agent_autonomy"],
+            )
+        )
+    elif _as_bool(sandbox.get("allowUnsandboxedCommands")):
+        findings.append(
+            make_finding(
+                "vscode.agent_host.unsandboxed_commands",
+                "medium",
+                "Shell Execution",
+                "VS Code agent sandbox lets commands escape to unsandboxed execution",
+                tags=["agent_autonomy"],
+            )
+        )
+
+    for key, out in (
+        ("computerUseEnabled", "agent_host_computer_use"),
+        ("codexAgentEnabled", "agent_host_codex_agent"),
+        ("githubMcpServerEnabled", "agent_host_github_mcp"),
+        ("mcpConnectorsEnabled", "agent_host_mcp_connectors"),
+        ("byokModelsEnabled", "agent_host_byok_models"),
+        ("imageGeneration", "agent_host_image_generation"),
+    ):
+        val = flag(key)
+        summary[out] = val if val is not None else "unset"
+    if summary["agent_host_computer_use"] is True:
+        findings.append(
+            make_finding(
+                "vscode.agent_host.computer_use",
+                "medium",
+                "General Tooling",
+                "VS Code agents may control the desktop (computer use enabled)",
+                tags=["agent_autonomy"],
+            )
+        )
+    if summary["agent_host_github_mcp"] is True or summary["agent_host_mcp_connectors"] is True:
+        bits = [
+            name
+            for name, on in (
+                ("GitHub MCP server", summary["agent_host_github_mcp"] is True),
+                ("MCP connectors", summary["agent_host_mcp_connectors"] is True),
+            )
+            if on
+        ]
+        findings.append(
+            make_finding(
+                "vscode.agent_host.remote_mcp",
+                "low",
+                "MCP Tooling",
+                "VS Code agents can call hosted MCP services",
+                evidence_count=len(bits),
+                sample_redacted=", ".join(bits),
+                tags=["mcp_external"],
+            )
+        )
+
+    merge = data.get("agentMerge") if isinstance(data.get("agentMerge"), dict) else {}
+    merge_on = _as_bool(merge.get("enabled")) is True
+    summary["agent_host_agent_merge"] = merge_on
+    if merge_on:
+        findings.append(
+            make_finding(
+                "vscode.agent_host.agent_merge",
+                "medium",
+                "General Tooling",
+                "VS Code agents may push fixes and merge pull requests",
+                sample_redacted=_safe_token(merge.get("mergePullRequest")) or "enabled",
+                tags=["agent_autonomy"],
+            )
+        )
+
+    trust = data.get("workspaceTrust") if isinstance(data.get("workspaceTrust"), dict) else {}
+    trust_on = _as_bool(trust.get("enabled"))
+    uris = trust.get("trustedUris")
+    summary["agent_host_workspace_trust"] = trust_on if trust_on is not None else "unset"
+    summary["agent_host_trusted_folders"] = len(uris) if isinstance(uris, list) else 0
+    if trust_on is False:
+        findings.append(
+            make_finding(
+                "vscode.workspace_trust.disabled",
+                "medium",
+                "General Tooling",
+                "VS Code agent host workspace trust is disabled",
+                tags=["agent_autonomy"],
+            )
+        )
+
+    telemetry = _safe_token(data.get("telemetryLevel"))
+    if telemetry:
+        summary["agent_host_telemetry"] = telemetry
+    return rules, findings, summary
+
+
+def _epoch_ms_to_date(value: object) -> str:
+    if not isinstance(value, (int, float)) or value <= 0:
+        return ""
+    try:
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).date().isoformat()
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def inventory_agent_host_sessions(db_path: Path) -> dict:
+    """Session metadata from agent-host.db: counts per provider, chat count,
+    deleted (tombstoned) sessions, newest activity date. No titles, paths or
+    payloads are read."""
+    out: dict = {}
+    if not db_path.is_file():
+        return out
+    uri = "file:" + db_path.resolve().as_posix() + "?mode=ro"
+    try:
+        con = sqlite3.connect(uri, uri=True, timeout=2)
+    except (sqlite3.Error, OSError, ValueError):
+        return {"agent_host_db_error": True}
+    try:
+        tables = {r[0] for r in con.execute("select name from sqlite_master where type='table'")}
+        providers: dict[str, int] = {}
+        newest = 0
+        if "sessions" in tables:
+            for provider, start, modified in con.execute(
+                "select provider, start_time, modified_time from sessions"
+            ):
+                name = _safe_token(provider) or "other"
+                providers[name] = providers.get(name, 0) + 1
+                for ts in (start, modified):
+                    if isinstance(ts, (int, float)) and ts > newest:
+                        newest = ts
+        out["agent_host_sessions"] = sum(providers.values())
+        out["agent_host_providers"] = providers
+        if "chats_v2" in tables:
+            out["agent_host_chats"] = con.execute("select count(*) from chats_v2").fetchone()[0]
+        if "metadata" in tables:
+            out["agent_host_deleted_sessions"] = con.execute(
+                "select count(*) from metadata where key like 'sessionTombstone:%'"
+            ).fetchone()[0]
+        date = _epoch_ms_to_date(newest)
+        if date:
+            out["agent_host_last_activity"] = date
+    except sqlite3.Error:
+        out["agent_host_db_error"] = True
+    finally:
+        con.close()
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # AI extension inventory
 # --------------------------------------------------------------------------- #
 def inventory_extensions(ext_dir: Path, global_storage: Path) -> tuple[list[dict], dict]:
@@ -499,24 +774,46 @@ def _harvest_requests(reqs: list, out: dict) -> None:
             out["modes"].add(str(mode))
 
 
-def inventory_chat_sessions(workspace_storage: Path) -> tuple[list[dict], dict, list[str]]:
-    """Walk workspaceStorage/*/chatSessions/*.jsonl. Returns (findings, summary,
+def inventory_chat_sessions(
+    workspace_storage: Path, global_storage: Path | None = None
+) -> tuple[list[dict], dict, list[str]]:
+    """Walk workspaceStorage/*/chatSessions/*.jsonl plus the no-folder
+    globalStorage/emptyWindowChatSessions/*.jsonl. Returns (findings, summary,
     scanned_paths). Workspace identity is hashed, prompt text never read into
     the envelope."""
     findings: list[dict] = []
     scanned: list[str] = []
     sessions = 0
+    empty_window = 0
     workspaces: set[str] = set()
     requests_total = 0
     modes: dict[str, int] = {}
     models: set[str] = set()
     levels: dict[str, int] = {}
+    newest_mtime = 0.0
 
+    files: list[tuple[Path, str | None]] = []
     if workspace_storage.exists():
-        for session_file in workspace_storage.glob("*/chatSessions/*.jsonl"):
+        files.extend(
+            (f, f.parent.parent.name) for f in workspace_storage.glob("*/chatSessions/*.jsonl")
+        )
+    if global_storage is not None and (global_storage / "emptyWindowChatSessions").is_dir():
+        files.extend(
+            (f, None) for f in (global_storage / "emptyWindowChatSessions").glob("*.jsonl")
+        )
+
+    if files:
+        for session_file, workspace_id in files:
             scanned.append(str(session_file))
             sessions += 1
-            workspaces.add(sha256_short(session_file.parent.parent.name))
+            if workspace_id is None:
+                empty_window += 1
+            else:
+                workspaces.add(sha256_short(workspace_id))
+            try:
+                newest_mtime = max(newest_mtime, session_file.stat().st_mtime)
+            except OSError:
+                pass
             try:
                 lines = session_file.read_text(encoding="utf-8", errors="replace").splitlines()
             except OSError:
@@ -545,12 +842,17 @@ def inventory_chat_sessions(workspace_storage: Path) -> tuple[list[dict], dict, 
 
     summary = {
         "chat_sessions": sessions,
+        "chat_empty_window_sessions": empty_window,
         "chat_workspaces": len(workspaces),
         "chat_requests": requests_total,
         "chat_modes": modes,
         "chat_models": sorted(models),
         "chat_permission_levels": levels,
     }
+    if newest_mtime:
+        summary["chat_last_activity"] = (
+            datetime.fromtimestamp(newest_mtime, tz=timezone.utc).date().isoformat()
+        )
     return findings, summary, scanned
 
 
@@ -786,11 +1088,49 @@ def collect(p: toolpaths.ToolPaths, repo_roots: list[Path]) -> dict:
             scanned.append(str(EXTENSIONS_DIR))
 
         chat_findings, chat_summary, chat_scanned = inventory_chat_sessions(
-            p.vscode_workspace_storage
+            p.vscode_workspace_storage, p.vscode_global_storage
         )
         all_findings.extend(chat_findings)
         summary.update(chat_summary)
         scanned.extend(chat_scanned)
+
+        host_cfg = p.vscode_global_storage / AGENT_HOST_CONFIG
+        if host_cfg.is_file():
+            scanned.append(str(host_cfg))
+            data, err = read_json_object(host_cfg)
+            if err or data is None:
+                all_findings.append(
+                    make_finding(
+                        "vscode.config.parse_error",
+                        "low",
+                        "General Tooling",
+                        "VS Code agent-host-config.json is present but could not be parsed",
+                        sample_redacted=err or "unreadable",
+                        tags=["config_parse_error"],
+                    )
+                )
+            else:
+                host_rules, host_findings, host_summary = parse_agent_host_config(data)
+                all_rules.extend(host_rules)
+                all_findings.extend(host_findings)
+                summary.update(host_summary)
+                # One switch for the access map: either surface auto-approving
+                # every tool call means shell runs without a prompt.
+                if host_summary.get("agent_host_global_auto_approve") is True:
+                    summary["tools_auto_approve"] = True
+        else:
+            summary["agent_host_config"] = False
+        host_db = p.vscode_global_storage / AGENT_HOST_DB
+        if host_db.is_file():
+            scanned.append(str(host_db))
+            summary.update(inventory_agent_host_sessions(host_db))
+
+        last = max(
+            str(summary.get("chat_last_activity") or ""),
+            str(summary.get("agent_host_last_activity") or ""),
+        )
+        if last:
+            summary["last_activity"] = last
 
         ws_rules, ws_findings, ws_summary, ws_scanned = scan_workspace_repos(repo_roots)
         all_rules.extend(ws_rules)
