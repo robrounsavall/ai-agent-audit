@@ -133,6 +133,43 @@ class TestDuplicateTitles(unittest.TestCase):
             _git(repo, "commit", "-m", "add env local")
             self.assertTrue(gp.check_env_in_history(repo))
 
+    def test_env_history_names_the_path_commit_and_tracking_state(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d) / "app"
+            _commit_repo(repo, ".env")
+            (repo / "config").mkdir()
+            (repo / "config" / ".env.local").write_text("B=2\n", encoding="utf-8")
+            (repo / ".env.example").write_text("A=\n", encoding="utf-8")
+            _git(repo, "add", "-f", "--", "config/.env.local", ".env.example")
+            _git(repo, "commit", "-m", "add local env")
+            _git(repo, "rm", "--cached", "--", ".env")
+            _git(repo, "commit", "-m", "untrack env")
+
+            rows = {row["path"]: row for row in gp.env_history_entries(repo)}
+            self.assertEqual(set(rows), {".env", "config/.env.local"})
+            self.assertEqual(rows[".env"]["note"], "removed from HEAD, still in history")
+            self.assertEqual(rows["config/.env.local"]["note"], "still tracked at HEAD")
+            for row in rows.values():
+                self.assertRegex(row["commit"], r"^[0-9a-f]{7,40}$")
+                self.assertRegex(row["date"], r"^\d{4}-\d{2}-\d{2}$")
+            self.assertNotEqual(rows[".env"]["commit"], rows["config/.env.local"]["commit"])
+
+            locations: list[dict] = []
+            env = gp.collect([Path(d)], False, locations)
+            found = [row for row in locations if row["finding"] == "git.env.in_history"]
+            self.assertEqual({row["path"] for row in found}, {".env", "config/.env.local"})
+            self.assertTrue(all(row["repo"] == str(repo) for row in found))
+            finding = next(f for f in env["findings"] if f["id"] == "git.env.in_history")
+            self.assertEqual(finding["raw_evidence_ref"], "raw/git-posture/locations.csv")
+            # The envelope still carries the repo label only, never the path list.
+            self.assertNotIn("config/.env.local", str(env))
+
+            gp.write_locations(Path(d) / "raw", locations)
+            text = (Path(d) / "raw" / "locations.csv").read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("finding,repo,path,commit,date,note"))
+            gp.write_locations(Path(d) / "raw", [])
+            self.assertFalse((Path(d) / "raw" / "locations.csv").exists())
+
     def test_same_check_is_one_finding_per_title(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

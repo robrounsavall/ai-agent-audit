@@ -32,10 +32,11 @@ from common import (
     make_finding,
     make_rule,
     redact_scope_label,
+    resolve_raw_root,
     validate_evidence_root,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 COLLECTOR = "git-posture"
 LARGE_BLOB_BYTES = 10 * 1024 * 1024
@@ -211,6 +212,66 @@ def check_gitignore(repo: Path) -> tuple[bool, list[str]]:
     return len(missing) == 0, missing
 
 
+LOCATIONS_REF = "raw/git-posture/locations.csv"
+
+
+def env_history_entries(repo: Path) -> list[dict]:
+    """Each committed .env path with the commit that added it.
+
+    One row per path: the oldest commit that added it, that commit's date,
+    and whether the file is still tracked at HEAD. Paths and commit ids only;
+    file contents are never read.
+    """
+    result = run_git(
+        repo,
+        "log", "--all", "--diff-filter=A", "--name-only", "--date=short",
+        "--pretty=format:%x01%h%x09%ad",
+    )
+    if not result or result.returncode != 0:
+        return []
+    found: dict[str, dict] = {}
+    commit = date = ""
+    for line in result.stdout.splitlines():
+        if line.startswith("\x01"):
+            commit, _, date = line[1:].partition("\t")
+            continue
+        if _is_env_history_path(line):
+            path = line.strip()
+            # git log is newest first, so the last one seen is the oldest add.
+            found[path] = {"path": path, "commit": commit.strip(), "date": date.strip()}
+    if not found:
+        return []
+    tracked: set[str] = set()
+    listing = run_git(repo, "ls-files", "--", *found)
+    if listing and listing.returncode == 0:
+        tracked = {line.strip() for line in listing.stdout.splitlines() if line.strip()}
+    rows = []
+    for path in sorted(found):
+        row = found[path]
+        row["note"] = "still tracked at HEAD" if path in tracked else "removed from HEAD, still in history"
+        rows.append(row)
+    return rows
+
+
+LOCATION_COLUMNS = ["finding", "repo", "path", "commit", "date", "note"]
+
+
+def write_locations(raw_dir: Path, rows: list[dict]) -> None:
+    """Write raw/git-posture/locations.csv: which repo and path each finding means."""
+    import csv
+
+    target = Path(raw_dir) / "locations.csv"
+    if not rows:
+        target.unlink(missing_ok=True)
+        return
+    Path(raw_dir).mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(LOCATION_COLUMNS)
+        for row in rows:
+            writer.writerow([row.get(col, "") for col in LOCATION_COLUMNS])
+
+
 def check_large_blobs(repo: Path) -> list[tuple[str, int]]:
     large: list[tuple[str, int]] = []
     rev = run_git(repo, "rev-list", "--objects", "--all")
@@ -299,7 +360,12 @@ def _sample_list(labels: list[str], limit: int = 5) -> str:
     return text
 
 
-def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
+def collect(
+    repo_roots: list[Path], allow_gh: bool, locations: list[dict] | None = None
+) -> dict:
+    """Build the envelope. ``locations`` collects one row per affected repo
+    or path for raw/git-posture/locations.csv when the caller passes a list."""
+    where = locations if locations is not None else []
     repos = find_git_repos(repo_roots)
     scope_hash = compute_scope_hash(str(r.resolve()) for r in repos)
     platform_detected = bool(repos)
@@ -383,13 +449,28 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
         if env_in_history:
             env_hits += 1
             env_samples.append(repo_sample)
+            entries = env_history_entries(repo) or [{"path": "", "commit": "", "date": "", "note": ""}]
+            for entry in entries:
+                where.append({"finding": "git.env.in_history", "repo": str(repo), **entry})
         if not has_hooks:
             no_hooks += 1
             hook_samples.append(repo_sample)
+            where.append({
+                "finding": "git.hooks.missing", "repo": str(repo),
+                "path": ".git/hooks/pre-commit", "note": "no pre-commit hook or config",
+            })
         if allow_gh and protection is False:
             no_protection += 1
             protection_samples.append(repo_sample)
+            where.append({
+                "finding": "git.branch.no_protection", "repo": str(repo),
+                "note": "default branch has no protection rule",
+            })
         for blob_name, size in large_blobs:
+            where.append({
+                "finding": "git.blob.large", "repo": str(repo), "path": blob_name,
+                "note": f"{size // (1024 * 1024)}MB",
+            })
             large_blob_count += 1
             if size > largest_blob:
                 largest_blob = size
@@ -400,6 +481,8 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
     # One finding per check. Repeating the same title once per repo made the
     # severity counts and the top of the report list the same issue many times.
     findings: list[dict] = []
+    # Set only when the caller is collecting rows for locations.csv.
+    ref = LOCATIONS_REF if locations is not None else None
     if env_hits:
         findings.append(
             make_finding(
@@ -410,6 +493,7 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
                 evidence_count=env_hits,
                 sample_redacted=_sample_list(env_samples),
                 tags=["env_read"],
+                raw_evidence_ref=ref,
             )
         )
     if no_hooks:
@@ -422,6 +506,7 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
                 evidence_count=no_hooks,
                 sample_redacted=_sample_list(hook_samples),
                 tags=["pre_commit_missing"],
+                raw_evidence_ref=ref,
             )
         )
     if no_protection:
@@ -434,6 +519,7 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
                 evidence_count=no_protection,
                 sample_redacted=_sample_list(protection_samples),
                 tags=["gh_token_present"],
+                raw_evidence_ref=ref,
             )
         )
     if large_blob_count:
@@ -450,6 +536,7 @@ def collect(repo_roots: list[Path], allow_gh: bool) -> dict:
                 evidence_count=large_blob_count,
                 sample_redacted=_sample_list(blob_samples),
                 tags=["history_retention"],
+                raw_evidence_ref=ref,
             )
         )
 
@@ -503,7 +590,10 @@ def main() -> None:
     else:
         repo_roots = default_repo_roots()
 
-    envelope = collect(repo_roots, args.allow_gh)
+    locations: list[dict] = []
+    envelope = collect(repo_roots, args.allow_gh, locations)
+    if not args.dry_run:
+        write_locations(resolve_raw_root(evidence_root, args.raw_root) / "git-posture", locations)
     if not envelope["platform_detected"]:
         finish_collector(envelope, evidence_root, dry_run=args.dry_run)
         sys.exit(2)

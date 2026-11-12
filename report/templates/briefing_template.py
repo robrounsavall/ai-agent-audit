@@ -493,6 +493,98 @@ tr.fdetail td { background: color-mix(in srgb, var(--accent) 8%, var(--bg-card))
 }
 .report-summary .meta-list { margin-bottom: 36px; }
 .page-panel .section { padding-top: 28px; padding-bottom: 40px; }
+
+/* Finding detail: what to do, then every place the value was found. */
+.ev-card .ev-sec { margin-top: 14px; }
+.ev-card .fix { margin-top: 4px; }
+.fix-risk { margin: 0 0 12px; max-width: 100ch; color: var(--fg); font-size: 1.05em; line-height: 1.55; }
+.fix-steps { margin: 0; padding-left: 22px; max-width: 100ch; color: var(--fg); line-height: 1.55; }
+.fix-steps li { margin: 4px 0; padding-left: 2px; }
+.fix-steps li::marker { color: var(--accent); font-weight: 600; }
+.fix-links { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 14px; }
+.fix-links a, .editor-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.hit-summary { margin: 0 0 6px; color: var(--fg-2); }
+.hit-masked-note { margin: 0 0 8px; color: var(--fg-3); }
+.hit-tools { margin: 0 0 8px; }
+.hit-filter {
+  width: min(420px, 100%);
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+}
+.hit-group { border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; background: var(--bg-card); }
+.hit-group[open] { border-color: var(--line-2); }
+.hit-group > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.hit-group > summary::-webkit-details-marker { display: none; }
+.hit-group > summary .chevron { margin-top: 0; align-self: center; }
+.hit-group[open] > summary .chevron { transform: rotate(45deg); }
+.hit-group > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hit-group--unlikely > summary { opacity: .72; }
+.hit-num { color: var(--fg-4); font-family: var(--f-mono); font-variant-numeric: tabular-nums; min-width: 2.2em; }
+.hit-type { font-weight: 600; color: var(--fg); }
+.hit-secret {
+  font-family: var(--f-mono);
+  color: var(--yellow);
+  background: rgba(251,191,36,.10);
+  border-radius: 3px;
+  padding: 0 4px;
+  overflow-wrap: anywhere;
+}
+.hit-count { margin-left: auto; color: var(--fg-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hit-novalue { color: var(--fg-3); font-style: italic; }
+.hit-body { padding: 2px 12px 10px; border-top: 1px solid var(--line); }
+.hit-actions { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; margin: 8px 0 2px; }
+.hit-note { margin: 0; color: var(--fg-2); max-width: 86ch; }
+.hit-list { margin: 6px 0 0; padding-left: 26px; }
+.hit-list > li.hit { margin: 0; padding: 8px 0; border-top: 1px dashed var(--line); }
+.hit-list > li.hit:first-child { border-top: 0; }
+.hit-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.hit-tool { font-weight: 600; color: var(--fg); }
+.hit-kind { color: var(--fg-3); }
+.hit-where { margin-top: 3px; overflow-wrap: anywhere; }
+.hit-label { color: var(--fg-3); margin-right: 4px; }
+.hit-label::after { content: ":"; }
+.hit-where .ev-path { color: var(--fg); }
+.editor-link { font-size: .85em; margin-left: 6px; white-space: nowrap; }
+.hit-ctx {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font: 12.5px/1.5 var(--f-mono);
+  color: var(--fg-2);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hit-ctx mark.hit-secret { color: #3b2a00; background: #ffd666; padding: 0 2px; }
+.repo-paths { margin: 4px 0 0; padding-left: 18px; color: var(--fg-2); }
+.repo-paths li { margin: 2px 0; }
+table.rule-mini { width: 100%; border-collapse: collapse; font-size: .95em; }
+table.rule-mini th, table.rule-mini td { text-align: left; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+table.rule-mini th { color: var(--fg-3); font-weight: 600; }
+.secrets-banner { background: #5b1010; color: #ffe1e1; border-bottom-color: #a33; display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: center; align-items: center; }
+.toggle-values {
+  font: 600 13px/1.2 var(--f-sans);
+  color: #ffe1e1;
+  background: transparent;
+  border: 1px solid rgba(255,225,225,.6);
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+body.values-hidden .hit-secret { filter: blur(6px); user-select: none; }
 @media print {
   .page-tablist { display: none !important; }
   .page-panel[hidden] { display: block !important; }
@@ -807,8 +899,9 @@ REPORT_V2_JS = """
     return false;
   }
   function flash(btn) {
+    var label = btn.getAttribute("data-label") || "Copy path";
     btn.textContent = "Copied";
-    setTimeout(function () { btn.textContent = "Copy path"; }, 1500);
+    setTimeout(function () { btn.textContent = label; }, 1500);
   }
   document.addEventListener("click", function (ev) {
     var target = ev.target;
@@ -824,6 +917,35 @@ REPORT_V2_JS = """
     } else if (fallbackCopy(path, btn)) {
       flash(btn);
     }
+  });
+})();
+(function () {
+  // Filter the locations inside one finding. A value group stays when its own
+  // label matches or any of its locations does.
+  document.addEventListener("input", function (ev) {
+    var box = ev.target;
+    if (!box.classList || !box.classList.contains("hit-filter")) return;
+    var q = (box.value || "").toLowerCase().trim();
+    var scope = box.closest(".hits");
+    if (!scope) return;
+    scope.querySelectorAll(".hit-group").forEach(function (group) {
+      var own = (group.getAttribute("data-text") || "").indexOf(q) !== -1;
+      var any = false;
+      group.querySelectorAll("li.hit").forEach(function (li) {
+        var ok = !q || own || (li.getAttribute("data-text") || "").indexOf(q) !== -1;
+        li.hidden = !ok;
+        if (ok) any = true;
+      });
+      group.hidden = !!q && !any;
+      if (q && any) group.open = true;
+    });
+  });
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target.closest ? ev.target.closest(".toggle-values") : null;
+    if (!btn) return;
+    var hidden = document.body.classList.toggle("values-hidden");
+    btn.setAttribute("aria-pressed", hidden ? "true" : "false");
+    btn.textContent = hidden ? "Show values" : "Hide values";
   });
 })();
 """

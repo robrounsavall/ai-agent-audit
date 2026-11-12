@@ -47,6 +47,12 @@ a secret, path, or email that survives in a `push` bundle.
   machine. The `evidence/` layer carries counts, hashes, and samples. Samples
   and rule text are masked only when `-Redact` is set. `-Redact` does not
   clean `raw/`. See [SCHEMA.md](SCHEMA.md).
+- The briefing masks matched values and hides local paths unless you ask
+  otherwise. `-LocalLinks` adds full paths. `-ShowSecrets` adds the matched
+  values and the text around them and writes `briefing-unmasked.html`. That
+  file holds live credentials. It is opt-in, it is never the default, and
+  `-Redact` and `-AgentMode` both turn it off. Per-hit rows (file, line,
+  column, value, surrounding text) are written only under `raw/`.
 - Redaction (`-Redact`) masks secret-shaped text, the running user's profile
   path and username, and other absolute paths in evidence samples and rules.
   It also hashes workspace labels. It does not rewrite `raw/`. Known limits

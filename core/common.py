@@ -172,6 +172,250 @@ def secret_types_in(text: str) -> list[str]:
     ]
 
 
+# Per-hit location of secret-shaped text. Used by the collectors that write
+# hit rows under raw/ so the briefing can show where each value sits.
+#
+# One span of text is reported once. The length-only matchers overlap the
+# vendor ones (the tail of a ghp_ token is also a 32+ character run) and each
+# other (every hex run is also a base64 run), so the specific pattern wins and
+# hex is tried before generic.
+_HIT_PRIORITY = {"hex_secret": 1, "generic_secret": 2}
+HIT_CONTEXT_CHARS = 80
+
+
+# A base64 image or a minified bundle is one unbroken run of thousands of
+# characters. That is a blob, not a credential, so the length-only matchers
+# skip a run longer than this when listing hits.
+HIT_MAX_UNSTRUCTURED_LEN = 512
+
+
+# --------------------------------------------------------------------------- #
+# Noise filter for listed hits
+#
+# mask_secrets() deliberately over-matches: masking a harmless string costs
+# nothing. A list of hits is the opposite. Every row is something a person
+# has to read, so a row that is plainly not a credential is dropped here.
+# These checks apply to secret_spans() only. Masking is unchanged.
+# --------------------------------------------------------------------------- #
+_PLACEHOLDER_WORDS = frozenset({
+    "password", "passwd", "pass", "pwd", "secret", "changeme", "change_me",
+    "example", "test", "testing", "none", "null", "nil", "undefined", "true",
+    "false", "xxx", "xxxx", "xxxxx", "redacted", "hidden", "token", "string",
+    "value", "placeholder", "dummy", "sample", "foo", "bar", "your_password",
+    "yourpassword", "your_token", "yourtoken", "your_key", "api_key", "apikey",
+    "user", "username", "admin", "root", "postgres", "empty", "todo",
+})
+_PLACEHOLDER_SYNTAX_RE = re.compile(r"[$<>{}\[\]%*]|\.\.\.|^x{3,}$|^\*+$", re.I)
+_LOCAL_HOST_RE = re.compile(r"^(?:localhost|127\.0\.0\.1|\[?::1\]?|0\.0\.0\.0|host\.docker\.internal)(?![A-Za-z0-9.-])", re.I)
+
+# Object ids that vendors write as <prefix>_<hex>: OpenAI response items,
+# Anthropic tool calls, and the like. They identify a message. They do not
+# authenticate anything.
+_ID_PREFIX_RE = re.compile(
+    r"(?:^|[^A-Za-z0-9])(?:rs|fc|msg|ws|ctc|resp|call|item|run|thread|toolu|srvtoolu|"
+    r"req|chatcmpl|cmpl|file|asst|step|evt|sess|conv|turn|exec|av_agt|ig|mcp|rev|"
+    r"batch|task|span|trace)_$",
+    re.I,
+)
+# A JSON key or variable name just before the value that says what it is.
+_BENIGN_KEY_RE = re.compile(
+    r"(?:encrypted_content|encrypted|signature|sig|thinking|hash|shapehash|digest|"
+    r"requestdigest|checksum|integrity|etag|md5|sha\d*|commit|commit_hash|commitid|"
+    r"commit_id|revision|rev|tree|parent|blob|oid|object|trace_id|traceid|span_id|"
+    r"spanid|request_id|requestid|uuid|guid|fingerprint|thumbprint|nonce|tail|"
+    r"cursor|image|data|base64|content|uri|url|href|src|path|filename|file)"
+    r"[\"'\\]*\s*[:=]\s*[\[\(]?\s*(?:[A-Za-z0-9+/=_-]{0,80}[\"'\\,\s]+){0,3}[\"'\\]*$",
+    re.I,
+)
+_HEX_COMMON_HASH_CONTEXT_RE = re.compile(
+    # No leading \b on commit/hash/digest: in a JSON-escaped log the word
+    # follows a literal "\n", which reads as the letter n glued to it.
+    r"(?:commit\b|\bsha\b|hash\b|digest\b|\bgit\b|\bblob\b|\btree\b|\bmerge\b|"
+    r"\bcherry-pick\b|\brevert\b|\bcheckout\b|\bHEAD\b|[0-9a-f]{7,40}\.\.)[^\n]{0,40}$",
+    re.I,
+)
+
+
+def shannon_entropy(value: str) -> float:
+    """Bits per character. Random base64 is near 5, prose and paths near 4."""
+    if not value:
+        return 0.0
+    import math
+    from collections import Counter as _Counter
+
+    total = len(value)
+    return -sum((n / total) * math.log2(n / total) for n in _Counter(value).values())
+
+
+def _credential_like(token: str) -> bool:
+    """True when a token could be a real credential and not a word or a slot."""
+    token = token.strip("\"'`,;)(\\")
+    if len(token) < 12 or _PLACEHOLDER_SYNTAX_RE.search(token):
+        return False
+    if token.lower() in _PLACEHOLDER_WORDS:
+        return False
+    has_digit = any(c.isdigit() for c in token)
+    mixed_case = any(c.islower() for c in token) and any(c.isupper() for c in token)
+    return has_digit or (mixed_case and len(token) >= 20)
+
+
+def _placeholder_value(value: str) -> bool:
+    value = value.strip("\"'`,;)(\\")
+    return (
+        not value
+        or value.lower() in _PLACEHOLDER_WORDS
+        or bool(_PLACEHOLDER_SYNTAX_RE.search(value))
+    )
+
+
+def _path_like(value: str) -> bool:
+    """A/long/path/of/words, not a base64 string that happens to hold slashes."""
+    if value.count("/") < 2:
+        return False
+    segments = [seg for seg in value.split("/") if seg]
+    if not segments:
+        return True
+    wordy = sum(1 for seg in segments if len(seg) <= 24 and re.fullmatch(r"[A-Za-z][A-Za-z0-9]*\d{0,4}|\d{1,4}", seg))
+    return wordy >= max(2, (len(segments) * 2 + 2) // 3)
+
+
+def hit_is_noise(secret_type: str, text: str, start: int, end: int) -> bool:
+    """True when a match is plainly not a credential and should not be listed."""
+    value = text[start:end]
+    before = text[max(0, start - 96):start]
+    if secret_type == "authorization":
+        parts = value.split(":", 1)[1].split()
+        if not parts:
+            return True
+        scheme_only = len(parts) == 1 and parts[0].strip("\"'`,;\\").lower() in (
+            "bearer", "basic", "token", "digest", "negotiate", "apikey", "api-key",
+        )
+        return scheme_only or not _credential_like(parts[-1])
+    if secret_type == "bearer":
+        return not _credential_like(value.split(None, 1)[1] if " " in value or "\t" in value else "")
+    if secret_type == "password_assign":
+        return _placeholder_value(value.split("=", 1)[1])
+    if secret_type == "url_userinfo":
+        creds = value.split("://", 1)[1].rstrip("@")
+        user, sep, password = creds.partition(":")
+        if not sep or _placeholder_value(password) or _placeholder_value(user) and user.lower() not in ("user", "admin", "root", "postgres"):
+            return True
+        # user:user or postgres:postgres on this machine is a dev default.
+        return bool(_LOCAL_HOST_RE.match(text[end:end + 40])) and (
+            password.lower() == user.lower() or password.lower() in _PLACEHOLDER_WORDS
+        )
+    if secret_type == "hex_secret":
+        if _ID_PREFIX_RE.search(before) or _BENIGN_KEY_RE.search(before):
+            return True
+        if len(value) in (40, 64) and _HEX_COMMON_HASH_CONTEXT_RE.search(before):
+            return True
+        # 32 random hex characters use about 14 of the 16 digits. A run built
+        # from a handful is padding or a pattern, not a key.
+        if len(set(value.lower())) < 8:
+            return True
+        # A hex run glued to more identifier text is part of a longer id.
+        prev, nxt = text[start - 1:start], text[end:end + 1]
+        return prev in ("_", "-") or nxt in ("_", "-") or prev.isalnum() or nxt.isalnum()
+    if secret_type == "generic_secret":
+        if _path_like(value) or _BENIGN_KEY_RE.search(before) or _ID_PREFIX_RE.search(before):
+            return True
+        core = value.rstrip("=")
+        if len(set(core)) < 12 or shannon_entropy(core) < 4.0:
+            return True
+        # An alphabet written out for an encoder or a random-string helper.
+        if "abcdefghijklm" in core.lower() or "0123456789" in core:
+            return True
+        prev, nxt = text[start - 1:start], text[end:end + 1]
+        return prev in ("_", "-", ".", "%", "\\") or nxt in ("_", "-", ".", "%")
+    return False
+
+
+def secret_spans(text: str) -> list[tuple[str, int, int]]:
+    """Every listable secret match as (type, start, end), in text order.
+
+    Overlapping matches collapse to the most specific pattern, and a match
+    that hit_is_noise() rejects is left out. A rejected match still claims
+    its span, so a looser pattern cannot report the same text instead.
+    """
+    if not text:
+        return []
+    ordered = sorted(
+        SECRET_PATTERNS, key=lambda item: _HIT_PRIORITY.get(item[0], 0)
+    )
+    claimed: list[tuple[int, int]] = []
+    found: list[tuple[str, int, int]] = []
+    import bisect
+
+    for secret_type, pattern in ordered:
+        fresh: list[tuple[int, int]] = []
+        for match in pattern.finditer(text):
+            start, end = match.span()
+            if end <= start or not _is_plausible_secret(secret_type, match.group(0)):
+                continue
+            if secret_type in _HIT_PRIORITY and end - start > HIT_MAX_UNSTRUCTURED_LEN:
+                continue
+            pos = bisect.bisect_right(claimed, (start, end))
+            if pos and claimed[pos - 1][1] > start:
+                continue
+            if pos < len(claimed) and claimed[pos][0] < end:
+                continue
+            fresh.append((start, end))
+            if not hit_is_noise(secret_type, text, start, end):
+                found.append((secret_type, start, end))
+        if fresh:
+            claimed = sorted(claimed + fresh)
+    found.sort(key=lambda item: item[1])
+    return found
+
+
+class LineIndex:
+    """Map a character offset to a 1-based (line, column)."""
+
+    def __init__(self, text: str):
+        self._text = text
+        self._starts = [0]
+        find = text.find
+        pos = find("\n")
+        while pos != -1:
+            self._starts.append(pos + 1)
+            pos = find("\n", pos + 1)
+
+    def locate(self, offset: int) -> tuple[int, int]:
+        import bisect
+
+        line = bisect.bisect_right(self._starts, offset)
+        return line, offset - self._starts[line - 1] + 1
+
+    def line_bounds(self, offset: int) -> tuple[int, int]:
+        import bisect
+
+        line = bisect.bisect_right(self._starts, offset)
+        start = self._starts[line - 1]
+        end = self._starts[line] - 1 if line < len(self._starts) else len(self._text)
+        return start, end
+
+
+_CONTEXT_WS_RE = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def hit_context(
+    text: str,
+    start: int,
+    end: int,
+    index: LineIndex,
+    width: int = HIT_CONTEXT_CHARS,
+) -> tuple[str, str]:
+    """Text on the same line just before and just after a match.
+
+    A JSONL record can be megabytes on one line, so each side is cut to
+    ``width`` characters. Control characters become one space.
+    """
+    line_start, line_end = index.line_bounds(start)
+    before = text[max(line_start, start - width):start]
+    after = text[end:min(line_end, end + width)]
+    return _CONTEXT_WS_RE.sub(" ", before), _CONTEXT_WS_RE.sub(" ", after)
+
+
 # Generic absolute-path matcher. Unquoted segments exclude whitespace so the
 # match does not run past a path into surrounding prose. The running operator's
 # own profile (which may contain spaces, e.g. "Test User") is handled by

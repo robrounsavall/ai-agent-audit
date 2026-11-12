@@ -45,6 +45,8 @@ sys.path.insert(0, str(TEMPLATES_DIR))
 
 from access_map import build_access_map  # noqa: E402
 from briefing_template import REPORT_V2_CSS, REPORT_V2_JS  # noqa: E402
+import common as _common  # noqa: E402
+import finding_detail  # noqa: E402
 from common import (  # noqa: E402
     DERIVED_EVIDENCE_STEMS,
     SECRET_HIT_TITLE_RE as _SECRET_TITLE_RE,
@@ -1884,12 +1886,36 @@ _RULE_RE = re.compile(r"[A-Za-z0-9_.\- ]{1,80}")
 _EXTRA_KEY_RE = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
 
 
+def _scrub_user_slug(text: str) -> str:
+    """Replace the account name where a tool has folded it into a folder name.
+
+    redact_paths removes the profile path and the bare username. Claude Code
+    names a project folder after its path with every separator turned into a
+    dash (C--Users-Jane-Doe-code), and Grok percent-encodes it, so a username
+    with a space survives there in a different spelling.
+    """
+    name = _common.USERPROFILE.name
+    if len(name) < 3 or not re.search(r"[ ._-]", name):
+        return text
+    parts = [re.escape(part) for part in re.split(r"[ ._-]+", name) if part]
+    if len(parts) < 2:
+        return text
+    # In the percent-encoded form the name follows %5C or %2F, whose last
+    # character is a letter, so that case is allowed for explicitly.
+    pattern = (
+        r"(?:(?<![A-Za-z0-9])|(?<=%5C)|(?<=%2F))"
+        + r"(?:[ ._-]|%20)".join(parts)
+        + r"(?![A-Za-z0-9])"
+    )
+    return re.sub(pattern, "<user>", text, flags=re.IGNORECASE)
+
+
 def _card_text(text: Any, local_links: bool = False) -> str:
     """Single sink for evidence-derived text shown in cards and hit-file lists."""
     text = mask_secrets(str(text if text is not None else ""))
     text = _EMAIL_RE.sub(lambda m: redact_sample(m.group(0), "EMAIL"), text)
     if not local_links:
-        text = _safe_display_path(text)
+        text = _scrub_user_slug(_safe_display_path(text))
     return text
 
 
@@ -1925,9 +1951,20 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
 class EvidenceContext:
     """Build-time lookups behind the evidence cards (raw CSV locations, path display)."""
 
-    def __init__(self, evidence_root: Path | str | None, local_links: bool = False):
+    def __init__(
+        self,
+        evidence_root: Path | str | None,
+        local_links: bool = False,
+        *,
+        reveal: bool = False,
+        envelopes: dict[str, dict[str, Any]] | None = None,
+    ):
         self.root = Path(evidence_root) if evidence_root else None
-        self.local_links = bool(local_links)
+        # Showing values is a local-only build, so it always has local paths.
+        self.reveal = bool(reveal)
+        self.local_links = bool(local_links) or self.reveal
+        self.envelopes = envelopes
+        self.hits = finding_detail.HitStore(self.root)
         self._secrets: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
         self._pii: dict[str, list[dict[str, Any]]] = defaultdict(list)
         if self.root is not None:
@@ -2027,15 +2064,52 @@ class EvidenceContext:
 
     # -- path display -------------------------------------------------------
 
+    def text(self, value: Any) -> str:
+        """Evidence-derived text as this build may show it."""
+        return _display_redaction_tokens(_card_text(value, self.local_links))
+
+    def _path_is_plain(self, path: str) -> bool:
+        """True when the path can be shown, copied, and linked as written.
+
+        A path that itself looks like a secret is masked and gets no link.
+        The show-secrets build skips that check: session files are often
+        named with a long hex id, and the page already holds real values.
+        """
+        return self.local_links and (self.reveal or mask_secrets(path) == path)
+
     def path_text(self, path: str) -> str:
         path = str(path or "")
+        if self.reveal:
+            return path
         return _display_redaction_tokens(_card_text(path, self.local_links))
 
     def path_html(self, path: str, *, label: str | None = None, folder: bool = True) -> str:
         text = _esc(label if label is not None else self.path_text(path))
-        if not self.local_links or mask_secrets(path) != path:
+        if not self._path_is_plain(path):
             return f'<span class="ev-path">{text}</span>'
         return self._with_actions(path, f'<span class="ev-path">{text}</span>', folder=folder)
+
+    def editor_links_html(self, path: str, line: str = "", col: str = "", *, folder: bool = False) -> str:
+        """Links that open a local file at a line in VS Code or Cursor.
+
+        Local builds only. Both editors register a <scheme>://file/<path>:<line>:<col>
+        handler. Nothing is written when the path cannot be linked.
+        """
+        path = str(path or "")
+        if not self._path_is_plain(path):
+            return ""
+        uri = local_file_uri(path, is_dir=folder)
+        if not uri or not uri.startswith("file:///"):
+            return ""
+        target = uri[len("file://"):].rstrip("/") if folder else uri[len("file://"):]
+        if str(line).isdigit():
+            target += f":{line}"
+            if str(col).isdigit():
+                target += f":{col}"
+        return " ".join(
+            f'<a class="editor-link" href="{_esc(scheme)}://file{_esc(target)}">{label} ↗</a>'
+            for scheme, label in (("vscode", "Open in VS Code"), ("cursor", "Open in Cursor"))
+        )
 
     def _with_actions(self, path: str, inner: str, *, folder: bool = True) -> str:
         parts = [
@@ -2066,6 +2140,16 @@ class EvidenceContext:
             else f'<span class="ev-path">{label}</span>'
         )
         return self._with_actions(absolute, inner)
+
+
+def _effective_reveal(requested: bool) -> bool:
+    if requested and not redaction_disabled():
+        print(
+            "-Redact turns off -ShowSecrets; building a briefing without secret values.",
+            file=sys.stderr,
+        )
+        return False
+    return bool(requested)
 
 
 def _effective_local_links(requested: bool) -> bool:
@@ -2148,19 +2232,30 @@ def render_evidence_card(finding: dict[str, Any], ctx: EvidenceContext) -> str:
     for key, text in _extra_finding_items(finding, ctx):
         trig.append(_kv(key, f"<code>{_esc(text)}</code>"))
 
-    locs = ctx.locations(finding)
     raw_ref = str(finding.get("raw_evidence_ref") or "")
-    if not (trig or locs or raw_ref):
-        return (
-            f'<div class="ev-card">{meta_html}'
-            '<p class="ev-none">No detail recorded by this collector.</p></div>'
-        )
+    # What to do comes first: it is what the reader opened the row for.
+    guidance_html = finding_detail.render_guidance(finding)
+    hits = ctx.hits.hits(finding)
+    repo_rows = ctx.hits.repo_rows(finding)
+    hits_html = finding_detail.render_hits(
+        finding, hits, ctx, raw_ref or f"raw/{collector}/"
+    ) or finding_detail.render_repo_rows(repo_rows, ctx)
+    rules_html = finding_detail.render_rules(
+        finding_detail.related_rules(finding, ctx.envelopes), ctx
+    )
+    # Per-hit rows replace the plain file list; without them it is still shown.
+    locs = [] if hits_html else ctx.locations(finding)
+    if not (trig or locs or raw_ref or hits_html):
+        none_html = "" if rules_html else '<p class="ev-none">No detail recorded by this collector.</p>'
+        return f'<div class="ev-card">{meta_html}{none_html}{guidance_html}{rules_html}</div>'
 
-    sections = [meta_html]
+    sections = [meta_html, guidance_html]
     if trig:
         sections.append(
             f'<div class="ev-sec"><h4>What triggered it</h4><dl class="ev-kv">{"".join(trig)}</dl></div>'
         )
+    sections.append(hits_html)
+    sections.append(rules_html)
     if locs:
         items = []
         for loc in locs[:_MAX_LOCATIONS]:
@@ -2207,9 +2302,11 @@ def render_findings_section(
     evidence_root: Path | str | None = None,
     local_links: bool = False,
     ctx: EvidenceContext | None = None,
+    reveal: bool = False,
+    envelopes: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
     if ctx is None:
-        ctx = EvidenceContext(evidence_root, local_links)
+        ctx = EvidenceContext(evidence_root, local_links, reveal=reveal, envelopes=envelopes)
     by_category: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for f in findings:
         cat = str(f.get("category") or "General Tooling")
@@ -4178,8 +4275,10 @@ def build_html(
     customer: str | None,
     operator: str | None,
     local_links: bool = False,
+    show_secrets: bool = False,
 ) -> str:
-    local_links = _effective_local_links(local_links)
+    show_secrets = _effective_reveal(show_secrets)
+    local_links = _effective_local_links(local_links or show_secrets)
     envelopes = load_evidence(evidence_root)
     discovery = envelopes.get("discovery")
     runs_list = load_collectors_run(evidence_root)
@@ -4198,7 +4297,11 @@ def build_html(
     tool_names = detected_tool_names(envelopes, tools_rows)
 
     findings_tabs, findings_panels = render_findings_section(
-        findings, evidence_root=evidence_root, local_links=local_links
+        findings,
+        evidence_root=evidence_root,
+        local_links=local_links,
+        reveal=show_secrets,
+        envelopes=envelopes,
     )
     appendix_rows, appendix_note = render_appendix_grouped(findings)
 
@@ -4251,12 +4354,16 @@ def build_html(
         )
 
     category_count = len({f.get("category") for f in findings if f.get("category")})
+    if show_secrets:
+        values_hint = " This copy shows the matched values and the text around them."
+    else:
+        values_hint = " Values are masked in this copy; build with -ShowSecrets to see them."
     findings_inner = f"""<section id="findings" class="section">
   <div class="wrap">
     <header class="sh">
       <div class="kicker"><span class="num">/03</span><span class="kicker-label">FINDINGS</span></div>
       <h2 class="h2">{sum(counts.values())} findings across {category_count} categories.</h2>
-      <p class="sub">Tabs below are exposure categories. Search covers the findings table on every category tab and stays on the tab you are viewing. Samples are unredacted unless this scan used -Redact. Secret-scanner hits are grouped by rule and severity, with the hit count in the evidence column. Likely test values are labeled and counted as low. Select a row to open its evidence. The row keeps a short sample; the file list is in that panel.</p>
+      <p class="sub">Tabs below are exposure categories. Search covers the findings table on every category tab and stays on the tab you are viewing. Samples are unredacted unless this scan used -Redact. Secret-scanner hits are grouped by rule and severity, with the hit count in the evidence column. Likely test values are labeled and counted as low. Select a row to open it: what to do about it, then every place it was found, with the tool, file, and line.{values_hint}</p>
     </header>
     <div class="sev-bar">
       <div class="hdr">
@@ -4390,12 +4497,31 @@ def build_html(
         if _panel_not_collected(fragment)
     }
     noindex_meta = '<meta name="robots" content="noindex" />' if local_links else ""
-    local_banner = (
-        '<div class="local-links-banner" role="note">Contains local file paths. '
-        "Don't share this file. Build without -LocalLinks for a shareable copy.</div>"
-        if local_links
-        else ""
-    )
+    if show_secrets:
+        local_banner = (
+            '<div class="local-links-banner secrets-banner" role="note">'
+            "<span>Contains secret values, transcript excerpts, and local file paths. "
+            "Keep this file on this machine and delete it when you are done.</span> "
+            '<button type="button" class="toggle-values" aria-pressed="false">Hide values</button>'
+            "</div>"
+        )
+    elif local_links:
+        local_banner = (
+            '<div class="local-links-banner" role="note">Contains local file paths. '
+            "Don't share this file. Build without -LocalLinks for a shareable copy.</div>"
+        )
+    else:
+        local_banner = ""
+    if show_secrets:
+        surface_note = (
+            "This copy includes matched secret values and short transcript excerpts on the "
+            "Findings tab. It does not include full prompts or transcripts."
+        )
+    else:
+        surface_note = (
+            "Presence and counts only. This page does not include prompts, transcript text, "
+            "or secret values."
+        )
     findings_intro = f"""<header class="report-summary compact" id="top">
     <div class="wrap">
       <div class="mono-eyebrow"><span>ENDPOINT POSTURE BRIEFING</span></div>
@@ -4415,7 +4541,7 @@ def build_html(
       </div>
       <p class="posture-grid-caption">These counts are finding rows. A row's evidence number is how many underlying hits it stands for, so a hit total can be larger than the row total.</p>
       <div class="summary-cards">{''.join(summary_cards)}</div>
-      <p class="surface-note">Presence and counts only. This page does not include prompts, transcript text, or secret values.</p>
+      <p class="surface-note">{surface_note}</p>
     </div>
   </header>"""
     html_doc = f"""<!doctype html>
@@ -4467,6 +4593,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show full local paths with Copy path and folder links (do not share the output)",
     )
+    parser.add_argument(
+        "--show-secrets",
+        action="store_true",
+        help="Show each matched value and the text around it, with full local paths. "
+        "Implies --local-links. The output must stay on this machine. Ignored under AISCAN_REDACT.",
+    )
     return parser
 
 
@@ -4481,6 +4613,7 @@ def main(argv: list[str] | None = None) -> int:
             customer=args.customer,
             operator=args.operator,
             local_links=args.local_links,
+            show_secrets=args.show_secrets,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
