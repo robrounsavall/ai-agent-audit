@@ -116,6 +116,21 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Fixed
 
+- `chat-history` 1.4.0 counts current Codex rollout messages. A session line
+  is kept when it is a legacy `event_msg` (`user_message` or `agent_message`),
+  a current `response_item` message (`role` user or assistant, text in
+  `input_text` or `output_text` parts), or a paginated `item_completed`
+  `UserMessage` or `AgentMessage`. The same role and text written in more
+  than one of those shapes counts once. Developer and system lines are
+  skipped, as are injected user parts such as `AGENTS.md` and
+  `<environment_context>`. Inter-agent `response_item` `agent_message` lines
+  are skipped unless `--include-tool-details` is set. Archived sessions
+  under `archived_sessions` are included. A compressed rollout that cannot
+  be read is a coverage note, and so is a Codex install whose session files
+  contain no recognized messages. `thread_history_*.sqlite` is not read; when
+  that database is present and there are no rollout files, or it is more than
+  a day newer than the newest rollout, a coverage note says that SQLite
+  history was not counted.
 - A single collector without `-Json` printed the detailed console view,
   including the machine hostname, finding titles, and samples, even with
   `-AgentMode` or `-Redact`. With `-AgentMode` it now prints only the
