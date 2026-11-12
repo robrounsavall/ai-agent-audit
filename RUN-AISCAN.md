@@ -119,28 +119,30 @@ Clone into a new, empty folder outside any other repo:
 Check that `.\aiscan.ps1` and `.\report\build-briefing.py` exist. Stop if
 they don't.
 
-## 4. Pick a new output folder
-Pick one outside the clone and outside OneDrive, Dropbox, or network
-drives:
-
-    $out = Join-Path $env:LOCALAPPDATA ("aiscan-results\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
-
-Stop if `$out` already exists. Later full runs in the same `aiscan-results`
-folder let the report show what changed since the last full scan. A
+## 4. Let aiscan keep the scan in the default folder
+Do not invent a new output folder. Omit `-OutDir`. aiscan writes the
+scan under `%USERPROFILE%\aiscan\scans\<yyyy-MM-dd_HHmm[ss]>` (or
+`AISCAN_SCANS_ROOT` if that is set). Later full runs in the same folder
+let the report show what changed since the last full scan. A
 one-collector folder in that directory is not used as the baseline.
 
+Do not move or delete anything already in `%TEMP%` or
+`%LOCALAPPDATA%\aiscan-results`. Those are older locations.
+
 A kept scan prints `OUTDIR_ID=<folder name>` and nothing else from the
-path. For the folder above, that name is the timestamp, and the folder is
-`$env:LOCALAPPDATA\aiscan-results\<that id>`. `.\aiscan.ps1 summary` with
-no `-OutDir` reads the newest full scan there. A newer one-collector
-folder is skipped.
+path. That name is the timestamp, and the folder is
+`$env:USERPROFILE\aiscan\scans\<that id>` (or
+`$env:AISCAN_SCANS_ROOT\<that id>`). `.\aiscan.ps1 summary` with no
+`-OutDir` reads the newest full scan there. A newer one-collector
+folder is skipped. `latest.txt` in the scans root also names the newest
+scan.
 
 ## 5. Run the scan
 Tell the user the scan is starting. It can take several minutes on a
 machine with a lot of chat history, so give the command at least a
 15-minute timeout. Don't promise a time.
 
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\aiscan.ps1 all -OutDir $out -Briefing -LaunchedBy "<harness>" -Reason "<why>"
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\aiscan.ps1 all -Briefing -LaunchedBy "<harness>" -Reason "<why>"
 
 Replace `<harness>` with your own name: the product that is following this
 file, such as `Claude Code`, `Codex`, or `Cursor`. Replace `<why>` with a
@@ -274,13 +276,14 @@ and exits 1. Do not open the HTML from this file's agent steps. The person
 running the scan can open it locally.
 
 ## 6. Read the results (only these fields)
-Do not open `evidence\*.json`. Run the summary instead. If `$out` is still
-set in this window:
+Do not open `evidence\*.json`. Run the summary instead:
 
-    .\aiscan.ps1 summary -OutDir $out
+    .\aiscan.ps1 summary
 
 With no `-OutDir`, `summary` reads the newest full scan under
-`$env:LOCALAPPDATA\aiscan-results`. A newer one-collector folder is skipped.
+`$env:USERPROFILE\aiscan\scans` (or `AISCAN_SCANS_ROOT`). A newer
+one-collector folder is skipped. If that folder is empty, it may fall
+back to an older `%LOCALAPPDATA%\aiscan-results` location and say so.
 
 Read only the JSON that command prints. It lists each collector, whether
 the tool was detected, and each finding's severity, title, category, and

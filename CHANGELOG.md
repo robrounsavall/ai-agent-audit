@@ -9,6 +9,15 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
+### Added
+
+- Default scans are kept under `%USERPROFILE%\aiscan\scans\<yyyy-MM-dd_HHmm[ss]>`
+  (override the root with `AISCAN_SCANS_ROOT` or a single run with
+  `-OutDir` / `-Here`). `latest.txt` in that folder names the newest
+  scan. The one-liner and `aiscan.ps1` use the same default. Existing
+  folders in `%TEMP%` or `%LOCALAPPDATA%\aiscan-results` are left
+  where they are.
+
 ### Changed
 
 - The default briefing (`all -Briefing`, written to `briefing.html`) now
@@ -21,6 +30,16 @@ each collector's `__version__` and appear in the evidence envelopes.
   `briefing-local.html` with full paths and values masked. `-ShowSecrets`
   still writes the same unmasked content to `briefing-unmasked.html`.
   `-AgentMode` still builds a masked briefing.
+- `aiscan summary` with no `-OutDir` reads the newest full scan in the
+  default scans folder. If that folder is empty it falls back to the
+  older `aiscan-results` location and says so.
+- `aiscan hub` ingests the default scans folder when the dashboard
+  starts, so past default scans are listed without a separate import.
+  `aiscan hub-import` with no `-OutDir` does the same. A leftover
+  `aiscan-results` folder is mentioned, not moved. `demo` does not
+  ingest real scans.
+- A briefing's "changes since the last scan" compares against the
+  previous sibling in the default scans folder automatically.
 
 ## [0.3.0] - 2026-11-12
 

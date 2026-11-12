@@ -43,6 +43,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import scan_paths
+
 import run_status
 from tool_version import tool_version
 
@@ -50,7 +52,6 @@ SUMMARY_FILENAME = "agent-summary.json"
 RUN_STATUS_FILENAME = "run-status.json"
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
-_STAMP = re.compile(r"^\d{8}-\d{6}$")
 _EXIT_IN_TEXT = re.compile(r"exit\s+(-?\d+)")
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -78,9 +79,10 @@ def newest_scan_dir(results_root: str | Path) -> Path | None:
     """Return the newest full scan folder under ``results_root``, or None.
 
     A scan folder is a child directory that contains ``evidence``. Timestamp
-    names (``yyyyMMdd-HHmmss``, local time) sort by that clock. Other names
-    sort by modification time. The later moment wins. Equal moments use the
-    folder name.
+    names (``yyyy-MM-dd_HHmm``, ``yyyy-MM-dd_HHmmss``, or the older
+    ``yyyyMMdd-HHmmss``, local time) sort by that clock. A folder named
+    ``latest`` is a pointer, not a scan. Other names sort by modification
+    time. The later moment wins. Equal moments use the folder name.
 
     A folder is eligible when it has at least half as many collectors as the
     largest child, the same cutoff ``scan_diff`` uses for an automatic
@@ -101,6 +103,8 @@ def newest_scan_dir(results_root: str | Path) -> Path | None:
     for child in children:
         try:
             if not child.is_dir():
+                continue
+            if scan_paths.is_pointer_name(child.name):
                 continue
             if not (child / "evidence").is_dir():
                 continue
@@ -138,15 +142,9 @@ def _full_scan_candidates(
 
 
 def _folder_when(path: Path) -> float:
-    if _STAMP.fullmatch(path.name):
-        try:
-            parsed = datetime.strptime(path.name, "%Y%m%d-%H%M%S")
-        except ValueError:
-            parsed = None
-        if parsed is not None:
-            # Naive local time, same clock ``Get-Date`` uses for the folder name.
-            return parsed.timestamp()
-    return path.stat().st_mtime
+    # Stamp names use local time, the same clock allocate_scan_dir uses.
+    when, _name = scan_paths.folder_sort_key(path)
+    return when
 
 
 def build_agent_summary(

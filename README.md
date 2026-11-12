@@ -59,13 +59,15 @@ decision on each finding.
 [![Hub dashboard, invented data](docs/hub-screenshot.png)](hub/README.md)
 
 ```powershell
-# Scan and store the result in the hub
+# Scan (kept under %USERPROFILE%\aiscan\scans). Opening the hub later
+# will list it, or pass -Hub to store it in the database now.
 .\aiscan.ps1 all -Hub
 
-# Add scan folders you already have
-.\aiscan.ps1 hub-import -OutDir C:\scans
+# Add scan folders you already have. Omit -OutDir to import the default folder.
+.\aiscan.ps1 hub-import
 
-# Open the dashboard (127.0.0.1 only, needs the access token it prints)
+# Open the dashboard (127.0.0.1 only, needs the access token it prints).
+# It also imports the default scans folder.
 .\aiscan.ps1 hub
 
 # Or look around first with invented data
@@ -199,7 +201,8 @@ installer, `get-aiscan.ps1`. The installer downloads the zip to
 machine-wide execution policy change: only the child PowerShell that runs
 aiscan gets `-ExecutionPolicy Bypass`. Python 3.11+ (and gitleaks, for
 `secrets-scan`) are still needed, as above. Output goes wherever you point
-`-OutDir`, or to a throwaway temp folder if you don't.
+`-OutDir`, or under `%USERPROFILE%\aiscan\scans` if you don't (set
+`AISCAN_SCANS_ROOT` to choose a different default root).
 
 ```powershell
 # Latest release, with arguments
@@ -228,7 +231,7 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 ## Usage
 
 ```powershell
-# Everything (same as `all`), throwaway output, results printed to console
+# Everything (same as `all`). Kept under %USERPROFILE%\aiscan\scans.
 .\aiscan.ps1
 
 # One collector
@@ -242,7 +245,8 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 # Safe summary of a scan you already have. Prints collector, detection,
 # and finding severity / title / category / evidence count only.
 # Titles are masked. No -OutDir uses the newest full scan under
-# %LOCALAPPDATA%\aiscan-results. A newer one-collector folder is skipped.
+# %USERPROFILE%\aiscan\scans (or AISCAN_SCANS_ROOT). A newer
+# one-collector folder is skipped.
 # The JSON includes run_origin (who launched the scan, when, and why).
 .\aiscan.ps1 summary -OutDir C:\scans\2026-10-07
 

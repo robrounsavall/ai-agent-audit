@@ -45,7 +45,7 @@ real = os.environ["AISCAN_REAL_PYTHON"]
 # aiscan.ps1 probes `python -c` for 3.11+ before any collector runs.
 if argv[0] == "-c":
     sys.exit(subprocess.call([real, *argv]))
-forward = {"tool_version.py", "run_status.py", "scan_diff.py", "build-briefing.py", "agent_summary.py", "run_origin.py"}
+forward = {"tool_version.py", "run_status.py", "scan_diff.py", "build-briefing.py", "agent_summary.py", "run_origin.py", "scan_paths.py"}
 
 
 def evidence_file():
@@ -171,6 +171,7 @@ class TestAiscanLauncher(unittest.TestCase):
         env["AISCAN_SHIM_LOG"] = str(self.log_path)
         env["TEMP"] = str(self.work)
         env["TMP"] = str(self.work)
+        env["AISCAN_SCANS_ROOT"] = str(self.work)
         env.pop("AISCAN_VERSION", None)
         env.pop("AISCAN_AGENT_MODE", None)
         env.pop("AISCAN_REDACT", None)
@@ -308,20 +309,30 @@ class TestAiscanLauncher(unittest.TestCase):
         self.assertNotIn(str(copy), proc.stdout)
         self.assertNotIn(str(out), proc.stdout)
 
-    def test_throwaway_folders_differ_inside_the_same_second(self):
-        first = self._run("ok-exit0", "vscode", "-Keep")
-        second = self._run("ok-exit0", "vscode", "-Keep")
+    def test_default_folders_differ_inside_the_same_second(self):
+        first = self._run("ok-exit0", "vscode")
+        second = self._run("ok-exit0", "vscode")
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         kept = self._kept_dirs(first.stdout) + self._kept_dirs(second.stdout)
-        try:
-            self.assertEqual(len(kept), 2, first.stdout + second.stdout)
-            self.assertNotEqual(kept[0], kept[1])
-            for path in kept:
-                self.assertRegex(path.name, r"^aiscan-\d{8}-\d{6}-[0-9a-f]{8}$")
-        finally:
-            for path in kept:
-                shutil.rmtree(path, ignore_errors=True)
+        self.assertEqual(len(kept), 2, first.stdout + second.stdout)
+        self.assertNotEqual(kept[0], kept[1])
+        stamp = r"^\d{4}-\d{2}-\d{2}_\d{4,6}(-\d+)?$"
+        for path in kept:
+            self.assertRegex(path.name, stamp)
+            self.assertEqual(path.parent, self.work)
+            self.assertTrue((path / "evidence").is_dir())
+        latest = (self.work / "latest.txt").read_text(encoding="utf-8").strip()
+        self.assertEqual(latest, kept[1].name)
+
+    def test_outdir_does_not_write_into_the_default_scans_root(self):
+        out = self.tmp / "custom-scan"
+        proc = self._run("ok-exit0", "vscode", "-OutDir", str(out))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertTrue((out / "evidence").is_dir())
+        self.assertFalse((self.work / "latest.txt").exists())
+        dated = [p for p in self.work.iterdir() if p.is_dir() and p.name[:4].isdigit()]
+        self.assertEqual(dated, [])
 
     def test_discover_does_not_resolve_the_version(self):
         proc = self._run("discover-log", "discover")

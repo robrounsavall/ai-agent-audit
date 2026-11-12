@@ -24,18 +24,22 @@ read anything from your machine and does not touch your real hub database.
 ## Use it on your own scans
 
 ```powershell
-# Scan and store the result in the hub in one step
+# Scan (kept under %USERPROFILE%\aiscan\scans). -Hub also stores it now.
 .\aiscan.ps1 all -Hub
 
-# Add scan folders you already have (one folder, or a folder of them)
-.\aiscan.ps1 hub-import -OutDir C:\scans
+# Add scan folders you already have. Omit -OutDir to import the default folder.
+.\aiscan.ps1 hub-import
 
-# Open the dashboard
+# Open the dashboard. It also imports the default scans folder.
 .\aiscan.ps1 hub
 ```
 
-`-Hub` works with a default throwaway scan. The temp folder is still
-deleted at the end, and the hub keeps the evidence layer.
+Default scans are kept on disk under `%USERPROFILE%\aiscan\scans`.
+`aiscan hub` and `aiscan hub-import` (with no `-OutDir`) add every scan
+in that folder to the database. Older folders in
+`%LOCALAPPDATA%\aiscan-results` are left in place; the hub mentions
+them and you can import them with `-OutDir`. `-Hub` on a scan is still
+useful when `-OutDir` or `-Here` wrote the result somewhere else.
 
 `aiscan hub` prints a sign-in link and opens it. The dashboard listens on
 `127.0.0.1:8765` and stops when you press Ctrl+C.
@@ -143,8 +147,9 @@ reverse proxy terminates TLS in front of it, pass `--insecure-http`.
 ```
 python hub\aiscan_hub.py [--db FILE] <command>
 
-  ingest PATH...     add scan folders (or folders of scan folders)
-  serve              run the dashboard
+  ingest [PATH...]   add scan folders (or folders of scan folders).
+                     Omit PATH to import the default scans folder.
+  serve              run the dashboard (imports the default scans folder first)
   demo               build a demo database from invented data and serve it
   status [--json]    counts from the database
   push SCAN          send one share-safe scan to another hub
