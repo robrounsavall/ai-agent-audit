@@ -698,5 +698,33 @@ class TestCodexRolloutShapes(unittest.TestCase):
         self.assertEqual(_pairs(buckets), [("user", "current")])
 
 
+class TestWslClaudeRoots(unittest.TestCase):
+    def test_roots_dedup_and_discovery_meta(self):
+        import wsl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "unc" / "Ubuntu" / "home" / "linuxuser"
+            proj = home / ".claude" / "projects" / "-mnt-c-repo"
+            proj.mkdir(parents=True)
+            (proj / "a.jsonl").write_text("{}\n", encoding="utf-8")
+            (proj / "b.jsonl").write_text("{}\n", encoding="utf-8")
+            no_projects = wsl.WslHome("Debian", root / "unc" / "Debian" / "home" / "x")
+            (no_projects.claude_home).mkdir(parents=True)
+            homes = [wsl.WslHome("Ubuntu", home), no_projects]
+
+            roots = ch.wsl_claude_roots(homes, [root / "win" / ".claude" / "projects"])
+            self.assertEqual([label for label, _ in roots], ["wsl:Ubuntu"])
+            # Same dir already in the Windows roots: not added twice.
+            self.assertEqual(ch.wsl_claude_roots(homes, [home / ".claude" / "projects"]), [])
+
+            meta = ch.wsl_discovery_meta(roots)
+        self.assertEqual(meta["file_count"], 2)
+        self.assertTrue(meta["detected"])
+        self.assertEqual(meta["distros"], ["Ubuntu"])
+        self.assertEqual(meta["source"], "wsl")
+        self.assertNotIn("linuxuser", json.dumps(meta))
+
+
 if __name__ == "__main__":
     unittest.main()

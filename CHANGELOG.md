@@ -25,6 +25,27 @@ each collector's `__version__` and appear in the evidence envelopes.
   demo` runs the dashboard on invented data. Stdlib only. See
   [hub/README.md](hub/README.md) and
   [docs/hub-architecture.md](docs/hub-architecture.md).
+- Claude Code inside WSL is now scanned. `claude` 1.5.0 and `chat-history`
+  1.5.0 find `~/.claude` in every user home of WSL distros that are already
+  running, without starting stopped ones. `claude` reads WSL user settings,
+  history and file-history artifacts and the implicit auto-mode default, and
+  merges matching findings with a `wsl:<distro>` note. `chat-history` exports
+  WSL transcripts with the other Claude sessions and adds a `claude_wsl`
+  discovery entry. The briefing shows a "Claude Code in WSL" panel, and Claude
+  Code "Last used" counts WSL sessions. Set `AISCAN_WSL=0` to skip WSL.
+- `vscode` collector 1.2.0 reads VS Code's agent host. From
+  `agent-host-config.json` it reports standing allow/ask/deny rules (as
+  rules), global and file-edit auto-approve, the terminal sandbox, computer
+  use, hosted MCP, agent merge and workspace trust, with new
+  `vscode.agent_host.*` findings. From `agent-host.db` (opened read-only) it
+  counts agent sessions per provider, chats and deleted sessions. Empty-window
+  chats in `emptyWindowChatSessions` are now counted too. Before this, a
+  machine that used VS Code mainly through the Agents view showed almost no
+  VS Code evidence.
+- The briefing shows a VS Code agent host panel, and VS Code "Last used" is
+  now the newest chat or agent session date instead of always `unknown`.
+  The access map fills VS Code shell, file-write, network, git and approval
+  cells from the agent-host settings.
 - `vscode` collector 1.1.0 replaces `copilot` and is included in `aiscan all`.
   It reads VS Code user and workspace settings, Copilot chat-session
   metadata, AI extensions, and JetBrains Copilot config. Finding ids moved

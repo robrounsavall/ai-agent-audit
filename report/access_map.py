@@ -63,14 +63,8 @@ UNCAPTURED: dict[tuple[str, str], str] = {
     ("codex", "remote"): (
         "Codex evidence is local config and sessions; remote execution is not recorded."
     ),
-    ("vscode", "files"): (
-        "VS Code evidence does not record file writes."
-    ),
     ("vscode", "secrets"): (
         "VS Code evidence does not record secret stores or env grants."
-    ),
-    ("vscode", "git"): (
-        "VS Code evidence does not record git or GitHub pushes."
     ),
     ("grok", "remote"): (
         "Grok Build evidence is local config and sessions; remote execution is not recorded."
@@ -665,6 +659,8 @@ def _files(view: _View) -> Cell:
     forced = _forced(view, "files")
     if forced:
         return forced
+    if view.agent_id == "vscode":
+        return _vscode_files(view)
     mode = _sandbox_mode(view)
     if mode == "read-only":
         return _cell(
@@ -789,6 +785,8 @@ def _network(view: _View) -> Cell:
     forced = _forced(view, "network", mcp_count=None)
     if forced:
         return forced
+    if view.agent_id == "vscode":
+        return _vscode_network(view)
     count = _mcp_count(view)
     phrase = _mcp_phrase(view, count)
     direct_bits: list[str] = []
@@ -816,8 +814,6 @@ def _network(view: _View) -> Cell:
             ["network grant"],
             mcp_count=count,
         )
-    if view.agent_id == "vscode":
-        return _vscode_network(view)
     if view.agent_id == "cloud-agents":
         return _cloud_network(view, count)
     if _unrestricted_execution(view):
@@ -886,6 +882,22 @@ def _vscode_network(view: _View) -> Cell:
             ["summary.workspace_mcp_servers"],
             mcp_count=mcp_count,
         )
+    grants = _vscode_host_network_grants(view)
+    if grants:
+        return _cell(
+            view,
+            "network",
+            "yes",
+            _sentence(grants, "VS Code agents can reach the network"),
+            "moderate",
+            ["agent-host-config.json"],
+            mcp_count=(mcp_count or 0)
+            + sum(
+                1
+                for key in ("agent_host_github_mcp", "agent_host_mcp_connectors")
+                if view.summary.get(key) is True
+            ),
+        )
     bits: list[str] = []
     if _flag_on(public):
         bits.append("public code suggestions are enabled")
@@ -918,15 +930,129 @@ def _vscode_network(view: _View) -> Cell:
     )
 
 
+def _vscode_host_network_grants(view: _View) -> list[str]:
+    """Network reach recorded in VS Code's agent-host config."""
+    s = view.summary
+    bits: list[str] = []
+    fetch = [r for r in _web_fetch_allows(view) if r.get("platform") == "vscode"]
+    if fetch:
+        noun = "rule" if len(fetch) == 1 else "rules"
+        bits.append(f"{len(fetch)} WebFetch allow {noun} ({_quoted_rule(fetch[0])})")
+    hosted = [
+        name
+        for key, name in (
+            ("agent_host_github_mcp", "the GitHub MCP server"),
+            ("agent_host_mcp_connectors", "MCP connectors"),
+        )
+        if s.get(key) is True
+    ]
+    if hosted:
+        bits.append(" and ".join(hosted) + " enabled")
+    if s.get("agent_host_sandbox") == "off":
+        bits.append("terminal commands run unsandboxed")
+    elif s.get("agent_host_sandbox_allow_network") is True:
+        bits.append("the sandbox allows network access")
+    return bits
+
+
+def _vscode_host_shell_unsandboxed(view: _View) -> bool:
+    s = view.summary
+    return s.get("agent_host_sandbox") == "off" or view.has_id(
+        "vscode.agent_host.sandbox_off", "vscode.agent_host.unsandboxed_commands"
+    )
+
+
+def _vscode_files(view: _View) -> Cell:
+    s = view.summary
+    if _flag_on(s.get("agent_host_global_auto_approve")):
+        return _cell(
+            view,
+            "files",
+            "yes",
+            "The VS Code agent host auto-approves every tool call, including file writes.",
+            "high",
+            ["finding vscode.agent_host.global_auto_approve"],
+        )
+    if s.get("agent_host_edit_auto_approve_all") is True:
+        protected = _as_int(s.get("agent_host_edit_protected_patterns")) or 0
+        tail = f" except {protected} protected pattern(s) such as .git and agent config" if protected else ""
+        return _cell(
+            view,
+            "files",
+            "yes",
+            f"VS Code agent file edits are auto-approved for every path{tail}.",
+            "moderate",
+            ["agent-host-config.json editAutoApprovePatterns"],
+        )
+    return _cell(
+        view,
+        "files",
+        "unknown",
+        "VS Code evidence does not record file writes.",
+        "none",
+    )
+
+
+def _vscode_git(view: _View) -> Cell:
+    s = view.summary
+    if s.get("agent_host_agent_merge") is True or view.has_id("vscode.agent_host.agent_merge"):
+        return _cell(
+            view,
+            "git",
+            "yes",
+            "VS Code agent merge is on, so agents can push fixes and merge pull requests.",
+            "high",
+            ["finding vscode.agent_host.agent_merge"],
+        )
+    auth = [
+        name
+        for key, name in (("agent_host_sandbox_git_auth", "git"), ("agent_host_sandbox_gh_auth", "gh"))
+        if s.get(key) is True
+    ]
+    if auth or _vscode_host_shell_unsandboxed(view):
+        why = (
+            f"agent terminal commands get your {' and '.join(auth)} sign-in"
+            if auth
+            else "agent terminal commands run unsandboxed as you"
+        )
+        return _cell(
+            view,
+            "git",
+            "partial",
+            f"VS Code {why}; a push still needs a terminal command that is approved.",
+            "low",
+            ["agent-host-config.json sandbox"],
+        )
+    return _cell(
+        view,
+        "git",
+        "unknown",
+        "VS Code evidence does not record git or GitHub pushes.",
+        "none",
+    )
+
+
 def _vscode_shell(view: _View) -> Cell:
-    if _flag_on(view.summary.get("tools_auto_approve")) or view.has_id("vscode.copilot.tools.auto_approve"):
+    if _flag_on(view.summary.get("tools_auto_approve")) or view.has_id(
+        "vscode.copilot.tools.auto_approve", "vscode.agent_host.global_auto_approve"
+    ):
         return _cell(
             view,
             "shell",
             "yes",
-            "Copilot agent tool auto-approve is on, so terminal commands can run without a prompt.",
+            "VS Code agent tool auto-approve is on, so terminal commands can run without a prompt.",
             "high",
             ["finding vscode.copilot.tools.auto_approve"],
+        )
+    if _vscode_host_shell_unsandboxed(view):
+        return _cell(
+            view,
+            "shell",
+            "partial",
+            "VS Code agent terminal sandbox is off, so commands run with your full rights; "
+            "they prompt unless they match the auto-approve list.",
+            "moderate",
+            ["finding vscode.agent_host.sandbox_off"],
         )
     if _flag_on(view.summary.get("agent_enabled")):
         return _cell(
@@ -947,14 +1073,34 @@ def _vscode_shell(view: _View) -> Cell:
 
 
 def _vscode_approval(view: _View) -> Cell:
-    if _flag_on(view.summary.get("tools_auto_approve")) or view.has_id("vscode.copilot.tools.auto_approve"):
+    if _flag_on(view.summary.get("tools_auto_approve")) or view.has_id(
+        "vscode.copilot.tools.auto_approve", "vscode.agent_host.global_auto_approve"
+    ):
         return _cell(
             view,
             "approval",
             "yes",
-            "Auto-approve: Copilot agent tool calls run without a prompt.",
+            "Auto-approve: VS Code agent tool calls run without a prompt.",
             "high",
             ["finding vscode.copilot.tools.auto_approve"],
+        )
+    s = view.summary
+    skipped: list[str] = []
+    if s.get("agent_host_edit_auto_approve_all") is True:
+        skipped.append("file edits")
+    allows = _as_int(s.get("agent_host_allow_rules")) or 0
+    if allows:
+        skipped.append(f"{allows} standing allow rule{'s' if allows != 1 else ''}")
+    if skipped:
+        return _cell(
+            view,
+            "approval",
+            "partial",
+            "Ask for terminal commands outside the auto-approve list; "
+            + " and ".join(skipped)
+            + " run without a prompt.",
+            "moderate",
+            ["agent-host-config.json"],
         )
     if view.has_id("vscode.copilot.permission_level_relaxed"):
         return _cell(
@@ -1084,6 +1230,8 @@ def _git(view: _View) -> Cell:
     forced = _forced(view, "git")
     if forced:
         return forced
+    if view.agent_id == "vscode":
+        return _vscode_git(view)
     git_rules = _git_allows(view)
     if git_rules:
         return _cell(

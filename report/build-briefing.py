@@ -1276,7 +1276,8 @@ def _tool_last_used(key: str, envelopes: dict[str, dict[str, Any]]) -> str:
         return max(((disc.get(n) or {}).get("newest") or "" for n in names), default="")
 
     if key == "claude":
-        return newest("claude_projects")
+        recorded = str(((envelopes.get(key) or {}).get("summary") or {}).get("wsl_last_activity") or "")
+        return max(newest("claude_projects", "claude_wsl"), recorded)
     if key == "codex":
         recorded = str(((envelopes.get("codex") or {}).get("summary") or {}).get("last_used") or "")
         return recorded or newest("codex_sessions")
@@ -1291,6 +1292,10 @@ def _tool_last_used(key: str, envelopes: dict[str, dict[str, Any]]) -> str:
         )
     if key == "cowork":
         return str(((envelopes.get(key) or {}).get("summary") or {}).get("newest_session") or "")
+    if key == "vscode":
+        # Settings.json mtime is an edit, not use: only chat and agent sessions count.
+        recorded = str(((envelopes.get(key) or {}).get("summary") or {}).get("last_activity") or "")
+        return recorded or newest("vscode_chat_sessions")
     return ""
 
 
@@ -2835,6 +2840,115 @@ def _render_grok_state_summary(summary: dict[str, Any]) -> str:
       </div>"""
 
 
+def _render_claude_wsl_summary(summary: dict[str, Any]) -> str:
+    """Claude Code homes found inside running WSL distros (claude 1.5.0+)."""
+    homes = summary.get("wsl_homes")
+    if not isinstance(homes, list) or not homes:
+        return ""
+    blocks = []
+    for home in homes:
+        if not isinstance(home, dict):
+            continue
+        chips = [
+            ("Distro", str(home.get("distro") or "unknown")),
+            ("Sessions", str(_as_int(home.get("sessions")))),
+            ("Last activity", str(home.get("last_activity") or "unknown")),
+            ("Permission mode", str(home.get("permission_mode") or "unset")),
+            ("Claude Code", str(home.get("claude_code_version") or "unknown")),
+            ("Settings files", str(_as_int(home.get("settings_files")))),
+            ("Rules", str(_as_int(home.get("rules")))),
+        ]
+        small_attr = ' class="small-value"'
+        blocks.append(
+            "<div class='mode-grid'>"
+            + "".join(
+                f"<div class='mode-chip'><span>{_esc(label)}</span>"
+                f"<strong{small_attr if len(str(value)) > 24 else ''}>{_esc(value)}</strong></div>"
+                for label, value in chips
+            )
+            + "</div>"
+        )
+    note = (
+        "Claude Code run inside WSL keeps its own ~/.claude, separate from Windows. "
+        "Only distros that were already running were read; a stopped distro is not started. "
+        "These sessions are included in the Claude Code chat counts and findings, labeled wsl:<distro>."
+    )
+    return f"""<div class="telemetry-summary">
+        <div class="rule-group-head">
+          <h4>Claude Code in WSL</h4>
+          <span class="meta">running WSL distros: /home/*/.claude</span>
+        </div>
+        <p class="surface-note">{_esc(note)}</p>
+        {''.join(blocks)}
+      </div>"""
+
+
+def _render_vscode_state_summary(summary: dict[str, Any]) -> str:
+    """Agent-host posture and session counts. Empty for pre-1.2.0 evidence."""
+    if not summary or "agent_host_config" not in summary:
+        return ""
+
+    def flag(key: str) -> str:
+        value = summary.get(key)
+        if value is True:
+            return "on"
+        if value is False:
+            return "off"
+        return "unset"
+
+    providers = summary.get("agent_host_providers") or {}
+    provider_text = (
+        ", ".join(f"{name} ({_as_int(n)})" for name, n in sorted(providers.items()))
+        if isinstance(providers, dict) and providers
+        else "none"
+    )
+    protected = _as_int(summary.get("agent_host_edit_protected_patterns"))
+    edits = (
+        f"auto ({protected} protected)"
+        if summary.get("agent_host_edit_auto_approve_all") is True
+        else "prompt"
+    )
+    hosted = [
+        name
+        for key, name in (("agent_host_github_mcp", "GitHub"), ("agent_host_mcp_connectors", "connectors"))
+        if summary.get(key) is True
+    ]
+    chips = [
+        ("Sandbox", str(summary.get("agent_host_sandbox") or "unset")),
+        ("Global auto-approve", flag("agent_host_global_auto_approve")),
+        ("File edits", edits),
+        ("Allow rules", str(_as_int(summary.get("agent_host_allow_rules")))),
+        ("Computer use", flag("agent_host_computer_use")),
+        ("Hosted MCP", ", ".join(hosted) or "none"),
+        ("Agent merge", flag("agent_host_agent_merge")),
+        ("Trusted folders", str(_as_int(summary.get("agent_host_trusted_folders")))),
+        ("Agent sessions", provider_text),
+        ("Deleted sessions", str(_as_int(summary.get("agent_host_deleted_sessions")))),
+        ("Copilot chats", str(_as_int(summary.get("chat_sessions")))),
+        ("Last activity", str(summary.get("last_activity") or "unknown")),
+    ]
+    small_attr = ' class="small-value"'
+    chip_html = "".join(
+        f"<div class='mode-chip'><span>{_esc(label)}</span>"
+        f"<strong{small_attr if len(str(value)) > 24 else ''}>{_esc(value)}</strong></div>"
+        for label, value in chips
+    )
+    note = (
+        "VS Code's agent host runs Copilot and other agents from the Agents view. "
+        "Settings come from agent-host-config.json; session counts from agent-host.db. "
+        "Trusted folder paths, chat titles and prompts stay out of evidence. "
+        "Claude Code used inside VS Code is reported under Claude Code."
+    )
+    return f"""<div class="telemetry-summary">
+        <div class="rule-group-head">
+          <h4>VS Code agent host</h4>
+          <span class="meta">agent-host-config.json + agent-host.db + chatSessions</span>
+        </div>
+        <p class="surface-note">{_esc(note)}</p>
+        <div class="mode-grid">{chip_html}</div>
+      </div>"""
+
+
 def _render_grok_bot_state_summary(summary: dict[str, Any]) -> str:
     if not summary:
         return ""
@@ -2904,6 +3018,8 @@ def render_permissions_section(envelopes: dict[str, dict[str, Any]]) -> str:
             state_early = _render_grok_state_summary(env.get("summary") or {})
         elif platform == "grok-bot":
             state_early = _render_grok_bot_state_summary(env.get("summary") or {})
+        elif platform == "vscode":
+            state_early = _render_vscode_state_summary(env.get("summary") or {})
         if not rules:
             posture_findings = [
                 f for f in (env.get("findings") or [])
@@ -3042,6 +3158,10 @@ def render_permissions_section(envelopes: dict[str, dict[str, Any]]) -> str:
             state_html = _render_cursor_state_summary(env.get("summary") or {})
         elif platform == "grok":
             state_html = _render_grok_state_summary(env.get("summary") or {})
+        elif platform == "vscode":
+            state_html = _render_vscode_state_summary(env.get("summary") or {})
+        elif platform == "claude":
+            state_html = _render_claude_wsl_summary(env.get("summary") or {})
         else:
             state_html = ""
         mode_html = _render_claude_mode_history(chat_sum) if platform == "claude" else ""

@@ -20,6 +20,20 @@ VS Code is audited as a surface hosting AI harnesses, not as a single tool:
   metadata only — counts, modes, model families, permission levels. Prompt
   text and account labels are never read into evidence; workspace identity is
   hashed.
+- Empty-window chats from `globalStorage/emptyWindowChatSessions/*.jsonl`
+  (same metadata-only parsing; counted as `chat_empty_window_sessions`).
+- Agent host (VS Code's Agents view, which runs Copilot CLI and other agents):
+  `globalStorage/agent-host-config.json` for standing `permissions`
+  allow/ask/deny rules, global auto-approve, edit auto-approve patterns,
+  terminal sandbox (on/off, network, unsandboxed escape, git/gh auth),
+  computer use, hosted MCP (GitHub MCP server, MCP connectors), agent merge
+  and workspace trust; `globalStorage/agent-host.db` (read-only) for session
+  counts per provider, chat count, deleted sessions and the newest activity
+  date. Trusted folder paths, shell paths, titles and free-text instructions
+  are counted, never copied.
+- `last_activity`: newest of chat-session file dates and agent-host session
+  times. The briefing uses it for "Last used". A settings.json edit does not
+  count as use.
 - Workspace-scoped `.vscode/settings.json` and `.vscode/mcp.json` under
   `--repo-roots` (hashed repo identity; non-localhost MCP servers flagged).
 - JetBrains Copilot config (minor unit).
@@ -38,5 +52,9 @@ Findings: `vscode.copilot.tools.auto_approve` (high),
 `vscode.copilot.permission_level_relaxed`, `vscode.mcp.non_local_server`,
 `vscode.workspace_trust.disabled`, `vscode.ai_extension.present`,
 `vscode.copilot.agent.max_requests_raised`, `vscode.config.parse_error`,
+`vscode.agent_host.global_auto_approve` (high), `vscode.agent_host.sandbox_off`,
+`vscode.agent_host.unsandboxed_commands`, `vscode.agent_host.computer_use`,
+`vscode.agent_host.agent_merge` (medium), `vscode.agent_host.allow_rules`,
+`vscode.agent_host.edit_auto_approve`, `vscode.agent_host.remote_mcp` (low),
 plus the v1-lineage Copilot findings (`vscode.copilot.exclude.none_configured`,
 `vscode.copilot.public_code.enabled`, `vscode.copilot.telemetry.enabled`).

@@ -15,6 +15,20 @@ Inventories Claude Code permission settings, MCP servers, and bypass modes from 
 .\aiscan.ps1 claude
 ```
 
+## WSL
+
+Claude Code run inside WSL keeps its own `~/.claude` under the Linux home, so
+the collector also reads every `/home/<user>/.claude` in WSL distros that are
+already running (`wsl.exe --list --running`, read over `\\wsl.localhost`). A
+stopped distro is not started. For each one it reads user `settings.json` and
+`settings.local.json` (rules get scope label `wsl:<distro>`), the same
+side-artifact checks as Windows, and the implicit auto-mode default. Findings
+that also exist on Windows are merged into one finding with a
+`wsl:<distro>:` note. The summary gains `wsl_homes` (per distro: sessions,
+last activity, permission mode, Claude Code version, settings files, rules),
+`wsl_sessions` and `wsl_last_activity`. The Linux username and home path are
+not written to evidence. Set `AISCAN_WSL=0` to skip WSL.
+
 ## Permission mode findings
 
 The start mode is read from `permissions.defaultMode` (legacy top-level `defaultMode` / `permissionMode` still accepted).
