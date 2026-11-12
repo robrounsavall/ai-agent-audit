@@ -252,12 +252,13 @@ hash in `aiscan-<version>.zip.sha256` from the same release.
 # you pass it. Leave both off and the line says unknown.
 .\aiscan.ps1 all -OutDir C:\scans\today -Briefing -LaunchedBy "Claude Code" -Reason "comparison baseline"
 
-# The copy for the person fixing the findings. Under each finding: every
-# matched value in full, the text around it, the file, line and column, the
-# tool and session it came from, and links that open the file at that line.
-# Writes briefing\briefing-unmasked.html. It holds live credentials: keep it
-# on this machine and delete it when you are done. -Redact turns it off.
-.\aiscan.ps1 all -OutDir C:\scans\today -Briefing -ShowSecrets
+# The default briefing already shows each matched value, the text around it,
+# the file, line and column, and links that open the file at that line.
+# briefing.html holds live credentials: keep it on this machine and delete
+# it when you are done. The page has a Hide values button for a screen share.
+# -ShowSecrets writes the same content to briefing\briefing-unmasked.html.
+# -Redact builds a shareable copy with values masked and paths hashed.
+.\aiscan.ps1 all -OutDir C:\scans\today -Briefing
 
 # Same, with an explicit previous scan folder
 .\aiscan.ps1 all -OutDir C:\scans\2026-10-07 -Previous C:\scans\2026-10-01 -Briefing

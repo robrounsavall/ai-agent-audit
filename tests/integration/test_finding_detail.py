@@ -1,8 +1,9 @@
 """The finding detail panel: what to do, where each value is, and who may see it.
 
-Three builds of the same scan folder are compared. The default build and the
--LocalLinks build must never contain a matched value or transcript text.
-Only the -ShowSecrets build may, and -Redact turns that off.
+Three builds of the same scan folder are compared. The default build shows
+matched values and local paths. The -LocalLinks build has paths but must
+never contain a matched value or transcript text. -Redact and --mask-secrets
+turn values off even if -ShowSecrets was also requested.
 """
 
 from __future__ import annotations
@@ -153,9 +154,8 @@ class TestFindingDetail(unittest.TestCase):
         self.assertNotIn('class="hit-ctx"', doc)
         self.assertNotIn("Copy value", doc)
 
-    def test_default_build_shows_where_and_what_to_do_without_values(self):
+    def test_default_build_shows_values_paths_and_what_to_do(self):
         doc = self._html()
-        self._assert_no_values(doc)
         # Location: tool, message, line and column, both files.
         self.assertIn("line 13, column 21", doc)
         self.assertIn("Claude Code", doc)
@@ -163,13 +163,26 @@ class TestFindingDetail(unittest.TestCase):
         self.assertIn("Original session log", doc)
         self.assertIn("2 locations in 1 file", doc)
         self.assertIn("3 locations in 1 file, 2 distinct values", doc)
-        # Guidance.
+        # Guidance and live values (the default briefing is a local cleanup copy).
         self.assertIn("Rotate before you delete.", doc)
         self.assertIn("~/.claude/projects/", doc)
         self.assertIn("git filter-repo", doc)
+        self.assertIn(f'<code class="hit-secret">{GH}</code>', doc)
+        self.assertIn(CARD, doc)
+        self.assertIn("Contains secret values", doc)
+        self.assertIn("vscode://file/", doc)
+        self.assertIn("Test User", doc)
+        self.assertNotIn("Values are masked in this copy.", doc)
+        # Case cards use the raw values, not the ****REDACTED**** placeholders.
+        summaries = re.findall(r'<p class="case-summary">(.*?)</p>', doc)
+        joined = " ".join(summaries)
+        self.assertTrue(GH in joined or html.escape(CARD) in joined or CARD in joined, joined[:300])
+        self.assertNotIn("****REDACTED", joined)
+
+    def test_shareable_build_masks_values_and_paths(self):
+        doc = self._html(mask_secrets=True)
+        self._assert_no_values(doc)
         self.assertIn("Values are masked in this copy.", doc)
-        # A shareable build has no local paths, no links, and no username,
-        # including the dashed form Claude Code uses in project folder names.
         self.assertNotIn("Test User", doc)
         self.assertNotIn("Test-User", doc)
         self.assertNotIn("vscode://", doc)
@@ -225,6 +238,11 @@ class TestFindingDetail(unittest.TestCase):
         self.assertNotIn("Contains secret values", doc)
         self.assertNotIn("vscode://", doc)
         self.assertNotIn("Test User", doc)
+
+    def test_mask_secrets_flag_keeps_values_out_without_redact(self):
+        doc = self._html(mask_secrets=True)
+        self._assert_no_values(doc)
+        self.assertNotIn("Contains secret values", doc)
 
     def test_named_credentials_come_before_the_length_only_matches(self):
         doc = self._html(show_secrets=True)

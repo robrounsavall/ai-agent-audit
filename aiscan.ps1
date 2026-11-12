@@ -55,18 +55,19 @@
     you intend to share aiscan output.
 
 .PARAMETER LocalLinks
-    With -Briefing, show full local file paths in the briefing with Copy path
-    buttons and folder links, and write briefing\briefing-local.html. The file
-    contains local paths: do not share it. Ignored (with a warning) when -Redact
-    is set.
+    With -Briefing, write briefing\briefing-local.html with full local file
+    paths, Copy path buttons, and folder links, but keep matched values masked.
+    The file contains local paths: do not share it. Ignored (with a warning)
+    when -Redact is set. The default briefing already includes paths when it
+    shows values.
 
 .PARAMETER ShowSecrets
-    With -Briefing, write briefing\briefing-unmasked.html: under each finding,
-    every matched value in full, the text on either side of it, the file, line
-    and column, and links that open the file at that line in VS Code or Cursor.
-    Includes everything -LocalLinks does. The file holds live credentials. Keep
-    it on this machine and delete it when you are done. Ignored (with a
-    warning) when -Redact or -AgentMode is set.
+    With -Briefing, write briefing\briefing-unmasked.html with the same
+    unmasked content the default briefing.html already has: every matched
+    value in full, the text on either side of it, the file, line and column,
+    and links that open the file at that line in VS Code or Cursor. The file
+    holds live credentials. Keep it on this machine and delete it when you
+    are done. Ignored (with a warning) when -Redact or -AgentMode is set.
 
 .PARAMETER OutDir
     Persistent output root instead of the throwaway temp directory. Creates
@@ -81,8 +82,13 @@
 .PARAMETER Briefing
     After collectors finish, build an HTML briefing from the evidence root with
     report\build-briefing.py and open it (Start-Process). Written to
-    <root>\briefing\briefing.html. Implies -Keep (the briefing lives inside the
-    evidence root). Failures print a warning and do not stop the scan.
+    <root>\briefing\briefing.html. Unless -Redact or -AgentMode is set, the
+    Findings tab shows matched values, surrounding text, and local paths. The
+    file holds live credentials: keep it on this machine and delete it when
+    you are done. A banner on the page has a Hide values button for a screen
+    share. Pass -Redact for a shareable copy with values masked and paths
+    hashed. Implies -Keep (the briefing lives inside the evidence root).
+    Failures print a warning and do not stop the scan.
 
 .PARAMETER Customer
     Customer / engagement name shown on the briefing hero and footer. Passed to
@@ -124,7 +130,8 @@
     (collector, detected, finding count): no hostname, finding titles,
     or samples. For agent runs that must not repeat absolute paths.
     Messages this script prints are scrubbed. Stderr from a collector
-    process is not, and can still contain a path.
+    process is not, and can still contain a path. A briefing built in this
+    mode keeps matched values masked.
 
 .PARAMETER Hub
     After the scan, add its evidence to the local hub database so it shows
@@ -806,6 +813,7 @@ function Invoke-AiscanBriefing {
     )
     if ($UseLocalLinks) { $briefingArgs += "--local-links" }
     if ($UseShowSecrets) { $briefingArgs += "--show-secrets" }
+    elseif ($AgentMode) { $briefingArgs += "--mask-secrets" }
     if ($Customer) { $briefingArgs += @("--customer", $Customer) }
     if ($Operator) { $briefingArgs += @("--operator", $Operator) }
     try {
@@ -822,7 +830,7 @@ function Invoke-AiscanBriefing {
         return
     }
     Write-Host ("Briefing written: {0}" -f (Format-AiscanPath -Path $briefingOut -Root $Root)) -ForegroundColor Green
-    if ($UseShowSecrets) {
+    if ($UseShowSecrets -or (-not $Redact -and -not $AgentMode -and -not $UseLocalLinks)) {
         Write-Host "This briefing shows secret values in full. Keep it on this machine and delete it when you are done." -ForegroundColor Yellow
     }
     try {

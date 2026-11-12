@@ -32,11 +32,12 @@ How much of that is shown depends on how the page was built.
 
 | Build | File | Paths | Matched values and surrounding text |
 |---|---|---|---|
-| `-Briefing` | `briefing.html` | Shortened or hashed | Masked. Not on the page. |
+| `-Briefing` | `briefing.html` | Full, with Copy path, folder, and open-in-editor links | Shown in full, with up to 80 characters on each side |
 | `-Briefing -LocalLinks` | `briefing-local.html` | Full, with Copy path, folder, and open-in-editor links | Masked. Not on the page. |
-| `-Briefing -ShowSecrets` | `briefing-unmasked.html` | Full, same links | Shown in full, with up to 80 characters on each side |
+| `-Briefing -ShowSecrets` | `briefing-unmasked.html` | Full, same links | Same unmasked content as the default `briefing.html` |
+| `-Briefing -Redact` | `briefing.html` | Shortened or hashed | Masked. Not on the page. |
 
-`-ShowSecrets` is for the person doing the cleanup on the machine that was scanned. The file holds live credentials and transcript excerpts. Keep it on that machine and delete it when you are done. The banner at the top has a Hide values button that blurs the values for a screen share. `-Redact` and `-AgentMode` both turn `-ShowSecrets` off.
+The default briefing is for the person doing the cleanup on the machine that was scanned. The file holds live credentials and transcript excerpts. Keep it on that machine and delete it when you are done. The banner at the top has a Hide values button that blurs the values for a screen share. Pass `-Redact` for a shareable copy. `-AgentMode` also builds a masked briefing.
 
 The open-in-editor links use the `vscode://file/<path>:<line>:<column>` and `cursor://file/...` schemes. They work when that editor is installed. A session log is often one very long line per message, so the column matters more than the line.
 

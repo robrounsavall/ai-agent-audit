@@ -9,6 +9,19 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ## [Unreleased]
 
+### Changed
+
+- The default briefing (`all -Briefing`, written to `briefing.html`) now
+  shows each matched value, the text around it, and local file paths on
+  the Findings tab. It used to mask those unless you passed `-ShowSecrets`.
+  The page has a warning banner and a Hide values button for a screen
+  share. The file holds live credentials: keep it on this machine and
+  delete it when you are done. Pass `-Redact` for a shareable copy with
+  values masked and paths hashed. `-LocalLinks` still writes
+  `briefing-local.html` with full paths and values masked. `-ShowSecrets`
+  still writes the same unmasked content to `briefing-unmasked.html`.
+  `-AgentMode` still builds a masked briefing.
+
 ## [0.3.0] - 2026-11-12
 
 ### Added

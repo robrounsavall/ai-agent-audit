@@ -199,15 +199,21 @@ class TestClickableEvidence(unittest.TestCase):
             self.assertIn(html.escape(part), doc)
 
     # 2
-    def test_secrets_and_pii_never_in_html(self):
-        self._assert_no_leaks(self._html())
+    def test_secrets_and_pii_never_in_masked_builds(self):
         self._assert_no_leaks(self._html(local_links=True))
+        self._assert_no_leaks(self._html(mask_secrets=True))
+
+    def test_default_build_includes_secret_values(self):
+        doc = self._html()
+        # pii-scan raw rows carry the value in "sample". secrets-scan raw rows
+        # only store a shortened sample_redacted column, so those stay masked.
+        self.assertIn(html.escape(PII), doc)
 
     # 3
     def test_local_links_off(self):
         common = sys.modules["common"]
         with mock.patch.object(common, "USERPROFILE", Path(PROFILE)):
-            doc = self._html()
+            doc = self._html(mask_secrets=True)
         self.assertNotIn("file:", doc)
         self.assertNotIn('class="copy-path"', doc)
         self.assertNotIn("data-path=", doc)
@@ -218,7 +224,7 @@ class TestClickableEvidence(unittest.TestCase):
         self.assertIn("&lt;userprofile&gt;", doc)
 
     def test_local_links_off_hashes_non_profile_paths(self):
-        doc = self._html()
+        doc = self._html(mask_secrets=True)
         self.assertNotIn("Test User", doc)
         self.assertNotIn("proj#1", doc)
         self.assertIn("&lt;path#", doc)
@@ -358,7 +364,7 @@ class TestClickableEvidence(unittest.TestCase):
     def test_card_paths_hidden_links_off(self):
         bad = "/var/private/stuff/x.env"
         self._set_codex(raw_evidence_ref=bad, note="see file:///home/bob/x and " + bad)
-        cards = self._cards()
+        cards = self._cards(mask_secrets=True)
         self.assertIn("ev-card", cards)
         self.assertNotIn("/var/private", cards)
         self.assertNotIn("bob", cards)
@@ -371,7 +377,7 @@ class TestClickableEvidence(unittest.TestCase):
         for f in data["findings"]:
             f["raw_evidence_ref"] = ref
         (self.root / "evidence" / "secrets-scan.json").write_text(json.dumps(data), encoding="utf-8")
-        cards = self._cards()
+        cards = self._cards(mask_secrets=True)
         self.assertIn("more in", cards)
         self.assertNotIn("Secret Dir", cards)
 
@@ -457,7 +463,7 @@ class TestClickableEvidence(unittest.TestCase):
             ["file", "line", "rule", "sample_redacted"],
             [[ENV_PATH, "", "bad/rule!" + tok, self.sample]],
         )
-        cards = self._cards()
+        cards = self._cards(mask_secrets=True)
         for bad in (tok, "victim.person", "example.com", "/var/private", "bob", "bad key", "Test User"):
             self.assertNotIn(bad, cards)
         self.assertIn("ok.key", cards)
