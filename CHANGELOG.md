@@ -11,6 +11,20 @@ each collector's `__version__` and appear in the evidence envelopes.
 
 ### Added
 
+- The hub: a local SQLite database and a dashboard for scans, in `hub/`.
+  `aiscan all -Hub` stores a scan, `aiscan hub-import -OutDir <folder>`
+  adds scans you already have, and `aiscan hub` serves the dashboard on
+  `127.0.0.1` behind an access token. It tracks each finding across scans
+  (first seen, last seen, open or resolved), charts open findings over
+  time, shows changes between scans using `core/scan_diff.py`, lists
+  current permissions, MCP servers, and accounts, and keeps a review
+  decision per finding. Only the `evidence` layer is stored. `raw\` is
+  never read. `python hub\aiscan_hub.py push` can send one masked,
+  share-safe scan to a hub on another machine. It is opt-in and is the
+  only hub command that makes an outbound call. `python hub\aiscan_hub.py
+  demo` runs the dashboard on invented data. Stdlib only. See
+  [hub/README.md](hub/README.md) and
+  [docs/hub-architecture.md](docs/hub-architecture.md).
 - `vscode` collector 1.1.0 replaces `copilot` and is included in `aiscan all`.
   It reads VS Code user and workspace settings, Copilot chat-session
   metadata, AI extensions, and JetBrains Copilot config. Finding ids moved

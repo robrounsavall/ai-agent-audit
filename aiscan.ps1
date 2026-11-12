@@ -18,7 +18,7 @@
 .PARAMETER Collector
     One of: claude cowork cursor codex vscode chat-history git-posture
     secrets-scan pii-scan grok grok-bot accounts cloud-agents telemetry
-    discover all. Defaults to 'all' when omitted.
+    discover summary hub hub-import all. Defaults to 'all' when omitted.
 
     'discover' is read-only and writes nothing.
     'summary' reads a finished scan and prints a safe summary (collector,
@@ -27,6 +27,11 @@
     %LOCALAPPDATA%\aiscan-results that has at least half as many collectors
     as the largest run there. A newer one-collector folder is skipped.
     'all' runs the 12 offline collectors and prints a combined summary.
+    'hub' runs the local dashboard over the hub database (hub\aiscan_hub.py
+    serve). It listens on 127.0.0.1 and needs the access token it prints.
+    'hub-import' adds scan folders you already have to the hub database.
+    Pass -OutDir with one scan folder or a folder that holds several.
+    Neither runs collectors, and neither makes an outbound network call.
     'accounts' reports which identity each tool is signed in as. It stores
     emails and plan names, never token or API key values. -Redact stays off
     unless it is passed; with -Redact, emails in that output become <email>.
@@ -113,6 +118,13 @@
     Messages this script prints are scrubbed. Stderr from a collector
     process is not, and can still contain a path.
 
+.PARAMETER Hub
+    After the scan, add its evidence to the local hub database so it shows
+    in the dashboard ('aiscan hub'). Works with a throwaway scan too: the
+    database keeps the evidence layer after the temp folder is deleted.
+    raw\ is never read. A failure here warns and does not change the exit
+    code. Nothing is sent to another machine.
+
 .PARAMETER LaunchedBy
     Who or what started this scan, such as a harness name ("Claude Code")
     or a person's name for a manual run. Overrides the AISCAN_LAUNCHED_BY
@@ -181,6 +193,15 @@
     summary line instead of the detailed view.
 
 .EXAMPLE
+    .\aiscan.ps1 all -Hub
+    Runs the offline collectors and stores the result in the local hub
+    database. Then '.\aiscan.ps1 hub' opens the dashboard.
+
+.EXAMPLE
+    .\aiscan.ps1 hub-import -OutDir C:\scans
+    Adds every scan folder under C:\scans to the hub database.
+
+.EXAMPLE
     .\aiscan.ps1 all -OutDir C:\scans\today -Briefing -LaunchedBy "Claude Code" -Reason "comparison baseline"
     Records one run-origin line: who launched the scan, the start time, and why.
     Secrets and paths in those two fields are masked even when -Redact is off.
@@ -190,7 +211,7 @@ param(
     [Parameter(Mandatory = $false, Position = 0)]
     [ValidateSet("claude", "cowork", "cursor", "codex", "vscode", "chat-history",
         "git-posture", "secrets-scan", "pii-scan", "grok", "grok-bot", "accounts",
-        "cloud-agents", "telemetry", "discover", "all", "summary")]
+        "cloud-agents", "telemetry", "discover", "all", "summary", "hub", "hub-import")]
     [string]$Collector = "all",
 
     [switch]$Json,
@@ -224,6 +245,8 @@ param(
     [string]$HistoryRoot,
 
     [switch]$AgentMode,
+
+    [switch]$Hub,
 
     [string]$LaunchedBy,
 
@@ -1008,6 +1031,53 @@ if ($Collector -eq "summary") {
     exit $LASTEXITCODE
 }
 
+# --- hub: local database and dashboard, no collectors ---
+# hub\aiscan_hub.py does the work. These two commands and -Hub read and
+# write a SQLite file on this machine. None of them sends anything out;
+# pushing to another machine is a separate, explicit python command.
+$HubScript = Join-Path $ScriptDir "hub\aiscan_hub.py"
+if ($Collector -eq "hub" -or $Collector -eq "hub-import") {
+    if (-not (Test-Path -LiteralPath $HubScript)) {
+        Write-Host "hub\aiscan_hub.py not found." -ForegroundColor Red
+        exit 1
+    }
+    if ($Collector -eq "hub") {
+        & $Python $HubScript "serve"
+        exit $LASTEXITCODE
+    }
+    $importRoot = if ($OutDir) { $OutDir } elseif ($Here) { (Get-Location).ProviderPath } else { $null }
+    if (-not $importRoot) {
+        Write-Host "hub-import needs -OutDir (a scan folder, or a folder of scan folders) or -Here." -ForegroundColor Red
+        exit 1
+    }
+    if (-not (Test-Path -LiteralPath $importRoot -PathType Container)) {
+        Write-Host "Output folder not found." -ForegroundColor Red
+        exit 1
+    }
+    & $Python $HubScript "ingest" $importRoot
+    exit $LASTEXITCODE
+}
+
+# Adds this scan's evidence layer to the hub database. Bookkeeping: a
+# failure warns and the scan result stands. Runs before a throwaway root is
+# deleted, so the database is what keeps a default scan.
+function Add-ScanToHub {
+    param([string]$Root)
+    if (-not $Hub) { return }
+    if (-not (Test-Path -LiteralPath $HubScript)) {
+        Write-Host "hub\aiscan_hub.py not found; scan not added to the hub." -ForegroundColor Yellow
+        return
+    }
+    Write-Host ""
+    & $Python $HubScript "ingest" $Root
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Scan was not added to the hub." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "Open the dashboard with: .\aiscan.ps1 hub" -ForegroundColor DarkGray
+    }
+}
+
 # Banner version, also stamped on every evidence envelope via AISCAN_VERSION.
 # After discover and summary return, so a path listing does not spawn git.
 $AiscanVersion = Get-AiscanVersion
@@ -1072,6 +1142,7 @@ if ($Collector -eq "all") {
         Invoke-ScanDiff -Root $root
         Invoke-AiscanBriefing -Root $root
     }
+    Add-ScanToHub -Root $root
     Remove-PeekRoot -Root $root
     exit (Get-AiscanScanExitCode -Rows $statusRows -BriefingFailed $script:AiscanBriefingFailed)
 }
@@ -1147,5 +1218,6 @@ if ($Briefing -and $parsed -and ($code -eq 0 -or $code -eq 2)) {
     }
     Invoke-AiscanBriefing -Root $root
 }
+if ($parsed) { Add-ScanToHub -Root $root }
 Remove-PeekRoot -Root $root
 exit (Get-AiscanScanExitCode -Rows @($statusRow) -BriefingFailed $script:AiscanBriefingFailed)

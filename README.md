@@ -48,6 +48,36 @@ cd ai-agent-audit
 Either way, `all` runs the offline collectors, writes what changed since the
 previous scan, and builds a self-contained HTML report.
 
+## Keep history and see a dashboard
+
+A scan folder is one machine at one moment. The **hub** keeps every scan in
+a local SQLite database and serves a dashboard over it: open findings over
+time, when each finding first appeared and whether it is fixed, what
+changed between scans, current permissions and MCP servers, and your review
+decision on each finding.
+
+[![Hub dashboard, invented data](docs/hub-screenshot.png)](hub/README.md)
+
+```powershell
+# Scan and store the result in the hub
+.\aiscan.ps1 all -Hub
+
+# Add scan folders you already have
+.\aiscan.ps1 hub-import -OutDir C:\scans
+
+# Open the dashboard (127.0.0.1 only, needs the access token it prints)
+.\aiscan.ps1 hub
+
+# Or look around first with invented data
+python hub\aiscan_hub.py demo
+```
+
+The hub is stdlib Python like the rest of aiscan: no install, no database
+server. It stores the `evidence` layer only and never reads `raw\`. One hub
+can also collect share-safe scans from several machines. See
+[hub/README.md](hub/README.md) and
+[docs/hub-architecture.md](docs/hub-architecture.md).
+
 ## Have an AI agent run the scan
 
 [RUN-AISCAN.md](RUN-AISCAN.md) is a set of instructions for an AI coding
@@ -79,6 +109,12 @@ teams have no inventory of any of it. aiscan answers the first question:
   `https://api.cursor.com` with a key you supply, and it is not part of `all`.
   `telemetry` is also opt-in and not part of `all`. It reads export files you
   already saved. It does not call Splunk.
+- **The hub is local too.** `-Hub`, `hub-import`, and `hub` read and write
+  a SQLite file on your machine. The dashboard listens on `127.0.0.1` and
+  needs an access token. The one command that sends a scan to another
+  machine is `python hub\aiscan_hub.py push`. It is never run for you, it
+  sends a masked, share-safe bundle to the one server you name, and
+  `--dry-run` prints exactly what would be sent.
 - **Secret values stay out of the report.** The `accounts` collector reads
   plain identifiers (email, username, organization, plan) and auth method.
   Token, API key, password, and cookie values are never written. Credential
@@ -363,6 +399,7 @@ components/
   telemetry-import/   # opt-in approvals and usage from local exports (not in `all`)
 core/scan_diff.py     # what changed since the previous scan (changes.json)
 report/               # HTML briefing builder (summary, then tabs) + access map
+hub/                  # scan database, dashboard, and share-safe push (see hub/README.md)
 samples/              # synthetic demo evidence and the report v2 draft
 tools/mcp-visibility/ # cross-tool MCP inventory utility
 tools/github-access/  # opt-in GitHub App and SAML credential inventory
@@ -383,8 +420,9 @@ SCHEMA.md             # evidence contract (all collectors)
 .\scripts\test-component.ps1 -Name codex
 .\scripts\test-component.ps1 -Name cloud-agents
 .\scripts\test-component.ps1 -Name telemetry-import
+.\scripts\test-component.ps1 -Name hub
 
-# Everything (all components + integration + mcp-visibility + github-access)
+# Everything (all components + hub + integration + mcp-visibility + github-access)
 .\scripts\test-component.ps1 -Name all
 
 # Live scan one tool on this machine

@@ -37,7 +37,7 @@ mkdir -p "$stage"
 # VERSION is not copied here. The printf below is the only copy in the zip,
 # so a byte-order mark in the repo file cannot ride along.
 files=(aiscan.ps1 paths.example.json README.md LICENSE SECURITY.md SCHEMA.md THIRD_PARTY_NOTICES.md)
-dirs=(components core report scripts tools)
+dirs=(components core hub report scripts tools)
 
 for f in "${files[@]}"; do cp "$f" "$stage/"; done
 for d in "${dirs[@]}"; do cp -r "$d" "$stage/"; done
@@ -53,7 +53,8 @@ printf '%s\n' "$version" > "$stage/VERSION"
 # Fail if aiscan.ps1's runtime entry points are missing.
 for need in core/common.py core/paths.py core/discover.py core/scan_diff.py \
             core/agent_summary.py core/tool_version.py core/run_status.py \
-            report/build-briefing.py report/templates/briefing.css; do
+            report/build-briefing.py report/templates/briefing.css \
+            hub/aiscan_hub.py hub/hub_web.py hub/static/hub.css hub/static/hub.js; do
   [[ -f "$stage/$need" ]] || { echo "missing from zip: $need" >&2; exit 1; }
 done
 # Collector scripts named in aiscan.ps1's $ScriptFor map ("claude\claude.py" ...).
