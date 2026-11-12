@@ -260,7 +260,21 @@ Opt-in telemetry import (local files, not part of `all`):
 ```
 
 Rebuild the report v2 HTML from a scan you already have, without re-running
-the offline collectors:
+the offline collectors. From the repo root in Windows PowerShell 5.1:
+
+```powershell
+.\scripts\build-draft-report.ps1 -EvidenceRoot C:\scans\2026-10-07
+```
+
+That writes `C:\scans\2026-10-07\briefing\report-v2.html`. The scan folder
+must contain `evidence\` with the collector JSON files (`version` major 1).
+`changes.json`, `raw\`, `manifest.json`, and `run-origin.txt` are optional.
+`-Previous`, `-Out`, `-Customer`, `-Operator`, `-OtelFile`, and
+`-SplunkExport` are optional. A missing folder prints
+`Scan folder not found: C:\scans\2026-10-07` and exits 1. A path that exists
+but is not a scan folder prints
+`Not a scan folder: C:\scans\2026-10-07 (expected an evidence directory)`
+and exits 1.
 
 ```powershell
 .\scripts\build-draft-report.ps1 -EvidenceRoot C:\scans\2026-10-07 -Previous C:\scans\2026-10-01 -Out C:\scans\2026-10-07\briefing\report-v2.html -OtelFile C:\exports\otel.json -SplunkExport C:\exports\cursor-usage.csv

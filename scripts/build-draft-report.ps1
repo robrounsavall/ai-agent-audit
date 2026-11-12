@@ -13,7 +13,14 @@
     files in the repo are not modified; the script copies them to a temp folder.
 
 .PARAMETER EvidenceRoot
-    Folder that contains an evidence\ directory from a real scan.
+    Scan folder from a real run. It must contain an evidence\ directory
+    with the collector JSON files (version major 1). changes.json, raw\,
+    manifest.json, and run-origin.txt are optional.
+
+    If the folder does not exist, the script prints
+    "Scan folder not found: <path>" and exits 1.
+    If the path exists but has no evidence\ directory, it prints
+    "Not a scan folder: <path> (expected an evidence directory)" and exits 1.
 
 .PARAMETER Previous
     Earlier evidence root. When omitted on a real scan, scan_diff prefers the
@@ -108,8 +115,14 @@ elseif (-not $Out) {
     $Out = Join-Path $EvidenceRoot "briefing\report-v2.html"
 }
 
-if (-not (Test-Path -LiteralPath (Join-Path $workRoot "evidence"))) {
-    Write-Host "No evidence directory under $workRoot" -ForegroundColor Red
+if (-not $synthetic) {
+    if (-not (Test-Path -LiteralPath $workRoot)) {
+        Write-Host "Scan folder not found: $workRoot" -ForegroundColor Red
+        exit 1
+    }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $workRoot "evidence") -PathType Container)) {
+    Write-Host "Not a scan folder: $workRoot (expected an evidence directory)" -ForegroundColor Red
     exit 1
 }
 

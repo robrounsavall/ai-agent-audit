@@ -326,8 +326,15 @@ REPORT_V2_CSS = """
   --f-serif: ui-sans-serif, "Segoe UI", sans-serif;
   --section-y: 36px;
 }
-.report-summary { padding: 48px 0 28px; }
-.report-summary .display { margin: 12px 0 8px; }
+.report-summary { padding: 20px 0 12px; }
+.report-summary .display {
+  font-size: clamp(32px, 4vw, 48px);
+  margin: 0 0 20px;
+}
+.report-summary .lede { margin-top: 0; margin-bottom: 20px; }
+.report-summary .mono-eyebrow { margin-bottom: 12px; }
+html { scroll-padding-top: calc(var(--tabbar-h, 56px) + 8px); }
+h1, h2, h3, .agents-block, .section { scroll-margin-top: calc(var(--tabbar-h, 56px) + 8px); }
 .summary-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -363,10 +370,9 @@ REPORT_V2_CSS = """
   position: sticky;
   top: 0;
   z-index: 40;
-  background: var(--nav-bg);
+  background: var(--bg);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  backdrop-filter: saturate(180%) blur(14px);
 }
 .page-tablist-inner {
   max-width: var(--max-w);
@@ -392,6 +398,91 @@ REPORT_V2_CSS = """
   background: var(--accent-2);
   border-color: var(--line-2);
 }
+.page-tab:focus-visible, .tab-btn:focus-visible, .finding-toggle:focus-visible, .goto-tab:focus-visible, .expand-all:focus-visible, .ev-collapse:focus-visible, .show-all-rows:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.page-tab--empty { opacity: 0.72; }
+.tab-tag {
+  margin-left: 6px;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+@media (max-width: 720px) {
+  .page-tablist-inner {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 28px), transparent);
+  }
+  .page-tab { flex: 0 0 auto; white-space: nowrap; }
+}
+.filter-label {
+  font-size: 14px;
+  color: var(--fg);
+  font-weight: 600;
+}
+.search-status, .search-other { margin: 8px 0 0; font-size: 14px; color: var(--fg-2); }
+.search-other { display: flex; flex-wrap: wrap; gap: 8px; }
+.search-other button, .goto-tab, .expand-all, .ev-collapse, .show-all-rows, .agents-toc button {
+  font: 600 13px/1.2 var(--f-sans);
+  color: var(--fg);
+  background: var(--bg-card);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.agents-toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 20px; }
+.change-counts { margin: 8px 0; padding-left: 18px; color: var(--fg); }
+.change-counts strong { font-variant-numeric: tabular-nums; }
+table.findings { table-layout: fixed; width: 100%; }
+table.findings .col-sev { width: 108px; }
+table.findings .col-evidence { width: 96px; }
+table.findings .col-seen { width: 120px; }
+table.findings .col-sample { width: 28%; }
+tr.frow { cursor: pointer; }
+tr.frow.is-open { background: var(--accent-2); box-shadow: inset 3px 0 0 var(--accent); }
+.finding-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chevron {
+  width: 0.55em;
+  height: 0.55em;
+  margin-top: 0.35em;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  flex: 0 0 auto;
+}
+tr.frow.is-open .chevron { transform: rotate(45deg); }
+tr.fdetail td { background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); border-left: 3px solid var(--accent); }
+.ev-panel { padding: 4px 0 0; }
+.ev-collapse-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding: 8px 0;
+  background: var(--bg-card);
+  border-top: 1px solid var(--line);
+}
+.findings-tools { display: flex; justify-content: flex-end; margin: 0 0 8px; }
+.low-allow summary { cursor: pointer; font-weight: 600; }
+.show-all-rows, .changes-block { margin-top: 8px; }
 .page-panel[hidden] { display: none !important; }
 .empty-note {
   margin: 28px 0;
@@ -414,95 +505,278 @@ REPORT_V2_CSS = """
 
 REPORT_V2_JS = """
 (function () {
-  var tabs = document.querySelectorAll("[data-page-tab]");
-  var panels = document.querySelectorAll("[data-page-panel]");
-  function show(id) {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-page-tab]"));
+  var panels = Array.prototype.slice.call(document.querySelectorAll("[data-page-panel]"));
+  var lastFinding = null;
+
+  function measureBar() {
+    var bar = document.querySelector(".page-tablist");
+    if (!bar) return;
+    var h = Math.ceil(bar.getBoundingClientRect().height);
+    document.documentElement.style.setProperty("--tabbar-h", h + "px");
+  }
+  measureBar();
+  window.addEventListener("resize", measureBar);
+
+  function headingOf(panel) {
+    return panel.querySelector("h1, h2") || panel;
+  }
+  function show(id, opts) {
+    opts = opts || {};
     tabs.forEach(function (tab) {
       var on = tab.getAttribute("data-page-tab") === id;
       tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+      if (on) tab.scrollIntoView({ inline: "nearest", block: "nearest" });
     });
+    var active = null;
     panels.forEach(function (panel) {
       var on = panel.getAttribute("data-page-panel") === id;
       panel.hidden = !on;
       panel.classList.toggle("is-active", on);
+      if (on) active = panel;
+    });
+    if (opts.user && active) {
+      var head = headingOf(active);
+      if (head.tabIndex < 0) head.tabIndex = -1;
+      var bar = document.querySelector(".page-tablist");
+      var offset = bar ? bar.getBoundingClientRect().height + 8 : 0;
+      var top = active.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo(0, Math.max(0, top));
+      head.focus();
+    }
+    if (opts.url && history.replaceState) history.replaceState(null, "", "#" + id);
+  }
+  function wireKeys(list, items, onPick) {
+    list.addEventListener("keydown", function (ev) {
+      var i = items.indexOf(document.activeElement);
+      if (i < 0) return;
+      var next = null;
+      if (ev.key === "ArrowRight" || ev.key === "ArrowDown") next = items[(i + 1) % items.length];
+      else if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") next = items[(i - 1 + items.length) % items.length];
+      else if (ev.key === "Home") next = items[0];
+      else if (ev.key === "End") next = items[items.length - 1];
+      if (!next) return;
+      ev.preventDefault();
+      next.focus();
+      onPick(next);
+    });
+  }
+  var tablist = document.querySelector(".page-tablist");
+  if (tablist) {
+    wireKeys(tablist, tabs, function (tab) {
+      show(tab.getAttribute("data-page-tab"), { user: true, url: true });
     });
   }
   tabs.forEach(function (tab) {
     tab.addEventListener("click", function () {
-      var id = tab.getAttribute("data-page-tab");
-      show(id);
-      if (history.replaceState) {
-        history.replaceState(null, "", "#" + id);
-      }
+      show(tab.getAttribute("data-page-tab"), { user: true, url: true });
     });
+  });
+  document.addEventListener("click", function (ev) {
+    var jump = ev.target.closest && ev.target.closest("[data-goto-tab]");
+    if (!jump) return;
+    ev.preventDefault();
+    show(jump.getAttribute("data-goto-tab"), { user: true, url: true });
   });
   var initial = (location.hash || "").replace(/^#/, "");
   tabs.forEach(function (tab) {
-    if (tab.getAttribute("data-page-tab") === initial) {
-      show(initial);
-    }
+    if (tab.getAttribute("data-page-tab") === initial) show(initial, { url: false });
   });
 
-  var tabBtns = document.querySelectorAll("#findings-tabs .tab-btn");
-  var tabPanels = document.querySelectorAll("#panel-findings [data-tab].tab-panel");
-  tabBtns.forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var target = btn.dataset.tab;
-      tabBtns.forEach(function (b) { b.classList.toggle("active", b === btn); });
-      tabPanels.forEach(function (p) { p.classList.toggle("active", p.dataset.tab === target); });
+  var catList = document.getElementById("findings-tabs");
+  var catBtns = Array.prototype.slice.call(document.querySelectorAll("#findings-tabs .tab-btn"));
+  var catPanels = Array.prototype.slice.call(document.querySelectorAll("#panel-findings [data-tab].tab-panel"));
+  function showCat(btn) {
+    var target = btn.getAttribute("data-tab");
+    catBtns.forEach(function (b) {
+      var on = b === btn;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      b.tabIndex = on ? 0 : -1;
     });
+    catPanels.forEach(function (p) { p.classList.toggle("active", p.getAttribute("data-tab") === target); });
+    btn.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }
+  catBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () { showCat(btn); });
+  });
+  if (catList) {
+    wireKeys(catList, catBtns, function (btn) { showCat(btn); });
+  }
+
+  function setOpen(row, open) {
+    var btn = row.querySelector(".finding-toggle");
+    var detail = row.nextElementSibling;
+    if (!btn || !detail || !detail.classList.contains("fdetail")) return;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    detail.hidden = !open;
+    row.classList.toggle("is-open", open);
+    if (open) lastFinding = btn;
+  }
+  function closeOthers(panel, row) {
+    panel.querySelectorAll("tr.frow").forEach(function (other) {
+      if (other !== row) setOpen(other, false);
+    });
+  }
+  document.addEventListener("click", function (ev) {
+    var target = ev.target;
+    if (!target.closest) return;
+    var collapse = target.closest(".ev-collapse");
+    if (collapse) {
+      var detail = collapse.closest("tr.fdetail");
+      var row = detail && detail.previousElementSibling;
+      if (row) {
+        setOpen(row, false);
+        var toggle = row.querySelector(".finding-toggle");
+        if (toggle) toggle.focus();
+        var allBtn = row.closest(".tab-panel").querySelector(".expand-all");
+        if (allBtn) allBtn.setAttribute("aria-pressed", "false");
+      }
+      return;
+    }
+    var expandAll = target.closest(".expand-all");
+    if (expandAll) {
+      var panel = expandAll.closest(".tab-panel");
+      var pressed = expandAll.getAttribute("aria-pressed") === "true";
+      panel.querySelectorAll("tr.frow").forEach(function (row) {
+        if (row.hidden) return;
+        setOpen(row, !pressed);
+      });
+      expandAll.setAttribute("aria-pressed", pressed ? "false" : "true");
+      expandAll.textContent = pressed ? "Expand all" : "Collapse all";
+      return;
+    }
+    var showAll = target.closest(".show-all-rows");
+    if (showAll) {
+      var block = showAll.closest(".changes-block");
+      var extra = block && block.querySelector(".changes-extra");
+      var open = showAll.getAttribute("aria-expanded") === "true";
+      if (extra) extra.hidden = open;
+      showAll.setAttribute("aria-expanded", open ? "false" : "true");
+      showAll.textContent = open ? (showAll.getAttribute("data-show-label") || "Show all") : "Show less";
+      return;
+    }
+    var jump = target.closest("[data-jump]");
+    if (jump) {
+      var dest = document.getElementById(jump.getAttribute("data-jump") || "");
+      if (!dest) return;
+      dest.scrollIntoView({ block: "start" });
+      var head = dest.querySelector("h2, h3") || dest;
+      if (head.tabIndex < 0) head.tabIndex = -1;
+      head.focus();
+      return;
+    }
+    var row = target.closest("tr.frow");
+    if (!row || target.closest("a, input, textarea, select")) return;
+    var btn = row.querySelector(".finding-toggle");
+    if (!btn) return;
+    var willOpen = btn.getAttribute("aria-expanded") !== "true";
+    var panel = row.closest(".tab-panel");
+    var allBtn = panel && panel.querySelector(".expand-all");
+    var allMode = allBtn && allBtn.getAttribute("aria-pressed") === "true";
+    if (willOpen && panel && !allMode) closeOthers(panel, row);
+    setOpen(row, willOpen);
+    if (!willOpen && allBtn) {
+      allBtn.setAttribute("aria-pressed", "false");
+      allBtn.textContent = "Expand all";
+    }
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Escape") return;
+    var detail = ev.target.closest && ev.target.closest("tr.fdetail");
+    var row = detail ? detail.previousElementSibling : null;
+    var toggle = (!row && ev.target.closest) ? ev.target.closest(".finding-toggle") : null;
+    if (toggle && toggle.getAttribute("aria-expanded") === "true") {
+      row = toggle.closest("tr.frow");
+    }
+    if (!row && lastFinding) row = lastFinding.closest("tr.frow");
+    if (!row || !row.classList.contains("frow")) return;
+    setOpen(row, false);
+    var back = row.querySelector(".finding-toggle");
+    if (back) back.focus();
   });
 
   function rowMatches(row, q) {
-    var text = (row.getAttribute("data-search") || row.textContent || "").toLowerCase();
+    var text = (row.getAttribute("data-search") || "").toLowerCase();
     return !q || text.indexOf(q) !== -1;
   }
   function setShown(row, shown) {
     row.hidden = !shown;
-    row.style.display = shown ? "" : "none";
   }
   var searchEl = document.getElementById("findings-search");
-  if (searchEl) {
-    searchEl.addEventListener("input", function () {
-      var q = searchEl.value.toLowerCase();
-      var buttons = document.querySelectorAll("#findings-tabs .tab-btn");
-      var firstMatch = null;
-      var activeHas = false;
-      buttons.forEach(function (btn) {
-        var slug = btn.getAttribute("data-tab");
-        var panel = document.querySelector('#panel-findings .tab-panel[data-tab="' + slug + '"]');
-        if (!panel) return;
-        var n = 0;
-        panel.querySelectorAll(".frow").forEach(function (row) {
-          var ok = rowMatches(row, q);
-          setShown(row, ok);
-          if (ok) n += 1;
-        });
-        var empty = panel.querySelector(".filter-empty");
-        if (empty) setShown(empty, q && n === 0);
-        var ct = btn.querySelector(".ct");
-        if (ct) {
-          if (!btn.getAttribute("data-total")) btn.setAttribute("data-total", ct.textContent || "0");
-          ct.textContent = q ? String(n) : btn.getAttribute("data-total");
-        }
-        if (n > 0 && !firstMatch) firstMatch = btn;
-        if (btn.classList.contains("active") && n > 0) activeHas = true;
-      });
-      document.querySelectorAll("#panel-findings .case").forEach(function (card) {
-        setShown(card, rowMatches(card, q));
-      });
-      var appendixHits = 0;
-      document.querySelectorAll("#panel-findings .appendix-table tbody tr").forEach(function (row) {
-        if (row.classList.contains("filter-empty")) return;
+  var statusEl = document.getElementById("findings-search-status");
+  var otherEl = document.getElementById("findings-search-other");
+  var clearBtn = document.getElementById("findings-search-clear");
+  function applySearch() {
+    if (!searchEl) return;
+    var raw = searchEl.value || "";
+    var q = raw.toLowerCase();
+    var activeBtn = document.querySelector("#findings-tabs .tab-btn.active") || catBtns[0];
+    var activeN = 0;
+    var activeTotal = 0;
+    var otherN = 0;
+    if (otherEl) otherEl.innerHTML = "";
+    catBtns.forEach(function (btn) {
+      var slug = btn.getAttribute("data-tab");
+      var panel = document.querySelector('#panel-findings .tab-panel[data-tab="' + slug + '"]');
+      if (!panel) return;
+      var n = 0;
+      var total = 0;
+      panel.querySelectorAll("tr.frow").forEach(function (row) {
+        total += 1;
         var ok = rowMatches(row, q);
         setShown(row, ok);
-        if (ok) appendixHits += 1;
+        var detail = row.nextElementSibling;
+        if (detail && detail.classList.contains("fdetail")) {
+          var open = row.querySelector(".finding-toggle");
+          var expanded = open && open.getAttribute("aria-expanded") === "true";
+          detail.hidden = !(ok && expanded);
+        }
+        if (ok) n += 1;
       });
-      var appendixEmpty = document.querySelector("#panel-findings .appendix-table .filter-empty");
-      if (appendixEmpty) setShown(appendixEmpty, q && appendixHits === 0);
-      if (q && !activeHas && firstMatch) firstMatch.click();
+      var empty = panel.querySelector(".filter-empty");
+      if (empty) {
+        empty.hidden = !(q && n === 0);
+        var cell = empty.querySelector("td");
+        if (cell && q) cell.textContent = "No findings match \u201c" + raw + "\u201d.";
+      }
+      var ct = btn.querySelector(".ct");
+      if (ct) {
+        if (!btn.getAttribute("data-total")) btn.setAttribute("data-total", ct.textContent || "0");
+        ct.textContent = q ? String(n) : btn.getAttribute("data-total");
+      }
+      if (btn === activeBtn) {
+        activeN = n;
+        activeTotal = total;
+      } else if (q && n > 0) {
+        otherN += n;
+        if (otherEl) {
+          var link = document.createElement("button");
+          link.type = "button";
+          link.textContent = n + " in " + (btn.getAttribute("data-label") || "this tab");
+          link.addEventListener("click", function () { showCat(btn); applySearch(); });
+          otherEl.appendChild(link);
+        }
+      }
     });
+    if (clearBtn) clearBtn.hidden = !q;
+    if (statusEl) {
+      if (!q) statusEl.textContent = "";
+      else if (activeN === 0 && otherN === 0) statusEl.textContent = "No findings match \u201c" + raw + "\u201d.";
+      else {
+        var msg = "Showing " + activeN + " of " + activeTotal + ".";
+        if (otherN) msg += " " + otherN + " matches in other tabs.";
+        statusEl.textContent = msg;
+      }
+    }
   }
+  if (searchEl) searchEl.addEventListener("input", applySearch);
+  if (clearBtn) clearBtn.addEventListener("click", function () {
+    searchEl.value = "";
+    applySearch();
+    searchEl.focus();
+  });
 })();
 (function () {
   function fallbackCopy(path, btn) {

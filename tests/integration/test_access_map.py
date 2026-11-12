@@ -630,8 +630,10 @@ class AccessMapRenderTests(unittest.TestCase):
         for row in grid["rows"]:
             for column in grid["columns"]:
                 anchor = grid["cells"][row["id"]][column["id"]]["anchor"]
-                self.assertIn(f"href='#{anchor}'", html)
+                self.assertNotIn(f"href='#{anchor}'", html)
                 self.assertIn(f"id='{anchor}'", html)
+                self.assertIn(f"aria-controls='{anchor}'", html)
+                self.assertIn("aria-expanded='false'", html)
         nav = render_access_map_nav(envelopes)
         self.assertEqual(nav, '<a href="#access-map">Access</a>')
 

@@ -1004,14 +1004,14 @@ def render_posture_grid(envelopes: dict[str, dict[str, Any]]) -> str:
         row_items.append((
             risk_rank, seq,
             f"<tr>"
-            f"<td><strong>{_esc(label)}</strong></td>"
-            f"<td>{det_label}</td>"
-            f"<td class='risk-word {_esc(risk_flag)}'>{_esc(risk_flag)}</td>"
-            f"<td class='num'>{mcp_cnt}</td>"
-            f"<td class='num'>{allow_cnt}</td>"
-            f"<td class='num'>{_esc(approval_evidence)}</td>"
-            f"<td class='num'>{chat_cell}</td>"
-            f"<td class='num'>{_esc(active_cell)}</td>"
+            f"<td data-label='Platform'><strong>{_esc(label)}</strong></td>"
+            f"<td data-label='Detected'>{det_label}</td>"
+            f"<td data-label='Highest risk' class='risk-word {_esc(risk_flag)}'>{_esc(risk_flag)}</td>"
+            f"<td data-label='MCP rules' class='num'>{mcp_cnt}</td>"
+            f"<td data-label='Stored allow rules' class='num'>{allow_cnt}</td>"
+            f"<td data-label='Approval evidence' class='num'>{_esc(approval_evidence)}</td>"
+            f"<td data-label='Chat messages' class='num'>{chat_cell}</td>"
+            f"<td data-label='Active estimate' class='num'>{_esc(active_cell)}</td>"
             f"</tr>"
         ))
 
@@ -2183,6 +2183,19 @@ def render_evidence_card(finding: dict[str, Any], ctx: EvidenceContext) -> str:
     return f'<div class="ev-card">{"".join(sections)}</div>'
 
 
+def _short_sample(sample: str, limit: int = 96) -> str:
+    text = sample.strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _finding_dom_id(finding: dict[str, Any], index: int) -> str:
+    raw = str(finding.get("id") or f"row-{index}")
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", raw).strip("-") or f"row-{index}"
+    return f"finding-{index}-{slug}"
+
+
 def render_findings_section(
     findings: list[dict[str, Any]],
     *,
@@ -2211,12 +2224,16 @@ def render_findings_section(
         slug = re.sub(r"[^a-z0-9]+", "-", cat.lower()).strip("-")
         active = " active" if idx == 0 else ""
         count = len(by_category[cat])
+        selected = "true" if idx == 0 else "false"
+        tab_index = "0" if idx == 0 else "-1"
         tabs.append(
-            f'<button type="button" class="tab-btn{active}" data-tab="{slug}">'
+            f'<button type="button" class="tab-btn{active}" role="tab" id="findings-tab-{slug}" '
+            f'aria-controls="findings-panel-{slug}" aria-selected="{selected}" tabindex="{tab_index}" '
+            f'data-tab="{slug}" data-label="{_esc(cat)}">'
             f'{_esc(cat)}<span class="ct">{count}</span></button>'
         )
         rows = []
-        for f in by_category[cat]:
+        for offset, f in enumerate(by_category[cat]):
             sev = _severity_class(f.get("severity", "low"))
             blob = _esc(_finding_search_blob(f))
             sample = _fix_plurals(_display_redaction_tokens(f.get("sample_redacted") or ""))
@@ -2225,41 +2242,46 @@ def render_findings_section(
                 shown = ctx.path_text(str(loc["path"]))
                 if shown not in files:
                     files.append(shown)
-            if files:
+            if sample:
+                sample_html = f"<code>{_esc(_short_sample(sample))}</code>"
+            elif files:
                 noun = "file" if len(files) == 1 else "files"
-                items = "".join(f"<li>{_esc(path)}</li>" for path in files[:_MAX_LOCATIONS])
-                if len(files) > _MAX_LOCATIONS:
-                    items += f"<li>+{len(files) - _MAX_LOCATIONS} more</li>"
-                file_html = (
-                    f"<details class='hit-files'><summary>{len(files)} {noun}</summary>"
-                    f"<ul>{items}</ul></details>"
-                )
+                sample_html = f"<span class='mono'>{len(files)} {noun}</span>"
             else:
-                file_html = ""
-            sample_html = (
-                f"<code>{_esc(sample)}</code>{file_html}"
-                if sample
-                else (file_html or "<span class='mono' style='color:var(--fg-4)'>n/a</span>")
-            )
+                sample_html = "<span class='mono' style='color:var(--fg-4)'>n/a</span>"
             last_seen = (f.get("last_seen") or "")[:10] or "n/a"
+            dom_id = _finding_dom_id(f, idx * 1000 + offset)
+            title = _esc(f.get("title", ""))
             rows.append(
                 f'<tr class="frow" data-search="{blob}">'
-                f'<td data-label="Severity"><span class="pill {sev}">{_esc(sev)}</span></td>'
-                f'<td data-label="Title"><details class="ev"><summary>{_esc(f.get("title", ""))}</summary>'
-                f'{render_evidence_card(f, ctx)}</details></td>'
-                f'<td class="num" data-label="Evidence">{_as_int((f.get("evidence_count")) or 1, 1)}</td>'
-                f'<td class="mono date" data-label="Last seen">{_esc(last_seen)}</td>'
-                f'<td data-label="Sample">{sample_html}</td>'
+                f'<td class="sev" data-label="Severity"><span class="pill {sev}">{_esc(sev)}</span></td>'
+                f'<td class="title" data-label="Title">'
+                f'<button type="button" class="finding-toggle" aria-expanded="false" aria-controls="{dom_id}">'
+                f'<span class="chevron" aria-hidden="true"></span>'
+                f'<span class="finding-title">{title}</span></button></td>'
+                f'<td class="num meta" data-label="Evidence">{_as_int((f.get("evidence_count")) or 1, 1)}</td>'
+                f'<td class="mono date meta" data-label="Last seen">{_esc(last_seen)}</td>'
+                f'<td class="sample meta" data-label="Sample">{sample_html}</td>'
                 f"</tr>"
+                f'<tr class="fdetail" id="{dom_id}" hidden>'
+                f'<td colspan="5"><div class="ev-panel">{render_evidence_card(f, ctx)}'
+                f'<div class="ev-collapse-bar"><button type="button" class="ev-collapse">Collapse</button></div>'
+                f"</div></td></tr>"
             )
         panels.append(
-            f'<div class="tab-panel{active}" data-tab="{slug}">'
-            f'<div class="table-wrap"><table>'
-            f'<thead><tr><th style="width:90px">Severity</th><th>Title</th>'
-            f'<th style="width:90px">Evidence</th><th style="width:110px">Last seen</th>'
+            f'<div class="tab-panel{active}" role="tabpanel" id="findings-panel-{slug}" '
+            f'aria-labelledby="findings-tab-{slug}" data-tab="{slug}">'
+            f'<div class="findings-tools">'
+            f'<button type="button" class="expand-all" aria-pressed="false">Expand all</button>'
+            f"</div>"
+            f'<div class="table-wrap findings-table"><table class="findings">'
+            f"<colgroup><col class='col-sev'><col class='col-title'><col class='col-evidence'>"
+            f"<col class='col-seen'><col class='col-sample'></colgroup>"
+            f"<thead><tr><th>Severity</th><th>Title</th>"
+            f"<th>Evidence</th><th>Last seen</th>"
             f"<th>Sample</th></tr></thead>"
             f"<tbody>{''.join(rows)}"
-            f'<tr class="filter-empty" hidden><td colspan="5">No matches</td></tr>'
+            f'<tr class="filter-empty" hidden><td colspan="5">No findings match this search.</td></tr>'
             f"</tbody></table></div></div>"
         )
     return "\n".join(tabs), "\n".join(panels)
@@ -3955,14 +3977,54 @@ def render_coverage_gaps(envelopes: dict[str, dict[str, Any]]) -> str:
 </section>"""
 
 
-def _page_tabs(active: str = "findings") -> str:
+def _panel_not_collected(fragment: str) -> bool:
+    return "Not collected in this scan." in fragment and "<h2" not in fragment
+
+
+_PLACEHOLDER_NAMES = {"", "unknown", "unknown customer", "unknown operator"}
+
+
+def _is_placeholder_name(value: str) -> bool:
+    return value.strip().lower() in _PLACEHOLDER_NAMES
+
+
+def _changes_card_html(env: dict[str, Any] | None) -> str:
+    """Counts plus a control that opens the Changes tab."""
+    sentence = _esc(_changes_headline(env))
+    counts = ""
+    summary = env.get("summary") if isinstance(env, dict) and isinstance(env.get("summary"), dict) else {}
+    if isinstance(env, dict) and summary.get("comparison") == "diff":
+        high = _as_int(summary.get("new_high_or_critical"))
+        added = _as_int(summary.get("findings_added"))
+        resolved = _as_int(summary.get("findings_resolved"))
+        drift = _as_int(summary.get("drift_warnings"))
+        counts = (
+            '<ul class="change-counts">'
+            f"<li><strong>{high}</strong> new high or critical</li>"
+            f"<li><strong>{added}</strong> findings added</li>"
+            f"<li><strong>{resolved}</strong> resolved</li>"
+            f"<li><strong>{drift}</strong> drift warnings</li>"
+            "</ul>"
+        )
+    return (
+        f"<p>{sentence}</p>{counts}"
+        '<p><button type="button" class="goto-tab" data-goto-tab="changes">'
+        "Open the Changes tab</button></p>"
+    )
+
+
+def _page_tabs(active: str = "findings", empty: set[str] | None = None) -> str:
+    empty = empty or set()
     buttons = []
     for tab_id, label in _PAGE_TABS:
-        selected = "true" if tab_id == active else "false"
+        selected = tab_id == active
+        classes = "page-tab page-tab--empty" if tab_id in empty else "page-tab"
+        tag = '<span class="tab-tag">not collected</span>' if tab_id in empty else ""
         buttons.append(
-            f'<button type="button" class="page-tab" role="tab" id="tab-{tab_id}" '
-            f'aria-controls="panel-{tab_id}" aria-selected="{selected}" data-page-tab="{tab_id}">'
-            f"{_esc(label)}</button>"
+            f'<button type="button" class="{classes}" role="tab" id="tab-{tab_id}" '
+            f'aria-controls="panel-{tab_id}" aria-selected="{"true" if selected else "false"}" '
+            f'tabindex="{"0" if selected else "-1"}" data-page-tab="{tab_id}">'
+            f"{_esc(label)}{tag}</button>"
         )
     return (
         '<div class="page-tablist" role="tablist" aria-label="Briefing sections">'
@@ -4059,10 +4121,7 @@ def build_html(
     approvals_line = _approvals_headline(telemetry_env)
     summary_cards = [
         _summary_card("Agents and harnesses", _agent_status_list(envelopes)),
-        _summary_card(
-            "What changed since last scan",
-            f"<p>{_esc(_changes_headline(changes_env))}</p>",
-        ),
+        _summary_card("What changed since last scan", _changes_card_html(changes_env)),
     ]
     if cloud_line:
         summary_cards.append(_summary_card("Cloud agents", f"<p>{_esc(cloud_line)}</p>"))
@@ -4077,7 +4136,7 @@ def build_html(
     <header class="sh">
       <div class="kicker"><span class="num">/03</span><span class="kicker-label">FINDINGS</span></div>
       <h2 class="h2">{sum(counts.values())} findings across {category_count} categories.</h2>
-      <p class="sub">Tabs below are exposure categories. The filter searches titles, samples, and tags across every tab. Samples are unredacted unless this scan used -Redact. Secret-scanner hits are grouped by rule and severity, with the hit count in the evidence column. Likely test values are labeled and counted as low. Click a finding title to expand it: the row shows the stored sample and the files where the scanner recorded the hits.</p>
+      <p class="sub">Tabs below are exposure categories. Search covers the findings table on every category tab and stays on the tab you are viewing. Samples are unredacted unless this scan used -Redact. Secret-scanner hits are grouped by rule and severity, with the hit count in the evidence column. Likely test values are labeled and counted as low. Select a row to open its evidence. The row keeps a short sample; the file list is in that panel.</p>
     </header>
     <div class="sev-bar">
       <div class="hdr">
@@ -4087,8 +4146,14 @@ def build_html(
       <div class="sev-bar-track">{render_severity_bar_segments(counts)}</div>
     </div>
     <div class="cases" style="margin-top: 28px;">{render_risk_register(findings)}</div>
-    <div class="filter"><input id="findings-search" type="search" placeholder="filter by title, sample text, or tag…" /></div>
-    <div class="tab-bar" id="findings-tabs">{findings_tabs}</div>
+    <div class="filter">
+      <label class="filter-label" for="findings-search">Search findings</label>
+      <input id="findings-search" type="search" placeholder="title, sample text, or tag" />
+      <button type="button" id="findings-search-clear" hidden>Clear search</button>
+    </div>
+    <p id="findings-search-status" class="search-status" aria-live="polite"></p>
+    <div id="findings-search-other" class="search-other"></div>
+    <div class="tab-bar" id="findings-tabs" role="tablist" aria-label="Finding categories">{findings_tabs}</div>
     {findings_panels}
     <header class="sh" style="margin-top: 48px;">
       <div class="kicker"><span class="num">/08</span><span class="kicker-label">APPENDIX</span></div>
@@ -4099,31 +4164,48 @@ def build_html(
     <div class="table-wrap appendix-table" style="max-height: none;">
       <table>
         <thead><tr><th>Severity</th><th>Finding</th><th>Hits</th><th>Evidence reference</th></tr></thead>
-        <tbody>{appendix_rows}<tr class="filter-empty" hidden><td colspan="4">No matches</td></tr></tbody>
+        <tbody>{appendix_rows}<tr class="filter-empty" hidden><td colspan="4">No findings match this search.</td></tr></tbody>
       </table>
     </div>
   </div>
 </section>"""
 
     collector_rows, collector_show_duration = render_collectors_table(envelopes, runs_list)
+    if manifest_header.startswith("Manifest SHA-256"):
+        attest_html = manifest_attest
+    else:
+        attest_html = ""
+    if _is_placeholder_name(operator_name):
+        sig_line = _esc(generated_at)
+    else:
+        sig_line = f"{_esc(operator_name)} · {_esc(generated_at)}"
     agents_inner = f"""<section id="agents" class="section">
   <div class="wrap">
-    <header class="sh">
+    <header class="sh" id="agents-recorded">
       <div class="kicker"><span class="num">/04</span><span class="kicker-label">AGENTS AND COLLECTORS</span></div>
       <h2 class="h2">What each collector recorded.</h2>
       <p class="sub">Presence, counts, and posture only. The account table names the signed-in identity for each tool. Prompts, transcript text, and secret values stay out of this page. Grok Bot is the desktop app, separate from Grok Build. Cloud agents are an opt-in inventory.</p>
     </header>
+    <nav class="agents-toc" aria-label="On this tab">
+      <button type="button" data-jump="agents-accounts">Accounts</button>
+      <button type="button" data-jump="agents-posture">Posture</button>
+      <button type="button" data-jump="agents-permissions">Permissions</button>
+      <button type="button" data-jump="agents-counts">Chat, secrets, git</button>
+      <button type="button" data-jump="agents-scope">How this was produced</button>
+    </nav>
     {render_accounts_block(envelopes.get("accounts"))}
+    <div id="agents-posture">
     {render_cover_status(envelopes, runs_map, counts)}
     {posture_grid}
-    <header class="sh" style="margin-top: 36px;">
+    </div>
+    <header class="sh" id="agents-permissions" style="margin-top: 36px;">
       <div class="kicker"><span class="num">/04b</span><span class="kicker-label">PERMISSIONS</span></div>
       <h2 class="h2">Configured permission surface.</h2>
     </header>
     {grok_bot_note}
     {render_permissions_section(envelopes)}
     {cloud_section}
-    <header class="sh" style="margin-top: 36px;">
+    <header class="sh" id="agents-counts" style="margin-top: 36px;">
       <div class="kicker"><span class="num">/05</span><span class="kicker-label">CHAT, SECRETS, GIT</span></div>
       <h2 class="h2">Counts from chat, secrets, and git collectors.</h2>
       <p class="sub">Transcript text stays in local raw/. This page shows file counts and hit totals. Samples follow the scan's redaction setting.</p>
@@ -4133,7 +4215,7 @@ def build_html(
       <div class="panel"><h3>Secrets scan · {total_secret_hits} hits</h3>{render_secrets_section(secrets_env)}</div>
       <div class="panel"><h3>Git posture · {git_repos} repos</h3>{render_git_section(git_env)}</div>
     </div>
-    <header class="sh" style="margin-top: 36px;">
+    <header class="sh" id="agents-scope" style="margin-top: 36px;">
       <div class="kicker"><span class="num">/07</span><span class="kicker-label">COLLECTION SCOPE</span></div>
       <h2 class="h2">How this evidence was produced.</h2>
     </header>
@@ -4143,16 +4225,50 @@ def build_html(
       <tbody>{collector_rows}</tbody>
     </table></div>
     <div class="attestation">
-      {manifest_attest}
+      {attest_html}
       <p>Raw evidence stays in the local output directory.</p>
-      <div class="sig-line">{_esc(operator_name)} · {_esc(generated_at)}</div>
+      <div class="sig-line">{sig_line}</div>
     </div>
   </div>
 </section>"""
 
     # Same line as run-origin.txt. Missing file is an older folder: unknown.
     origin_line = format_origin_line(load_run_origin(evidence_root))
-    title = _esc(f"{customer_name} · AI Coding Tool Exposure Review")
+    if manifest_header.startswith("Manifest SHA-256"):
+        manifest_item = f"<li><span class=\"meta-dash\">—</span>{_esc(manifest_header)}</li>"
+    else:
+        manifest_item = ""
+    meta_items = [
+        f"<li><span class=\"meta-dash\">—</span>Run origin · {_esc(origin_line)}</li>",
+    ]
+    if not _is_placeholder_name(customer_name):
+        meta_items.append(
+            f"<li><span class=\"meta-dash\">—</span>Customer · <strong>{_esc(customer_name)}</strong></li>"
+        )
+    if engagement_date.strip().lower() not in {"", "unknown"}:
+        meta_items.append(
+            f"<li><span class=\"meta-dash\">—</span>Engagement · {_esc(engagement_date)}</li>"
+        )
+    if not _is_placeholder_name(operator_name):
+        meta_items.append(
+            f"<li><span class=\"meta-dash\">—</span>Operator · {_esc(operator_name)}</li>"
+        )
+    if manifest_item:
+        meta_items.append(manifest_item)
+    footer_who = "" if _is_placeholder_name(customer_name) else f" · {_esc(customer_name)}"
+    if _is_placeholder_name(customer_name):
+        title = _esc("AI Coding Tool Exposure Review")
+    else:
+        title = _esc(f"{customer_name} · AI Coding Tool Exposure Review")
+    empty_tabs = {
+        tab_id
+        for tab_id, fragment in (
+            ("changes", changes_panel),
+            ("approvals", approvals_panel),
+            ("usage", usage_panel),
+        )
+        if _panel_not_collected(fragment)
+    }
     noindex_meta = '<meta name="robots" content="noindex" />' if local_links else ""
     local_banner = (
         '<div class="local-links-banner" role="note">Contains local file paths. '
@@ -4160,31 +4276,12 @@ def build_html(
         if local_links
         else ""
     )
-    html_doc = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>{title}</title>
-  {noindex_meta}
-  <style>
-{css}
-  </style>
-</head>
-<body>
-  {local_banner}
-  <header class="report-summary" id="top">
+    findings_intro = f"""<header class="report-summary compact" id="top">
     <div class="wrap">
       <div class="mono-eyebrow"><span>ENDPOINT POSTURE BRIEFING</span></div>
       <h1 class="display">AI coding tool exposure<span class="display-period">.</span></h1>
       <p class="lede">{_esc(render_hero_lede(tool_names, counts))}</p>
-      <ul class="meta-list">
-        <li><span class="meta-dash">—</span>Run origin · {_esc(origin_line)}</li>
-        <li><span class="meta-dash">—</span>Customer · <strong>{_esc(customer_name)}</strong></li>
-        <li><span class="meta-dash">—</span>Engagement · {_esc(engagement_date)}</li>
-        <li><span class="meta-dash">—</span>Operator · {_esc(operator_name)}</li>
-        <li><span class="meta-dash">—</span>{_esc(manifest_header)}</li>
-      </ul>
+      <ul class="meta-list">{''.join(meta_items)}</ul>
       <header class="sh">
         <div class="kicker"><span class="num">/01</span><span class="kicker-label">EXECUTIVE SUMMARY</span></div>
         <h2 class="h2">{_esc(render_executive_headline(counts))}</h2>
@@ -4200,10 +4297,23 @@ def build_html(
       <div class="summary-cards">{''.join(summary_cards)}</div>
       <p class="surface-note">Presence and counts only. This page does not include prompts, transcript text, or secret values.</p>
     </div>
-  </header>
-  {_page_tabs()}
+  </header>"""
+    html_doc = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>{title}</title>
+  {noindex_meta}
+  <style>
+{css}
+  </style>
+</head>
+<body>
+  {local_banner}
+  {_page_tabs(empty=empty_tabs)}
   <main>
-    {_page_panel("findings", findings_inner, active=True)}
+    {_page_panel("findings", findings_intro + findings_inner, active=True)}
     {_page_panel("access-map", render_access_map_section(envelopes), active=False)}
     {_page_panel("changes", changes_panel, active=False)}
     {_page_panel("agents", agents_inner, active=False)}
@@ -4213,8 +4323,8 @@ def build_html(
   </main>
   <footer class="footer">
     <div class="foot-inner">
-      <span>aiscan briefing · {_esc(customer_name)}</span>
-      <span class="foot-meta"><span>{_esc(engagement_date)}</span></span>
+      <span>aiscan briefing{footer_who}</span>
+      <span class="foot-meta"><span>{_esc(engagement_date) if engagement_date.strip().lower() not in {"", "unknown"} else ""}</span></span>
     </div>
   </footer>
   <script>

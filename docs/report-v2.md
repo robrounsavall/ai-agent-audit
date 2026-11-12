@@ -2,9 +2,9 @@
 
 This page is the HTML briefing. It is one file. Open it in a browser. It does not need the network, a font download, or a web server.
 
-The top of the page is the summary. Under the title, the first fact is the run origin: who or what launched the scan, when it started, and why. An older folder with no `run-origin.txt` says `unknown` there. The summary also tells you which agents were detected, how many findings there are at each severity, and one sentence about what changed since the last scan. If a cloud-agents inventory was collected, the summary also shows how many agents and how many tokens. If a telemetry export included approval decisions, the summary says how many were approved, how many were denied, and how many of the approvals came from a config rule. Token totals are not dollars. A dollar figure appears only when the Cursor dashboard usage export included `cost_cents`, and the page says that number is from that export.
+The section tabs are the first thing on the page. The summary strip is on the Findings tab only. Under the title, the first fact is the run origin: who or what launched the scan, when it started, and why. An older folder with no `run-origin.txt` says `unknown` there. The summary also tells you which agents were detected, how many findings there are at each severity, and the change counts since the last scan, with a control that opens the Changes tab. If a cloud-agents inventory was collected, the summary also shows how many agents and how many tokens. If a telemetry export included approval decisions, the summary says how many were approved, how many were denied, and how many of the approvals came from a config rule. Token totals are not dollars. A dollar figure appears only when the Cursor dashboard usage export included `cost_cents`, and the page says that number is from that export.
 
-Under the summary are tabs:
+The tabs are:
 
 | Tab | What it is |
 |---|---|
@@ -16,7 +16,7 @@ Under the summary are tabs:
 | Usage | Token totals, and cost only when the export carried cents |
 | Coverage gaps | Questions the evidence cannot answer |
 
-If a tab has no evidence, it says so in one line, for example `Not collected — run aiscan telemetry -OtelFile <file> -SplunkExport <file> to enable.` The page still opens. A missing file is not an error in the report.
+If a tab has no evidence, it is dimmed with a "not collected" tag and the panel says `Not collected in this scan.` The page still opens. A missing file is not an error in the report. On the access map, a Yes or Unknown cell is a button that opens that cell's evidence. On Findings, a row opens its evidence underneath.
 
 The page does not copy full transcripts or prompts. It does show finding samples. Those samples are unredacted unless the scan used `-Redact`, so they can include paths and secret-shaped text. Cowork still contributes counts, not file contents. The agents tab includes an account table when `evidence/accounts.json` is present: email, username, organization, and plan from local config. Those identifiers are shown on a normal scan. They are masked when the briefing is built with `-Redact`. Token and API key values are not in the table.
 
@@ -53,13 +53,19 @@ More on the folder layout and the diff command is in [scan-history.md](scan-hist
 
 ## Build the same draft from a real scan
 
-From the repo, on Windows:
+From the repo root, in Windows PowerShell 5.1:
+
+```powershell
+.\scripts\build-draft-report.ps1 -EvidenceRoot C:\scans\2026-10-07
+```
+
+The scan folder must contain `evidence\` with one JSON file per collector (`version` major 1). `changes.json`, `raw\`, `manifest.json`, and `run-origin.txt` are optional. The command writes `<EvidenceRoot>\briefing\report-v2.html`. If that folder does not exist, the script prints `Scan folder not found: C:\scans\2026-10-07` and exits 1. If the path exists but has no `evidence\` directory, it prints `Not a scan folder: C:\scans\2026-10-07 (expected an evidence directory)` and exits 1.
+
+`-Previous`, `-Out`, `-OtelFile`, and `-SplunkExport` are optional. Leave the telemetry switches off when you do not have an export. Cloud agents show up only when that scan already contains `evidence\cloud-agents.json` (from `.\aiscan.ps1 cloud-agents`, which is not part of `all`).
 
 ```powershell
 .\scripts\build-draft-report.ps1 -EvidenceRoot C:\scans\2026-10-07 -Previous C:\scans\2026-10-01 -Out C:\scans\2026-10-07\briefing\report-v2.html -OtelFile C:\exports\otel.json -SplunkExport C:\exports\cursor-usage.csv
 ```
-
-`-Previous`, `-OtelFile`, and `-SplunkExport` are optional. Leave the telemetry switches off when you do not have an export. Cloud agents show up only when that scan already contains `evidence\cloud-agents.json` (from `.\aiscan.ps1 cloud-agents`, which is not part of `all`).
 
 A normal scan does this for you when you add `-Briefing`:
 

@@ -252,7 +252,9 @@ class TestClickableEvidence(unittest.TestCase):
         rows = re.findall(r'<tr class="frow".*?</tr>', doc, re.S)
         self.assertTrue(rows)
         for row in rows:
-            self.assertIn('<details class="ev"><summary>', row)
+            self.assertIn('class="finding-toggle"', row)
+            self.assertIn('aria-expanded="false"', row)
+        self.assertEqual(doc.count('class="ev-card"'), len(rows))
 
     # 7
     def test_grouped_secret_keeps_both_locations(self):
@@ -260,7 +262,7 @@ class TestClickableEvidence(unittest.TestCase):
         self.assertIn("2 scanner rows", doc)
         self.assertIn(html.escape(ENV_PATH), doc)
         self.assertIn(html.escape(OTHER_PATH), doc)
-        self.assertIn("<details class='hit-files'><summary>2 files</summary>", doc)
+        self.assertNotIn("hit-files", doc)
         findings, _ = self.briefing.present_findings(
             self.briefing.aggregate_findings(self.briefing.load_evidence(self.root))
         )
@@ -308,7 +310,7 @@ class TestClickableEvidence(unittest.TestCase):
     def test_bad_csv_is_tolerated(self):
         (self.root / "raw" / "pii-scan" / "findings.csv").write_bytes(b"\xef\xbb\xbf\xff\x00garbage\n\"unterminated")
         (self.root / "raw" / "secrets-scan" / "findings.csv").unlink()
-        self.assertIn("<details", self._html())
+        self.assertIn("ev-card", self._html())
 
     def _set_codex(self, **extra):
         self.root.joinpath("evidence", "codex.json").write_text(
@@ -356,7 +358,7 @@ class TestClickableEvidence(unittest.TestCase):
     def test_card_paths_hidden_links_off(self):
         bad = "/var/private/stuff/x.env"
         self._set_codex(raw_evidence_ref=bad, note="see file:///home/bob/x and " + bad)
-        cards = "".join(re.findall(r'<details class="ev">.*?</details>', self._html(), re.S))
+        cards = self._cards()
         self.assertIn("ev-card", cards)
         self.assertNotIn("/var/private", cards)
         self.assertNotIn("bob", cards)
@@ -369,7 +371,7 @@ class TestClickableEvidence(unittest.TestCase):
         for f in data["findings"]:
             f["raw_evidence_ref"] = ref
         (self.root / "evidence" / "secrets-scan.json").write_text(json.dumps(data), encoding="utf-8")
-        cards = "".join(re.findall(r'<details class="ev">.*?</details>', self._html(), re.S))
+        cards = self._cards()
         self.assertIn("more in", cards)
         self.assertNotIn("Secret Dir", cards)
 
@@ -406,9 +408,33 @@ class TestClickableEvidence(unittest.TestCase):
     # fix2
     def _cards(self, **kwargs) -> str:
         doc = self._html(**kwargs)
-        return "".join(re.findall(r'<details class="ev">.*?</details>', doc, re.S)) + "".join(
-            re.findall(r"<details class='hit-files'>.*?</details>", doc, re.S)
-        )
+        marker = '<div class="ev-card">'
+        parts: list[str] = []
+        pos = 0
+        while True:
+            start = doc.find(marker, pos)
+            if start < 0:
+                break
+            depth = 0
+            index = start
+            end = start
+            while index < len(doc):
+                open_at = doc.find("<div", index)
+                close_at = doc.find("</div>", index)
+                if close_at < 0:
+                    break
+                if open_at != -1 and open_at < close_at:
+                    depth += 1
+                    index = open_at + 4
+                else:
+                    depth -= 1
+                    index = close_at + len("</div>")
+                    if depth == 0:
+                        end = index
+                        break
+            parts.append(doc[start:end])
+            pos = end
+        return "".join(parts)
 
     def test_fix2_tokens_and_emails_links_off(self):
         tok = "ghp_" + "Kd4" * 12

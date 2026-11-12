@@ -111,17 +111,90 @@ def _fmt_when(value: Any) -> str:
     return text
 
 
-def _table(headers: list[str], rows: list[list[str]]) -> str:
-    if not rows:
+_SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+_VISIBLE_ROWS = 20
+
+
+def _row_severity(row: list[str]) -> int:
+    blob = " ".join(row)
+    for name, rank in _SEV_RANK.items():
+        if f"pill {name}" in blob:
+            return rank
+    return 9
+
+
+def _sort_by_severity(rows: list[list[str]]) -> list[list[str]]:
+    ranked = [(_row_severity(row), index, row) for index, row in enumerate(rows)]
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [row for _rank, _index, row in ranked]
+
+
+def _is_low_new_allow(row: list[str]) -> bool:
+    blob = " ".join(row)
+    if "pill low" not in blob:
+        return False
+    if row and row[0] == "Added":
+        return True
+    return "New allow rule" in blob
+
+
+def _fold_low_allow(headers: list[str], folded: list[list[str]]) -> str:
+    if not folded:
         return ""
     head = "".join(f"<th>{_esc(header)}</th>" for header in headers)
-    body = []
+    inner = "".join(
+        "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>" for row in folded
+    )
+    count = len(folded)
+    noun = "rule" if count == 1 else "rules"
+    return (
+        f'<tr class="allow-fold"><td colspan="{len(headers)}">'
+        f'<details class="low-allow"><summary>{count} new allow {noun} (low)</summary>'
+        '<div class="table-wrap changes-table"><table class="mcp-table"><thead><tr>'
+        f"{head}</tr></thead><tbody>{inner}</tbody></table></div></details></td></tr>"
+    )
+
+
+def _table(headers: list[str], rows: list[list[str]], *, fold_low_new_allow: bool = False) -> str:
+    rows = list(rows)
+    extra_row = ""
+    if fold_low_new_allow:
+        kept: list[list[str]] = []
+        folded: list[list[str]] = []
+        for row in rows:
+            if _is_low_new_allow(row):
+                folded.append(row)
+            else:
+                kept.append(row)
+        rows = kept
+        extra_row = _fold_low_allow(headers, folded)
+    rows = _sort_by_severity(rows)
+    trs = []
     for row in rows:
         cells = "".join(f"<td>{cell}</td>" for cell in row)
-        body.append(f"<tr>{cells}</tr>")
+        trs.append(f"<tr>{cells}</tr>")
+    if not trs and not extra_row:
+        return ""
+    budget = _VISIBLE_ROWS - 1 if extra_row else _VISIBLE_ROWS
+    shown = trs[:budget]
+    if extra_row:
+        shown.append(extra_row)
+    extra = trs[budget:]
+    head = "".join(f"<th>{_esc(header)}</th>" for header in headers)
+    extra_body = ""
+    button = ""
+    total = len(trs) + (1 if extra_row else 0)
+    if extra:
+        extra_body = f"<tbody class='changes-extra' hidden>{''.join(extra)}</tbody>"
+        button = (
+            f"<button type='button' class='show-all-rows' aria-expanded='false' "
+            f"data-show-label='Show all ({total})'>Show all ({total})</button>"
+        )
     return (
-        '<div class="table-wrap"><table class="mcp-table"><thead><tr>'
-        f"{head}</tr></thead><tbody>{''.join(body)}</tbody></table></div>"
+        '<div class="changes-block">'
+        '<div class="table-wrap changes-table"><table class="mcp-table"><thead><tr>'
+        f"{head}</tr></thead><tbody>{''.join(shown)}</tbody>{extra_body}</table></div>"
+        f"{button}</div>"
     )
 
 
@@ -243,11 +316,17 @@ def _metric_strip(summary: dict[str, Any], allow_added: int) -> str:
     )
     parts = []
     for label, value, tone in cells:
-        tone_cls = f" {tone}" if tone else ""
+        shown = _as_int(value)
+        if shown == 0:
+            tone_cls = " zero"
+        elif tone:
+            tone_cls = f" {tone}"
+        else:
+            tone_cls = ""
         parts.append(
             "<div>"
             f'<div class="lbl">{_esc(label)}</div>'
-            f'<div class="v{tone_cls}">{_esc(_as_int(value))}</div>'
+            f'<div class="v{tone_cls}">{shown}</div>'
             "</div>"
         )
     return f'<div class="sev-strip">{"".join(parts)}</div>'
@@ -451,7 +530,7 @@ def _diff_section(env: dict[str, Any]) -> str:
     parts.append(_block(
         "Flagged since the last scan",
         f"{flagged} change finding" if flagged == 1 else f"{flagged} change findings",
-        _table(["Severity", "What changed", "Detail"], _flag_rows(env)),
+        _table(["Severity", "What changed", "Detail"], _flag_rows(env), fold_low_new_allow=True),
     ))
     parts.append(_block(
         "Drift warnings",
@@ -484,7 +563,11 @@ def _diff_section(env: dict[str, Any]) -> str:
     parts.append(_block(
         "Allow rules",
         f"{allow_added} added · {allow_removed} removed",
-        _table(["Change", "Collector", "Risk", "Rule"], _rule_rows(collectors, allow_only=True)),
+        _table(
+            ["Change", "Collector", "Risk", "Rule"],
+            _rule_rows(collectors, allow_only=True),
+            fold_low_new_allow=True,
+        ),
     ))
     parts.append(_block(
         "Other rules",
