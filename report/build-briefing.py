@@ -1544,7 +1544,27 @@ def render_severity_bar_note(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def render_risk_register(findings: list[dict[str, Any]]) -> str:
+def _revealed_sample_text(finding: dict[str, Any], ctx: "EvidenceContext") -> str:
+    """First few raw hit values for a case card when this build shows secrets."""
+    values: list[str] = []
+    seen: set[str] = set()
+    for hit in ctx.hits.hits(finding):
+        if hit.get("masked"):
+            continue
+        value = str(finding_detail._shown_value(hit, ctx) or "").strip()
+        if not value or "REDACTED" in value or value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+        if len(values) == 3:
+            break
+    return ", ".join(values)
+
+
+def render_risk_register(
+    findings: list[dict[str, Any]],
+    ctx: "EvidenceContext | None" = None,
+) -> str:
     """Numbered case cards for the critical findings (all of them, so the count
     reconciles with the executive strip). When there are none, preview up to 4
     high-severity findings instead."""
@@ -1593,6 +1613,10 @@ def render_risk_register(findings: list[dict[str, Any]]) -> str:
         category = str(f.get("category", "General"))
         title = CANON_TITLES.get(gkey, str(f.get("title", "")))
         sample = _display_redaction_tokens(f.get("sample_redacted") or "")
+        if ctx is not None and ctx.reveal:
+            shown = _revealed_sample_text(f, ctx)
+            if shown:
+                sample = shown
 
         # Per-member rows: (target, evidence ref). Target is the member's sample,
         # or its own title + tool when the sample is secret-suppressed.
@@ -2142,12 +2166,13 @@ class EvidenceContext:
         return self._with_actions(absolute, inner)
 
 
-def _effective_reveal(requested: bool) -> bool:
-    if requested and not redaction_disabled():
-        print(
-            "-Redact turns off -ShowSecrets; building a briefing without secret values.",
-            file=sys.stderr,
-        )
+def _effective_reveal(requested: bool, *, warn: bool = False) -> bool:
+    if not redaction_disabled():
+        if warn:
+            print(
+                "-Redact turns off -ShowSecrets; building a briefing without secret values.",
+                file=sys.stderr,
+            )
         return False
     return bool(requested)
 
@@ -4275,9 +4300,21 @@ def build_html(
     customer: str | None,
     operator: str | None,
     local_links: bool = False,
-    show_secrets: bool = False,
+    show_secrets: bool | None = None,
+    mask_secrets: bool = False,
 ) -> str:
-    show_secrets = _effective_reveal(show_secrets)
+    # Default briefing shows values. --local-links alone keeps them masked.
+    # --mask-secrets (and AISCAN_REDACT / -Redact) always masks them.
+    if mask_secrets:
+        requested_reveal = False
+        explicit_reveal = False
+    elif show_secrets is None:
+        requested_reveal = not local_links
+        explicit_reveal = False
+    else:
+        requested_reveal = bool(show_secrets)
+        explicit_reveal = requested_reveal
+    show_secrets = _effective_reveal(requested_reveal, warn=explicit_reveal)
     local_links = _effective_local_links(local_links or show_secrets)
     envelopes = load_evidence(evidence_root)
     discovery = envelopes.get("discovery")
@@ -4296,6 +4333,12 @@ def build_html(
     posture_grid = render_posture_grid(envelopes)
     tool_names = detected_tool_names(envelopes, tools_rows)
 
+    evidence_ctx = EvidenceContext(
+        evidence_root,
+        local_links,
+        reveal=show_secrets,
+        envelopes=envelopes,
+    )
     findings_tabs, findings_panels = render_findings_section(
         findings,
         evidence_root=evidence_root,
@@ -4357,7 +4400,10 @@ def build_html(
     if show_secrets:
         values_hint = " This copy shows the matched values and the text around them."
     else:
-        values_hint = " Values are masked in this copy; build with -ShowSecrets to see them."
+        values_hint = (
+            " Values are masked in this copy. Rebuild without -Redact "
+            "(or with -ShowSecrets) to see them."
+        )
     findings_inner = f"""<section id="findings" class="section">
   <div class="wrap">
     <header class="sh">
@@ -4372,7 +4418,7 @@ def build_html(
       </div>
       <div class="sev-bar-track">{render_severity_bar_segments(counts)}</div>
     </div>
-    <div class="cases" style="margin-top: 28px;">{render_risk_register(findings)}</div>
+    <div class="cases" style="margin-top: 28px;">{render_risk_register(findings, evidence_ctx)}</div>
     <div class="filter">
       <label class="filter-label" for="findings-search">Search findings</label>
       <input id="findings-search" type="search" placeholder="title, sample text, or tag" />
@@ -4597,7 +4643,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--show-secrets",
         action="store_true",
         help="Show each matched value and the text around it, with full local paths. "
-        "Implies --local-links. The output must stay on this machine. Ignored under AISCAN_REDACT.",
+        "Implies --local-links. The output must stay on this machine. Ignored under AISCAN_REDACT. "
+        "The default briefing already shows values when redaction is off.",
+    )
+    parser.add_argument(
+        "--mask-secrets",
+        action="store_true",
+        help="Keep matched values out of the briefing even when redaction is off. "
+        "Used by -AgentMode. -Redact already implies this.",
     )
     return parser
 
@@ -4613,7 +4666,8 @@ def main(argv: list[str] | None = None) -> int:
             customer=args.customer,
             operator=args.operator,
             local_links=args.local_links,
-            show_secrets=args.show_secrets,
+            show_secrets=True if args.show_secrets else None,
+            mask_secrets=args.mask_secrets,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

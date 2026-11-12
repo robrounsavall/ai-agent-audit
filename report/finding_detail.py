@@ -7,12 +7,15 @@ and message it came from.
 
 Three levels of disclosure, decided by the caller's context object:
 
-  default        paths are hashed or shortened, values are masked, and no
-                 surrounding text is shown. Safe to forward.
+  default        the matched value and the text around it, as stored in
+                 raw/, with full local paths. The file holds live
+                 credentials and stays on this machine. This is also the
+                 -ShowSecrets build.
   local links    full local paths with copy and open-in-editor links.
                  Values stay masked.
-  show secrets   the matched value and the text around it, as stored in
-                 raw/. Never leaves the machine.
+  redact         paths are hashed or shortened, values are masked, and no
+                 surrounding text is shown. Safe to forward. Used when
+                 -Redact or -AgentMode is set.
 
 Nothing here decides the level. Every value and path goes through the
 context's own display functions.
@@ -454,8 +457,8 @@ def render_hits(finding: dict[str, Any], hits: list[dict[str, Any]], ctx: Any, r
     masked_note = ""
     if not ctx.reveal:
         masked_note = (
-            '<p class="hit-masked-note">Values are masked in this copy. Build with -ShowSecrets '
-            "to see each value and the text around it.</p>"
+            '<p class="hit-masked-note">Values are masked in this copy. Rebuild without -Redact '
+            "(or with -ShowSecrets) to see each value and the text around it.</p>"
         )
     return (
         '<div class="ev-sec hits">'
